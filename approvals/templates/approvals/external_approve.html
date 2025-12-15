@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Согласование документа — Мини-СЭД</title>
+    <style>
+        :root {
+            --green-main: #0b7f5f;
+            --green-light: #e3f4ee;
+            --red-main: #f44336;
+            --gray-border: #e0e0e0;
+            --gray-bg: #f5f5f5;
+            --text-main: #202124;
+            --text-muted: #70757a;
+            --bg-main: #ffffff;
+            --shadow-soft: 0 2px 8px rgba(0,0,0,.08);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            padding: 24px 12px;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: var(--gray-bg);
+            color: var(--text-main);
+        }
+
+        .page {
+            max-width: 760px;
+            margin: 0 auto;
+        }
+
+        .logo-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .logo-main {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--green-main);
+        }
+
+        .logo-sub {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .pill {
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 999px;
+            background: var(--green-light);
+            color: var(--green-main);
+            font-weight: 500;
+        }
+
+        .box {
+            background: var(--bg-main);
+            border-radius: 10px;
+            box-shadow: var(--shadow-soft);
+            padding: 20px 20px 18px;
+        }
+
+        h1 {
+            margin: 0 0 12px;
+            font-size: 20px;
+        }
+
+        .meta {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-bottom: 16px;
+        }
+
+        .meta-row {
+            margin-bottom: 4px;
+        }
+
+        .meta-row strong {
+            color: var(--text-main);
+        }
+
+        .crm-link {
+            color: #1976d2;
+            text-decoration: none;
+            word-break: break-all;
+        }
+
+        .crm-link:hover {
+            text-decoration: underline;
+        }
+
+        .section-title {
+            font-size: 14px;
+            font-weight: 600;
+            margin: 18px 0 8px;
+        }
+
+        .viewer {
+            margin-bottom: 10px;
+        }
+
+        .files-list {
+            margin: 0;
+            padding: 0;
+            list-style: none;
+            border-radius: 8px;
+            border: 1px solid var(--gray-border);
+            background: #fafafa;
+        }
+
+        .file-item {
+            display: flex;
+            align-items: center;
+            padding: 8px 10px;
+            border-bottom: 1px solid #e8e8e8;
+            font-size: 13px;
+        }
+
+        .file-item:last-child {
+            border-bottom: none;
+        }
+
+        .file-icon {
+            margin-right: 8px;
+            font-size: 16px;
+        }
+
+        .file-link {
+            color: #1976d2;
+            text-decoration: none;
+            word-break: break-word;
+        }
+
+        .file-link:hover {
+            text-decoration: underline;
+        }
+
+        .status {
+            font-size: 13px;
+            font-weight: 500;
+            margin-top: 8px;
+        }
+
+        .status-label {
+            color: var(--text-muted);
+            font-weight: 400;
+        }
+
+        .status-value {
+            font-weight: 600;
+        }
+
+        .status-approved {
+            color: #4caf50;
+        }
+
+        .status-rejected {
+            color: var(--red-main);
+        }
+
+        .error-box {
+            margin-top: 12px;
+            padding: 8px 10px;
+            border-radius: 8px;
+            background: #ffebee;
+            border: 1px solid #ffcdd2;
+            font-size: 13px;
+            color: #c62828;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 80px;
+            resize: vertical;
+            padding: 8px 10px;
+            border-radius: 6px;
+            border: 1px solid var(--gray-border);
+            font-size: 13px;
+            font-family: inherit;
+        }
+
+        .comment-hint {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .btn-row {
+            display: flex;
+            gap: 10px;
+            margin-top: 12px;
+        }
+
+        .btn {
+            flex: 1 1 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 8px 12px;
+            border-radius: 999px;
+            border: none;
+            font-size: 14px;
+            cursor: pointer;
+            font-weight: 500;
+            box-shadow: var(--shadow-soft);
+            transition: filter 0.15s ease, transform 0.05s ease;
+        }
+
+        .btn:hover {
+            filter: brightness(0.97);
+        }
+
+        .btn-approve {
+            background: var(--green-main);
+            color: #ffffff;
+        }
+
+        .btn-reject {
+            background: var(--red-main);
+            color: #ffffff;
+        }
+
+        .footer-hint {
+            margin-top: 18px;
+            font-size: 11px;
+            color: var(--text-muted);
+            text-align: right;
+        }
+
+        .footer-hint a {
+            color: var(--green-main);
+            text-decoration: none;
+        }
+
+        .footer-hint a:hover {
+            text-decoration: underline;
+        }
+
+        @media (max-width: 600px) {
+            body {
+                padding: 16px 8px;
+            }
+            .box {
+                padding: 16px 14px;
+            }
+            .btn-row {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="page">
+    <div class="logo-bar">
+        <div>
+            <div class="logo-main">Мини-СЭД</div>
+            <div class="logo-sub">Внешнее согласование документа</div>
+        </div>
+        <div class="pill">Ссылка из e-mail</div>
+    </div>
+
+    <div class="box">
+        <h1>Согласование документа</h1>
+
+        <div class="meta">
+            <div class="meta-row">
+                <strong>Документ:</strong> {{ agreement.title }}
+            </div>
+            {% if agreement.description %}
+                <div class="meta-row">
+                    <strong>Описание:</strong> {{ agreement.description }}
+                </div>
+            {% endif %}
+            {% if agreement.amount %}
+                <div class="meta-row">
+                    <strong>Сумма:</strong> {{ agreement.amount }}
+                </div>
+            {% endif %}
+            {% if deadline %}
+                <div class="meta-row">
+                    <strong>Дедлайн:</strong> {{ deadline }}
+                </div>
+            {% endif %}
+            {% if agreement.crm_link %}
+                <div class="meta-row">
+                    <strong>CRM:</strong>
+                    {% if "://" in agreement.crm_link %}
+                        <a href="{{ agreement.crm_link }}" target="_blank" class="crm-link">
+                            {{ agreement.crm_link }}
+                        </a>
+                    {% else %}
+                        {{ agreement.crm_link }}
+                    {% endif %}
+                </div>
+            {% endif %}
+        </div>
+
+        {# --- Блок документов: несколько файлов или один старый --- #}
+        {% if documents or file_url %}
+            <div class="section-title">Документы для ознакомления</div>
+            <div class="viewer">
+                {% if documents %}
+                    <ul class="files-list">
+                        {% for doc in documents %}
+                            <li class="file-item">
+                                <span class="file-icon">📄</span>
+                                <a href="{{ doc.url }}" download class="file-link">
+                                    {{ doc.name }}
+                                </a>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <ul class="files-list">
+                        <li class="file-item">
+                            <span class="file-icon">📄</span>
+                            <a href="{{ file_url }}" download class="file-link">
+                                Скачать документ
+                            </a>
+                        </li>
+                    </ul>
+                {% endif %}
+            </div>
+        {% endif %}
+
+        {% if error %}
+            <div class="error-box">
+                {{ error }}
+            </div>
+        {% endif %}
+
+        {# --- Блок статуса / формы решения --- #}
+        {% if already_decided %}
+            <div class="section-title">Ваше решение</div>
+            <p class="status">
+                <span class="status-label">Вы уже оставили решение:</span>
+                {% if participant.status == "approved" %}
+                    <span class="status-value status-approved">
+                        {{ participant.get_status_display }}
+                    </span>
+                {% elif participant.status == "rejected" %}
+                    <span class="status-value status-rejected">
+                        {{ participant.get_status_display }}
+                    </span>
+                {% else %}
+                    <span class="status-value">
+                        {{ participant.get_status_display }}
+                    </span>
+                {% endif %}
+            </p>
+            {% if participant.comment %}
+                <p style="font-size:13px; margin-top:8px;">
+                    <strong>Ваш комментарий:</strong><br>
+                    {{ participant.comment }}
+                </p>
+            {% endif %}
+        {% else %}
+            <div class="section-title">Ваше решение</div>
+            <form method="post">
+                {% csrf_token %}
+                <p style="font-size:13px; margin-bottom:4px;">
+                    <strong>Комментарий</strong>
+                </p>
+                <textarea name="comment">{{ comment_value }}</textarea>
+                <div class="comment-hint">
+                    При <strong>отклонении</strong> комментарий обязателен.
+                    При согласовании его можно не заполнять.
+                </div>
+
+                <div class="btn-row">
+                    <button type="submit"
+                            name="decision"
+                            value="approve"
+                            class="btn btn-approve">
+                        ✅ Согласовать
+                    </button>
+                    <button type="submit"
+                            name="decision"
+                            value="reject"
+                            class="btn btn-reject">
+                        ✖ Отклонить
+                    </button>
+                </div>
+            </form>
+        {% endif %}
+
+        <div class="footer-hint">
+            Внутренний портал:
+            <a href="/auth/bitrix/start/?next=/approvals/app" target="_blank">
+                открыть Мини-СЭД в Битрикс24
+            </a>
+        </div>
+    </div>
+</div>
+</body>
+</html>

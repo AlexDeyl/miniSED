@@ -1,0 +1,3382 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Мини-СЭД</title>
+
+    <style>
+        :root {
+            --green-main: #0b7f5f;
+            --green-light: #e3f4ee;
+            --red-main: #f44336;
+            --orange-main: #ff9800;
+            --gray-border: #e0e0e0;
+            --gray-bg: #f5f5f5;
+            --text-main: #202124;
+            --text-muted: #70757a;
+            --bg-main: #ffffff;
+            --shadow-soft: 0 1px 3px rgba(0, 0, 0, 0.08);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            color: var(--text-main);
+            background: var(--gray-bg);
+            font-size: 14px;
+        }
+
+        body {
+            display: flex;
+            align-items: stretch;
+            justify-content: stretch;
+        }
+
+        .app-shell {
+            display: flex;
+            height: 100%;
+            min-height: 100vh;
+            width: 100%;
+            overflow: hidden;
+        }
+
+        /* SIDEBAR */
+
+        .sidebar {
+            width: 230px;
+            background: var(--green-main);
+            color: white;
+            padding: 16px 12px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sidebar-logo {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sidebar-logo span {
+            display: block;
+        }
+
+        .sidebar-logo small {
+            font-size: 11px;
+            opacity: 0.9;
+        }
+
+        .sidebar-block {
+            margin-bottom: 16px;
+        }
+
+        .sidebar-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            opacity: 0.85;
+            margin-bottom: 6px;
+        }
+
+        .sidebar-nav {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .sidebar-nav-btn {
+            border: none;
+            background: transparent;
+            color: white;
+            text-align: left;
+            padding: 6px 8px;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            transition: background 0.15s ease, transform 0.05s ease;
+        }
+
+        .sidebar-nav-btn span {
+            pointer-events: none;
+        }
+
+        .sidebar-nav-btn:hover {
+            background: rgba(0, 0, 0, 0.15);
+        }
+
+        .sidebar-nav-btn.active {
+            background: #ffffff;
+            color: var(--green-main);
+            font-weight: 600;
+        }
+
+        .sidebar-info {
+            font-size: 12px;
+            opacity: 0.9;
+            margin-top: 4px;
+        }
+
+        .sidebar-footer {
+            margin-top: auto;
+            font-size: 11px;
+            opacity: 0.85;
+        }
+
+        /* MAIN */
+
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            background: #ffffff;
+        }
+
+        .main-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 16px;
+            background: #ffffff;
+            border-bottom: 1px solid var(--gray-border);
+        }
+
+        .main-header-left {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .main-header-title {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .main-header-subtitle {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .main-header-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 12px;
+        }
+
+        .main-header-right span {
+            color: var(--text-muted);
+        }
+
+        .main-header-right strong {
+            color: var(--text-main);
+        }
+
+        .main-body {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+        }
+
+        /* COLUMNS */
+
+        .column-list {
+            width: 360px;
+            border-right: 1px solid var(--gray-border);
+            display: flex;
+            flex-direction: column;
+            background: #ffffff;
+        }
+
+        .column-detail {
+            flex: 1;
+            background: var(--gray-bg);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .column-inner-header {
+            padding: 8px 14px;
+            font-size: 13px;
+            color: var(--text-muted);
+            border-bottom: 1px solid var(--gray-border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .column-inner-header strong {
+            color: var(--text-main);
+        }
+
+        .column-list-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px 10px;
+        }
+
+        .column-detail-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 14px 18px 18px 18px;
+        }
+
+        .column-detail-body-inner {
+            max-width: 980px;
+            margin: 0 auto;
+        }
+
+        /* ERROR BOX */
+
+        .error-box {
+            background: #ffebee;
+            color: #c62828;
+            padding: 6px 10px;
+            font-size: 12px;
+            border-radius: 6px;
+            margin: 6px 10px;
+            border: 1px solid #ffcdd2;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        /* LIST ITEMS */
+
+        .item-card {
+            background: #ffffff;
+            border-radius: 8px;
+            padding: 8px 10px;
+            margin-bottom: 6px;
+            box-shadow: var(--shadow-soft);
+            border: 1px solid #f1f1f1;
+            cursor: pointer;
+            transition: background 0.12s ease, box-shadow 0.12s ease, transform 0.05s ease;
+        }
+
+        .item-card:hover {
+            background: #fafafa;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.08);
+        }
+
+        .item-title-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 4px;
+        }
+
+        .item-title {
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .item-sub {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+        }
+
+        .item-tags {
+            font-size: 11px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+        }
+
+        .tag-chip {
+            border-radius: 999px;
+            border: 1px solid var(--gray-border);
+            padding: 2px 8px;
+            background: #fafafa;
+        }
+
+        .empty-hint {
+            font-size: 12px;
+            padding: 12px 8px;
+            color: var(--text-muted);
+        }
+
+        /* STATUS */
+
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            padding: 2px 6px;
+            border-radius: 999px;
+            font-size: 10px;
+            font-weight: 600;
+            color: white;
+        }
+        .status-pill.in_progress { background: var(--orange-main); }
+        .status-pill.completed   { background: #4caf50; }
+        .status-pill.rejected    { background: var(--red-main); }
+        .status-pill.draft       { background: #9e9e9e; }
+        .status-pill.canceled    { background: #bdbdbd; }
+
+        .participant-pill {
+            padding: 2px 6px;
+            border-radius: 999px;
+            font-size: 10px;
+            background: #e0e0e0;
+        }
+        .participant-pill.waiting  { background: #ffe0b2; }
+        .participant-pill.approved { background: #c8e6c9; }
+        .participant-pill.rejected { background: #ffcdd2; }
+
+        /* DETAIL */
+
+        .detail-placeholder {
+            font-size: 13px;
+            color: var(--text-muted);
+            padding: 20px;
+            text-align: center;
+        }
+
+        .detail-header-main {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .detail-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .detail-meta {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .detail-status-chip {
+            display: inline-flex;
+            align-items: center;
+            padding: 3px 8px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 500;
+            white-space: nowrap;      /* чип статуса не переносим */
+            flex-shrink: 0;
+        }
+
+        .detail-status-draft {
+            background: #e0e0e0;
+            color: #424242;
+        }
+        .detail-status-in_progress {
+            background: var(--orange-main);
+            color: #fff;
+        }
+        .detail-status-completed {
+            background: var(--green-main);
+            color: #fff;
+        }
+        .detail-status-rejected {
+            background: var(--red-main);
+            color: #fff;
+        }
+        .detail-status-canceled {
+            background: #9e9e9e;
+            color: #fff;
+        }
+
+        .detail-side {
+            font-size: 12px;
+            color: var(--text-muted);
+            min-width: 0;                 /* не распираем сетку */
+        }
+
+        .detail-side-block {
+            background: white;
+            border-radius: 8px;
+            padding: 8px 10px;
+            border: 1px solid #e0e0e0;
+            margin-bottom: 8px;
+        }
+
+        .detail-side-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+        }
+
+        .detail-tabs {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 8px;
+        }
+
+        .detail-tab-btn {
+            border-radius: 999px;
+            padding: 5px 10px;
+            border: none;
+            cursor: pointer;
+            font-size: 13px;
+            background: transparent;
+            color: var(--text-muted);
+        }
+
+        .detail-tab-btn.active {
+            background: var(--green-light);
+            color: var(--green-main);
+            font-weight: 500;
+        }
+
+        .detail-tab {
+            display: none;
+        }
+
+        .detail-tab.active {
+            display: block;
+        }
+
+        .detail-columns {
+            display: grid;
+            grid-template-columns: minmax(0, 2fr) minmax(260px, 1.2fr);
+            gap: 16px;
+            margin-top: 10px;
+            align-items: flex-start;
+        }
+
+        .detail-card {
+            background: #ffffff;
+            border-radius: 10px;
+            padding: 10px 12px;
+            box-shadow: var(--shadow-soft);
+            border: 1px solid #f1f1f1;
+            margin-bottom: 10px;
+            overflow: hidden;          /* защита от вылезания содержимого */
+        }
+
+        .detail-card-header {
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 6px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .detail-card-body {
+            font-size: 13px;
+        }
+
+        /* Таймлайн */
+
+        .detail-timeline {
+            font-size: 12px;
+        }
+
+        .timeline-item {
+            position: relative;
+            padding-left: 18px;
+            margin-bottom: 8px;
+        }
+
+        .timeline-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 999px;
+            background: var(--green-main);
+            position: absolute;
+            left: 2px;
+            top: 4px;
+        }
+
+        .timeline-text {
+            font-size: 12px;
+        }
+
+        .timeline-date {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .small-btn {
+            padding: 4px 10px;
+            font-size: 12px;
+        }
+
+        .field-hint {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        /* ссылка на CRM в карточке согласования */
+        .crm-link {
+            display: inline-block;
+            max-width: 100%;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            text-decoration: none;
+            color: #1976d2;
+        }
+
+        .crm-link:hover {
+            text-decoration: underline;
+        }
+
+        /* УЧАСТНИКИ */
+
+        .participant-card {
+            background: white;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+            padding: 8px 10px;
+            margin-bottom: 6px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 8px;
+            font-size: 13px;
+            word-break: break-word;       /* длинные почты ломаем внутри блока */
+        }
+
+        /* первый div внутри participant-card — левая часть (аватар+текст) */
+        .participant-card > div:first-child {
+            display: flex;
+            gap: 8px;
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+
+        .participant-chip-avatar {
+            width: 28px;
+            height: 28px;
+            flex: 0 0 28px;
+            border-radius: 999px;
+            background: #e0f2f1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--green-main);
+            overflow: hidden;
+        }
+
+        .participant-chip-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .participant-chip-main {
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+
+        .participant-chip-name {
+            font-size: 13px;
+            font-weight: 500;
+            overflow-wrap: anywhere;
+        }
+
+        .participant-chip-pos {
+            font-size: 11px;
+            color: var(--text-muted);
+            overflow-wrap: anywhere;
+        }
+
+        /* если для статуса есть отдельный класс */
+        .participant-status-chip {
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        /* ДОКУМЕНТЫ */
+
+        .doc-item {
+            background: white;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+            padding: 8px 10px;
+            margin-bottom: 8px;
+        }
+
+        .doc-name {
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 4px;
+            overflow-wrap: anywhere;      /* длинные имена файлов переносятся */
+            word-break: break-word;
+        }
+
+        .doc-actions {
+            font-size: 12px;
+            margin-bottom: 4px;
+        }
+
+        .doc-actions a,
+        .doc-actions button.link-btn {
+            margin-right: 8px;
+        }
+
+        .link-btn {
+            border: none;
+            background: transparent;
+            padding: 0;
+            margin: 0;
+            color: var(--text-muted);
+            font-size: 11px;
+            cursor: pointer;
+        }
+
+        .link-btn:hover {
+            text-decoration: underline;
+        }
+
+        /* ПАНЕЛЬ СОЗДАНИЯ */
+
+        .create-panel {
+            position: fixed;
+            right: -420px;
+            top: 0;
+            width: 420px;
+            height: 100vh;
+            background: #ffffff;
+            box-shadow: -2px 0 8px rgba(0, 0, 0, 0.15);
+            transition: right 0.2s ease-out;
+            display: flex;
+            flex-direction: column;
+            z-index: 1000;
+        }
+
+        .create-panel.open {
+            right: 0;
+        }
+
+        .create-header {
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--gray-border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .create-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px 18px 18px 18px;
+        }
+
+        .form-row {
+            margin-bottom: 18px;
+        }
+
+        .form-row label {
+            display: block;
+            font-size: 12px;
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+
+        .required-label::after {
+            content: " *";
+            color: var(--red-main);
+        }
+
+        .form-row input[type="text"],
+        .form-row input[type="number"],
+        .form-row input[type="date"],
+        .form-row input[type="email"],
+        .form-row textarea {
+            width: 100%;
+            padding: 8px 11px;
+            border-radius: 4px;
+            border: 1px solid #d0d0d0;
+            font-size: 15px;
+        }
+
+        .form-row textarea {
+            resize: vertical;
+            min-height: 60px;
+        }
+
+        .hint {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .chips-box, .chips-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 6px;
+        }
+
+        .participant-chip {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 8px;
+            border-radius: 999px;
+            background: #f1f3f4;
+            font-size: 12px;
+            gap: 6px;
+        }
+
+        .participant-chip.external {
+            background: #fff3e0;
+        }
+
+        .field-group-horizontal {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .field-group-horizontal input {
+            flex: 1;
+        }
+
+        /* BUTTONS */
+
+        .btn {
+            border-radius: 6px;
+            border: none;
+            padding: 6px 12px;
+            font-size: 13px;
+            cursor: pointer;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            transition: background 0.15s ease, box-shadow 0.1s ease, transform 0.05s ease;
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: default;
+        }
+
+        .btn:hover:not(:disabled) {
+            box-shadow: var(--shadow-soft);
+        }
+
+        .btn-primary {
+            background: var(--green-main);
+            color: white;
+        }
+
+        .btn-secondary {
+            background: #eeeeee;
+            color: #333;
+        }
+
+        .btn-b24 {
+            background: #1d6fbf !important;
+            color: #ffffff !important;
+        }
+
+        .btn-b24:hover {
+            filter: brightness(0.95);
+        }
+
+        .btn-link {
+            border: none;
+            background: transparent;
+            padding: 0;
+            margin: 0;
+            color: var(--green-main);
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .btn-link:hover {
+            text-decoration: underline;
+        }
+
+        /* контейнер для двух кнопок решения */
+        .decision-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .decision-actions .btn,
+        .decision-actions button {
+            flex: 1 1 0;   /* обе кнопки одинаковой ширины */
+        }
+
+        /* Карточка участника — вертикальная колонка */
+        .participant-card {
+            display: flex;
+            flex-direction: column;   /* статус уходит на следующую строку */
+            align-items: stretch;
+        }
+
+        /* Верхняя часть: аватар + ФИО + должность остаются в ряд */
+        .participant-card > div:first-child {
+            display: flex;
+            gap: 8px;
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+
+        /* Статус под карточкой, слева, одной строкой */
+        .participant-card .participant-status-chip,
+        .participant-card .detail-status-chip {
+            align-self: flex-start;   /* прижать к левому краю */
+            margin-top: 6px;          /* небольшой отступ сверху от текста */
+            white-space: nowrap;      /* не ломаем «Ожидаем»/«Отклонено» на две строки */
+        }
+
+        .decision-label {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-bottom: 3px;
+        }
+
+        .decision-current {
+            margin-bottom: 8px;
+        }
+
+        .decision-comment-text {
+            font-size: 13px;
+            white-space: pre-wrap; /* сохраняем переносы строк из комментария */
+        }
+
+        .decision-comment-input {
+            width: 100%;
+            min-height: 70px;
+            resize: vertical;
+            padding: 6px 8px;
+            border-radius: 4px;
+            border: 1px solid #d0d0d0;
+            font-size: 13px;
+            box-sizing: border-box;
+        }
+
+        .decision-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .decision-actions .btn,
+        .decision-actions button {
+            flex: 1 1 0; /* кнопки тянутся поровну */
+        }
+
+        .decision-separator {
+            border: none;
+            border-top: 1px solid #eee;
+            margin: 10px 0;
+        }
+
+    </style>
+    <script src="//api.bitrix24.com/api/v1/"></script>
+</head>
+<body>
+<div class="app-shell">
+    <div class="sidebar">
+        <div class="sidebar-logo">
+            <span>Мини-СЭД</span>
+            <small>Быстрые согласования</small>
+        </div>
+        <div class="sidebar-block">
+            <div class="sidebar-label">Разделы</div>
+            <div class="sidebar-nav">
+                <button class="sidebar-nav-btn active" id="nav-todo" onclick="setMode('todo')">
+                    <span>Требуется действие</span>
+                </button>
+                <button class="sidebar-nav-btn" id="nav-my" onclick="setMode('my')">
+                    <span>Созданные мной</span>
+                </button>
+                <button class="sidebar-nav-btn" id="nav-all" onclick="setMode('all')">
+                    <span>Все</span>
+                </button>
+                <button class="sidebar-nav-btn" id="nav-templates" onclick="setMode('templates')">
+                    <span>Шаблоны</span>
+                </button>
+            </div>
+        </div>
+        <div class="sidebar-block">
+            <div class="sidebar-label">Текущий пользователь</div>
+            <div class="sidebar-info">
+                B24 ID: <strong id="b24-id-label">—</strong>
+            </div>
+        </div>
+        <div class="sidebar-block">
+            <div class="sidebar-label">Авторизация</div>
+            <div id="auth-hint" class="sidebar-info hidden">
+                <span>Если вы открыли сервис вне Битрикс24 — авторизуйтесь через портал.</span>
+                <div style="margin-top:6px;">
+                    <a href="/auth/bitrix/start/" class="btn btn-secondary btn-b24" style="text-decoration:none;">
+                        Войти через Bitrix24
+                    </a>
+                </div>
+            </div>
+        </div>
+        <div class="sidebar-footer">
+            ©Mini-SED by Alexander Rodionov, 2025
+        </div>
+    </div>
+    <!-- MAIN -->
+    <div class="main">
+        <div class="main-header">
+            <div class="main-header-left">
+                <div class="main-header-title" id="page-title">Светофор</div>
+                <div class="main-header-subtitle" id="page-subtitle">
+                    Согласования, где требуется ваше решение
+                </div>
+            </div>
+            <div class="main-header-right">
+                <button class="btn btn-primary" onclick="openCreatePanel()">+ Новое согласование</button>
+            </div>
+        </div>
+        <div id="error" class="error-box hidden"></div>
+        <div class="main-body">
+            <!-- LIST COLUMN -->
+            <div class="column-list">
+                <div class="column-inner-header">
+                    <strong id="list-title">Требуется действие</strong>
+                    <span id="list-counter"></span>
+                </div>
+                <div class="column-list-body" id="list-container">
+                    <div class="empty-hint">
+                        Загрузка согласований...
+                    </div>
+                </div>
+            </div>
+            <!-- DETAIL COLUMN -->
+            <div class="column-detail">
+                <div class="column-detail-body">
+                    <div class="column-detail-body-inner" id="detail-container">
+                        <div class="detail-placeholder">
+                            Выберите согласование из списка слева, чтобы посмотреть детали.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- CREATE SLIDE PANEL -->
+    <div class="create-panel" id="create-panel">
+        <div class="create-header">
+            <span>Новое согласование</span>
+            <button class="btn-link" onclick="closeCreatePanel()">Закрыть</button>
+        </div>
+        <div class="create-body">
+            <div class="form-row">
+                <label class="required-label">Название</label>
+                <input type="text" id="form-title">
+            </div>
+
+            <div class="form-row">
+                <label>Описание</label>
+                <textarea id="form-description"></textarea>
+            </div>
+            <div class="form-row">
+                <label class="form-label">Тип согласования</label>
+                <div>
+                    <label style="margin-right: 12px;">
+                        <input type="radio" name="flow_type" value="parallel" checked>
+                        Параллельное (все могут голосовать сразу)
+                    </label>
+                    <label>
+                        <input type="radio" name="flow_type" value="sequential">
+                        Последовательное (по очереди, в порядке добавления)
+                    </label>
+                </div>
+            </div>
+            <div class="form-row">
+                <label>Сумма</label>
+                <input type="number" step="0.01" id="form-amount">
+            </div>
+
+            <div class="form-row">
+                <label>Дедлайн</label>
+                <input type="date" id="form-deadline">
+                <div class="hint">Необязательное поле, используется для напоминаний.</div>
+            </div>
+
+            <div class="form-row">
+    <div class="field-label">Привязка к CRM</div>
+        <div>
+            <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+                <input type="text"
+                    id="form-crm"
+                    placeholder="Вставьте ссылку или выберите из CRM"
+                    style="flex:1; min-width:220px;">
+                <button type="button"
+                        class="btn btn-secondary small-btn"
+                        onclick="openCrmSelector()">
+                    Выбрать из CRM
+                </button>
+            </div>
+            <div class="field-hint">
+                Можно вставить ссылку на сделку/счёт/контакт вручную
+                или выбрать элемент CRM через диалог Битрикс24.
+            </div>
+        </div>
+    </div>
+
+        <div id="parallel-block">
+            <div class="form-row">
+                <label>Участники из Б24</label>
+                <div class="field-group-horizontal">
+                    <input type="text"
+                           id="form-internal"
+                           placeholder="Например: 1, 25, 37">
+                    <button type="button"
+                            class="btn btn-secondary btn-b24"
+                            onclick="openUserSelector()">
+                        + Выбрать в Б24
+                    </button>
+                </div>
+                <div class="hint">
+                    Можно указать через запятую или выбрать через диалог Bitrix24.
+                </div>
+                <div class="chips-box" id="internal-chips"></div>
+            </div>
+
+            <div class="form-row">
+                <label>Внешние участники (email)</label>
+                <div class="field-group-horizontal">
+                    <input type="email"
+                           id="external-input"
+                           placeholder="email@example.com">
+                    <button type="button"
+                            class="btn btn-secondary"
+                            onclick="addExternalEmail()">
+                        + Добавить
+                    </button>
+                </div>
+                <input type="hidden" id="form-external" value="">
+                <div class="hint">
+                    На указанные адреса будет отправлена ссылка для согласования.
+                </div>
+                <div class="chips-box" id="external-chips"></div>
+            </div>
+        </div>
+        <div id="sequential-block" style="display: none;">
+            <div class="form-row">
+                <label>Порядок согласования (последовательно)</label>
+                <div class="hint">
+                    Добавляйте участников по шагам. Можно комбинировать сотрудников Б24 и внешние email,
+                    менять порядок и удалять строки.
+                </div>
+            </div>
+
+            <div class="form-row">
+                <button type="button"
+                        class="btn btn-secondary btn-b24"
+                        onclick="seqAddInternal()"
+                        style="width:100%; margin-bottom: 8px;">
+                    + Добавить сотрудника из Б24
+                </button>
+            </div>
+
+            <div class="form-row">
+                <input type="email"
+                    id="seq-external-input"
+                    placeholder="email@example.com">
+                <button type="button"
+                        class="btn btn-secondary"
+                        onclick="seqAddExternal()"
+                        style="margin-top: 6px;">
+                    + Добавить внешний email
+                </button>
+            </div>
+            <div class="form-row">
+                <div id="seq-list" class="chips-box"></div>
+            </div>
+        </div>    
+            <!-- БЛОК ШАБЛОНОВ -->
+            <div class="form-row">
+                <label>Шаблон согласования</label>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; margin-bottom:6px;">
+                    <select id="template-select"
+                            onchange="applyTemplateFromSelect()"
+                            style="flex:1; min-width:0;">
+                        <option value="">— Не использовать шаблон —</option>
+                    </select>
+                    <button type="button"
+                            class="btn btn-secondary"
+                            onclick="loadTemplatesSelect()">
+                        Обновить
+                    </button>
+                </div>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; margin-bottom:6px;">
+                    <input type="text"
+                           id="template-name-input"
+                           placeholder="Название шаблона"
+                           style="flex:1; min-width:0;">
+                    <select id="template-scope-select" onchange="onTemplateScopeChange()">
+                        <option value="private">Только мне</option>
+                        <option value="public">Всем</option>
+                        <option value="group">Группа</option>
+                    </select>
+                </div>
+                <div id="template-group-row"
+                     style="display:none; gap:8px; flex-wrap:wrap; align-items:flex-end; margin-bottom:4px;">
+                    <button type="button"
+                            class="btn btn-secondary btn-b24"
+                            onclick="openTemplateGroupSelector()">
+                        + Группа из Б24
+                    </button>
+                    <input type="text"
+                           id="template-group-input"
+                           placeholder="ID через запятую (для группы)"
+                           style="flex:1; min-width:0;">
+                </div>
+
+                <button type="button"
+                        class="btn btn-primary"
+                        onclick="saveCurrentAsTemplate()">
+                    Сохранить как шаблон
+                </button>
+
+                <div class="hint">
+                    Шаблон сохраняет только маршрут (список участников).
+                    Название и описание согласования вы задаёте отдельно при создании.
+                </div>
+            </div>
+
+            <div class="form-row">
+                <label>Файлы</label>
+                <div id="create-files-container">
+                    <input type="file" class="create-file-input">
+                </div>
+                <button type="button" class="btn btn-secondary" onclick="addCreateFileInput()" style="margin-top:6px;">
+                    + Ещё файл
+                </button>
+                <div class="hint">
+                    Прикрепите документы, которые нужно согласовать.
+                </div>
+            </div>
+
+            <div class="form-row">
+                <button class="btn btn-primary" style="width:100%;" onclick="submitCreate()">
+                    Создать согласование
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let B24_USER_ID = null;
+    let MODE = "todo";
+    let CURRENT_LIST = [];
+    let CURRENT_AGREEMENT = null;
+    let TEMPLATE_CACHE = [];
+    let sequentialParticipants = [];
+    let CURRENT_TEMPLATE_ID = null;
+    const B24_USER_CACHE = {};
+    let B24_USER_EMAIL = null;
+    const SESSION_B24_USER_ID = {{ session_b24_id|default:"null" }};
+
+    /* COMMON HELPERS */
+
+    function setError(msg) {
+        const box = document.getElementById("error");
+        if (!box) return;
+        if (!msg) {
+            box.classList.add("hidden");
+            box.textContent = "";
+        } else {
+            box.textContent = msg;
+            box.classList.remove("hidden");
+        }
+    }
+
+    function escapeHtml(str) {
+        if (str === null || str === undefined) return "";
+        return String(str)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
+    function initialsFromName(name) {
+        if (!name) return "?";
+        const parts = String(name).trim().split(/\s+/);
+        const letters = parts.slice(0, 2).map(p => p[0]).join("");
+        return letters.toUpperCase();
+    }
+
+    function apiFetch(path, options = {}) {
+        options.headers = options.headers || {};
+        if (B24_USER_ID) {
+            options.headers["X-B24-User"] = B24_USER_ID;
+        }
+        options.headers["ngrok-skip-browser-warning"] = "true";
+
+        return fetch(path, options).then(async resp => {
+            let raw = "";
+            try {
+                raw = await resp.text();
+            } catch (e) {
+                console.log("apiFetch read error", path, e);
+            }
+
+            let data = null;
+            if (raw) {
+                try {
+                    data = JSON.parse(raw);
+                } catch (e) {
+                    console.log("apiFetch JSON parse error", path, raw);
+                }
+            }
+
+            if (!resp.ok) {
+                const detail = data && data.detail ? data.detail : "Ошибка запроса";
+                throw new Error(detail);
+            }
+
+            console.log("apiFetch OK", path, data);
+            return data;
+        });
+    }
+
+    /* NAVIGATION + MODES */
+
+    function loadTemplatesList() {
+        apiFetch("/api/templates/")
+            .then(data => {
+                let items;
+                if (Array.isArray(data)) {
+                    items = data;
+                } else if (data && Array.isArray(data.results)) {
+                    items = data.results;
+                } else {
+                    items = [];
+                }
+
+                CURRENT_LIST = items;
+                TEMPLATE_CACHE = items.slice();
+                renderList();
+            })
+            .catch(e => setError(e.message || "Не удалось загрузить шаблоны."));
+    }
+
+    function setMode(mode) {
+        MODE = mode;
+        ["nav-todo", "nav-my", "nav-all", "nav-templates"].forEach(id => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.classList.toggle(
+                "active",
+                (mode === "todo" && id === "nav-todo") ||
+                (mode === "my" && id === "nav-my") ||
+                (mode === "all" && id === "nav-all") ||
+                (mode === "templates" && id === "nav-templates")
+            );
+        });
+
+        const listTitle = document.getElementById("list-title");
+        const pageTitle = document.getElementById("page-title");
+        const pageSub = document.getElementById("page-subtitle");
+        const detailContainer = document.getElementById("detail-container");
+
+        if (mode === "todo") {
+            listTitle.textContent = "Требуется действие";
+            pageTitle.textContent = "Светофор";
+            pageSub.textContent = "Согласования, где требуется ваше решение";
+            loadTodo();
+        } else if (mode === "my") {
+            listTitle.textContent = "Созданные мной";
+            pageTitle.textContent = "Мои согласования";
+            pageSub.textContent = "Согласования, инициатором которых являетесь вы";
+            loadMy();
+        } else if (mode === "all") {
+            listTitle.textContent = "Все согласования";
+            pageTitle.textContent = "Все согласования";
+            pageSub.textContent = "Полный список согласований";
+            loadAll();
+        } else if (mode === "templates") {
+            listTitle.textContent = "Шаблоны";
+            pageTitle.textContent = "Шаблоны согласований";
+            pageSub.textContent = "Сохранённые маршруты согласований";
+            loadTemplatesList();
+
+            if (detailContainer) {
+                detailContainer.innerHTML =
+                    '<div class="detail-placeholder">Выберите шаблон или создайте новый.</div>';
+            }
+        }
+    }
+
+    /* CREATE PANEL */
+
+    function openCreatePanel() {
+        const panel = document.getElementById("create-panel");
+        if (panel) {
+            panel.classList.add("open");
+        }
+        setError("");
+        loadTemplatesSelect();
+    }
+
+    function closeCreatePanel() {
+        const panel = document.getElementById("create-panel");
+        if (panel) {
+            panel.classList.remove("open");
+        }
+    }
+
+    function clearCreateForm() {
+        const ids = [
+            "form-title",
+            "form-description",
+            "form-amount",
+            "form-deadline",
+            "form-crm",
+            "form-internal",
+            "form-external",
+            "external-input",
+            "template-name-input",
+            "template-group-input"
+        ];
+        ids.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.value = "";
+        });
+
+        const container = document.getElementById("create-files-container");
+        if (container) {
+            container.innerHTML = '<input type="file" class="create-file-input">';
+        }
+
+        const chips = document.getElementById("internal-chips");
+        if (chips) chips.innerHTML = "";
+
+        const extChips = document.getElementById("external-chips");
+        if (extChips) extChips.innerHTML = "";
+        sequentialParticipants = [];
+        const seqList = document.getElementById("seq-list");
+        if (seqList) seqList.innerHTML = "";
+        const parallelRadio = document.querySelector('input[name="flow_type"][value="parallel"]');
+        if (parallelRadio) {
+            parallelRadio.checked = true;
+            handleFlowTypeChange();
+        }
+    }
+
+    function addCreateFileInput() {
+        const container = document.getElementById("create-files-container");
+        if (!container) return;
+        const input = document.createElement("input");
+        input.type = "file";
+        input.className = "create-file-input";
+        container.appendChild(input);
+    }
+
+    function toggleUpdateDocsPanel() {
+        const panel = document.getElementById("update-docs-panel");
+        if (!panel) return;
+        const current = panel.style.display;
+        panel.style.display = (!current || current === "none") ? "block" : "none";
+    }
+
+    function addUpdateFileInput() {
+        const container = document.getElementById("update-files-container");
+        if (!container) return;
+        const input = document.createElement("input");
+        input.type = "file";
+        input.className = "update-file-input";
+        container.appendChild(input);
+    }
+
+    function submitUpdateDocuments(agreementId) {
+        setError("");
+
+        const container = document.getElementById("update-files-container");
+        if (!container) {
+            setError("Не найден контейнер файлов для обновления.");
+            return;
+        }
+
+        const inputs = container.querySelectorAll(".update-file-input");
+        const fd = new FormData();
+        let hasFiles = false;
+
+        inputs.forEach(input => {
+            if (input.files) {
+                for (const file of input.files) {
+                    fd.append("files", file);
+                    hasFiles = true;
+                }
+            }
+        });
+
+        if (!hasFiles) {
+            setError("Выберите хотя бы один файл для новой версии документов.");
+            return;
+        }
+
+        const headers = {};
+        if (B24_USER_ID) {
+            headers["X-B24-User"] = B24_USER_ID;
+        }
+
+        fetch(`/api/agreements/${agreementId}/update_document/`, {
+            method: "POST",
+            headers: headers,
+            body: fd
+        })
+            .then(async (resp) => {
+                if (!resp.ok) {
+                    let msg = "Ошибка обновления документов.";
+                    try {
+                        const data = await resp.json();
+                        if (data && data.detail) msg = data.detail;
+                    } catch (e) {}
+                    throw new Error(msg);
+                }
+                return resp.json();
+            })
+            .then(data => {
+                CURRENT_AGREEMENT = data;
+                renderDetail();
+                if (MODE === "todo") loadTodo();
+                else if (MODE === "my") loadMy();
+                else loadAll();
+            })
+            .catch(e => setError(e.message));
+    }
+
+    function parseInternalIds() {
+        const input = document.getElementById("form-internal");
+        if (!input) {
+            return [];
+        }
+
+        const raw = input.value || "";
+        return raw
+            .split(",")
+            .map(x => x.trim())
+            .filter(Boolean)
+            .map(x => parseInt(x, 10))
+            .filter(x => !Number.isNaN(x));
+    }
+
+    function submitCreate() {
+        setError("");
+
+        const titleEl = document.getElementById("form-title");
+        const descEl = document.getElementById("form-description");
+        const deadlineEl = document.getElementById("form-deadline");
+
+        const title = titleEl ? titleEl.value.trim() : "";
+        const description = descEl ? descEl.value.trim() : "";
+        const deadline = deadlineEl ? deadlineEl.value.trim() : "";
+        const crmEl = document.getElementById("form-crm");
+
+        if (!title) {
+            setError("Укажите название согласования.");
+            return;
+        }
+        const flowTypeInput = document.querySelector('input[name="flow_type"]:checked');
+        const flowType = flowTypeInput ? flowTypeInput.value : "parallel";
+        const internalIds = parseInternalIds();
+        const externalEmails = parseExternalList();
+        const crmLink = (crmEl?.value || "").trim();
+        const participants = [];
+        let order = 0;
+
+        if (flowType === "sequential" && Array.isArray(sequentialParticipants) && sequentialParticipants.length) {
+            sequentialParticipants.forEach((p) => {
+                participants.push({
+                    type: p.type,
+                    b24_user_id: p.type === "internal" ? p.b24_user_id : null,
+                    email: p.type === "external" ? (p.email || "") : "",
+                    name: p.name || "",
+                    order_index: order++,
+                    note: p.note || ""
+                });
+            });
+        } else {
+            if (!internalIds.length && !externalEmails.length) {
+                alert("Добавьте хотя бы одного участника (внутреннего или внешнего).");
+                return;
+            }
+
+            internalIds.forEach((id) => {
+                participants.push({
+                    type: "internal",
+                    b24_user_id: id,
+                    email: "",
+                    name: "",
+                    order_index: order++,
+                    note: ""
+                });
+            });
+
+            externalEmails.forEach((email) => {
+                participants.push({
+                    type: "external",
+                    b24_user_id: null,
+                    email: email,
+                    name: "",
+                    order_index: order++,
+                    note: ""
+                });
+            });
+        }
+
+        const formData = new FormData();
+        formData.append("title", title);
+        formData.append("description", description);
+        if (deadline) {
+            formData.append("deadline", deadline);
+        }
+        formData.append("flow_type", flowType);
+        if (crmLink) {
+            formData.append("crm_link", crmLink);
+        }
+        formData.append("participants", JSON.stringify(participants));
+        const fileInputs = document.querySelectorAll(".create-file-input");
+        fileInputs.forEach((input) => {
+            if (input.files && input.files[0]) {
+                formData.append("files", input.files[0]);
+            }
+        });
+
+        apiFetch("/api/agreements/", {
+            method: "POST",
+            body: formData
+        })
+            .then((agreement) => {
+                try {
+                    const allParticipants = agreement.participants || [];
+                    const internalParticipants = allParticipants.filter(
+                        (p) => p.type === "internal" && p.b24_user_id
+                    );
+
+                    let userIds = [];
+
+                    if (agreement.flow_type === "sequential") {
+                        const waitingInternal = internalParticipants.filter(
+                            (p) => p.status === "waiting"
+                        );
+
+                        if (waitingInternal.length) {
+                            const minOrder = Math.min(
+                                ...waitingInternal.map((p) =>
+                                    typeof p.order_index === "number"
+                                        ? p.order_index
+                                        : 0
+                                )
+                            );
+
+                            userIds = waitingInternal
+                                .filter((p) =>
+                                    (typeof p.order_index === "number" ? p.order_index : 0) === minOrder
+                                )
+                                .map((p) => Number(p.b24_user_id))
+                                .filter((id) => !Number.isNaN(id));
+                        }
+                    } else {
+                        userIds = internalParticipants
+                            .map((p) => Number(p.b24_user_id))
+                            .filter((id) => !Number.isNaN(id));
+                    }
+
+                    if (userIds.length) {
+                        notifyBitrixUsersOnCreate(agreement, userIds);
+                    }
+                } catch (e) {
+                    console.log("notifyBitrixUsersOnCreate error", e);
+                }
+                closeCreatePanel();
+                clearCreateForm();
+                if (MODE === "my") loadMy();
+                else if (MODE === "todo") loadTodo();
+                else loadAll();
+            })
+            .catch((e) => setError(e.message || "Не удалось создать согласование."));
+    }
+
+
+    function resolveCrmUrlFromRaw(selected) {
+        if (!selected || typeof selected !== "object") return null;
+
+        const domain =
+            (typeof BX24 !== "undefined" &&
+                BX24.getDomain &&
+                BX24.getDomain()) ||
+            window.location.host;
+
+        const TYPES = ["deal", "lead", "contact", "company"];
+
+        for (const t of TYPES) {
+            const bucket = selected[t];
+            if (!bucket) continue;
+
+            let first = null;
+
+            if (Array.isArray(bucket)) {
+                if (!bucket.length) continue;
+                first = bucket[0];
+            } else if (typeof bucket === "object") {
+                const keys = Object.keys(bucket);
+                if (!keys.length) continue;
+                first = bucket[keys[0]];
+            }
+
+            if (!first || typeof first !== "object") continue;
+
+            if (first.url) {
+                const rawUrl = String(first.url);
+                if (rawUrl.startsWith("http://") || rawUrl.startsWith("https://")) {
+                    return rawUrl;
+                }
+                return "https://" + domain + rawUrl;
+            }
+        }
+
+        return null;
+    }
+
+
+    function extractCrmId(item) {
+        if (!item || typeof item !== "object") return null;
+
+        const candidates = [
+            "id",
+            "ID",
+            "entityId",
+            "ENTITY_ID",
+            "entity_id",
+            "value",
+            "VALUE",
+            "ELEMENT_ID",
+            "elementId",
+            "element_id"
+        ];
+
+        for (const key of candidates) {
+            if (item[key] !== undefined && item[key] !== null && String(item[key]).trim() !== "") {
+                return item[key];
+            }
+        }
+
+        return null;
+    }
+
+    // Хелпер: превращаем ответ BX24.selectCRM в единый массив объектов { type, id }
+    function normalizeCrmSelected(selected) {
+        if (!selected) return [];
+
+        if (Array.isArray(selected)) {
+            return selected.map(function (item) {
+                if (typeof item === "string") {
+                    return { type: "", id: item };
+                }
+                return {
+                    type: item.type || item.entityType || "",
+                    id: extractCrmId(item) || ""
+                };
+            });
+        }
+
+        if (
+            typeof selected === "object" &&
+            (selected.type || selected.entityType)
+        ) {
+            return [{
+                type: selected.type || selected.entityType || "",
+                id: extractCrmId(selected) || ""
+            }];
+        }
+
+        if (typeof selected === "object") {
+            var list = [];
+            Object.keys(selected).forEach(function (key) {
+                var arr = selected[key];
+                if (!arr) return;
+                if (!Array.isArray(arr)) {
+                    if (typeof arr === "string") {
+                        list.push({ type: key, id: arr });
+                    } else if (typeof arr === "object") {
+                        list.push({
+                            type: arr.type || arr.entityType || key,
+                            id: extractCrmId(arr) || ""
+                        });
+                    }
+                    return;
+                }
+
+                arr.forEach(function (item) {
+                    if (typeof item === "string") {
+                        list.push({ type: key, id: item });
+                    } else if (typeof item === "object") {
+                        list.push({
+                            type: item.type || item.entityType || key,
+                            id: extractCrmId(item) || ""
+                        });
+                    }
+                });
+            });
+            return list;
+        }
+
+        return [];
+    }
+
+    function openCrmSelector() {
+        const input = document.getElementById("form-crm");
+        if (!input) return;
+
+        if (typeof BX24 === "undefined" || typeof BX24.selectCRM !== "function") {
+            alert("Выбор из CRM доступен только внутри портала Битрикс24.");
+            return;
+        }
+
+        BX24.selectCRM(
+            {
+                entityType: ["deal", "lead", "contact", "company"],
+                multiple: false
+            },
+            function (selected) {
+                console.log("CRM selected RAW:", selected);
+                const directUrl = resolveCrmUrlFromRaw(selected);
+                if (directUrl) {
+                    input.value = directUrl;
+                    console.log("CRM field set to URL:", directUrl);
+                    return;
+                }
+                const items = normalizeCrmSelected(selected);
+                console.log("CRM selected normalized:", items);
+
+                if (!items.length) {
+                    try {
+                        input.value = JSON.stringify(selected);
+                    } catch (e) {
+                        input.value = String(selected);
+                    }
+                    console.log("CRM field fallback set to RAW:", input.value);
+                    return;
+                }
+
+                const item = items[0];
+                const rawType = item.type || "";
+                const type = String(rawType).toLowerCase();
+                const rawId = item.id;
+
+                if (!rawId) {
+                    input.value = type || "crm";
+                    return;
+                }
+
+                let idStr = String(rawId);
+                const parts = idStr.split("_");
+                const id = parts.length > 1 ? parts[1] : idStr;
+
+                const domain =
+                    (BX24.getDomain && BX24.getDomain()) ||
+                    window.location.host;
+
+                let path = null;
+                switch (type) {
+                    case "deal":
+                        path = "/crm/deal/details/" + id + "/";
+                        break;
+                    case "lead":
+                        path = "/crm/lead/details/" + id + "/";
+                        break;
+                    case "contact":
+                        path = "/crm/contact/details/" + id + "/";
+                        break;
+                    case "company":
+                        path = "/crm/company/details/" + id + "/";
+                        break;
+                    default:
+                        input.value = (type || "crm") + ":" + id;
+                        console.log("CRM field set to generic:", input.value);
+                        return;
+                }
+
+                const url = "https://" + domain + path;
+                input.value = url;
+                console.log("CRM field set to URL (fallback):", url);
+            }
+        );
+    }
+
+
+
+
+    /* BX24 USER SELECTOR + INTERNAL CHIPS */
+
+    function openUserSelector() {
+        if (!window.BX24 || !BX24.selectUsers) {
+            alert("Выбор сотрудников через диалог доступен только внутри Битрикс24.");
+            return;
+        }
+
+        BX24.selectUsers(function (users) {
+            if (!users || !users.length) return;
+
+            const ids = users.map(u => u.id);
+            const internalInput = document.getElementById("form-internal");
+            if (internalInput) {
+                internalInput.value = ids.join(",");
+            }
+
+            users.forEach(u => {
+                const id = parseInt(u.id, 10);
+                if (!id) return;
+                B24_USER_CACHE[id] = {
+                    id: id,
+                    name: u.name || (u.last_name ? (u.last_name + " " + (u.name || "")) : ("Пользователь #" + id)),
+                    position: u.work_position || "",
+                    avatar: u.avatar || u.personal_photo || ""
+                };
+            });
+
+            renderInternalChipsFromInput();
+        });
+    }
+
+    function renderInternalChipsFromInput() {
+        const box = document.getElementById("internal-chips");
+        const input = document.getElementById("form-internal");
+        if (!box || !input) return;
+
+        box.innerHTML = "";
+
+        const ids = input.value
+            .split(",")
+            .map(s => s.trim())
+            .filter(Boolean);
+
+        if (!ids.length) return;
+
+        ids.forEach(idStr => {
+            const id = parseInt(idStr, 10);
+            const info = B24_USER_CACHE[id] || { id, name: "Сотрудник #" + id, position: "", avatar: "" };
+
+            const chip = document.createElement("div");
+            chip.className = "participant-chip";
+
+            const avatarHtml = info.avatar
+                ? `<div class="participant-chip-avatar"><img src="${info.avatar}" alt=""></div>`
+                : `<div class="participant-chip-avatar">${initialsFromName(info.name)}</div>`;
+
+            chip.innerHTML = `
+                ${avatarHtml}
+                <div class="participant-chip-main">
+                    <div class="participant-chip-name">${escapeHtml(info.name)}</div>
+                    ${info.position ? `<div class="participant-chip-pos">${escapeHtml(info.position)}</div>` : ""}
+                </div>
+            `;
+
+            box.appendChild(chip);
+        });
+    }
+
+    /* EXTERNAL EMAILS */
+
+    function parseExternalList() {
+        const hidden = document.getElementById("form-external");
+        if (!hidden || !hidden.value) return [];
+        return hidden.value
+            .split(",")
+            .map(x => x.trim())
+            .filter(Boolean);
+    }
+
+    function saveExternalList(list) {
+        const hidden = document.getElementById("form-external");
+        if (hidden) {
+            hidden.value = list.join(",");
+        }
+    }
+
+    function renderExternalChipsFromHidden() {
+        const box = document.getElementById("external-chips");
+        if (!box) return;
+
+        const emails = parseExternalList();
+        box.innerHTML = "";
+
+        if (!emails.length) return;
+
+        emails.forEach(email => {
+            const chip = document.createElement("div");
+            chip.className = "participant-chip external";
+
+            chip.innerHTML = `
+                <div class="participant-chip-avatar">@</div>
+                <div class="participant-chip-main">
+                    <div class="participant-chip-name">${escapeHtml(email)}</div>
+                    <div class="participant-chip-pos">Внешний участник</div>
+                </div>
+                <button type="button"
+                        class="link-btn"
+                        style="margin-left:6px;"
+                        onclick="removeExternalEmail('${email.replace(/'/g, "\\'")}')">
+                    ✕
+                </button>
+            `;
+
+            box.appendChild(chip);
+        });
+    }
+
+    function addExternalEmail() {
+        const input = document.getElementById("external-input");
+        if (!input) return;
+
+        const val = input.value.trim();
+        if (!val) return;
+
+        if (!val.includes("@")) {
+            alert("Похоже, это не e-mail: " + val);
+            return;
+        }
+
+        let list = parseExternalList();
+        if (!list.includes(val)) {
+            list.push(val);
+            saveExternalList(list);
+            renderExternalChipsFromHidden();
+        }
+
+        input.value = "";
+    }
+
+    function removeExternalEmail(email) {
+        let list = parseExternalList();
+        list = list.filter(e => e !== email);
+        saveExternalList(list);
+        renderExternalChipsFromHidden();
+    }
+
+    /* === ШАБЛОНЫ СОГЛАСОВАНИЙ === */
+
+    function loadTemplatesSelect() {
+        const select = document.getElementById("template-select");
+        if (!select) return;
+
+        apiFetch("/api/templates/").then(data => {
+            TEMPLATE_CACHE = data.results || data || [];
+            select.innerHTML = '<option value="">— Не использовать шаблон —</option>';
+
+            TEMPLATE_CACHE.forEach(t => {
+                const opt = document.createElement("option");
+                opt.value = String(t.id);
+                opt.textContent = (t.group ? `[${t.group}] ` : "") + t.name;
+                if (CURRENT_TEMPLATE_ID && String(CURRENT_TEMPLATE_ID) === String(t.id)) {
+                    opt.selected = true;
+                }
+                select.appendChild(opt);
+            });
+            if (!CURRENT_TEMPLATE_ID) {
+                select.value = "";
+            }
+        }).catch(e => {
+            console.log("loadTemplatesSelect error", e);
+        });
+    }
+
+    function applyTemplateFromSelect() {
+        const select = document.getElementById("template-select");
+        if (!select || !select.value) {
+            CURRENT_TEMPLATE_ID = null;
+            return;
+        }
+
+        const id = parseInt(select.value, 10);
+        if (!id) {
+            CURRENT_TEMPLATE_ID = null;
+            return;
+        }
+
+        CURRENT_TEMPLATE_ID = id;
+        const template = TEMPLATE_CACHE.find(t => Number(t.id) === id);
+        if (!template) {
+            console.warn("Template not found for id", id);
+            return;
+        }
+
+        applyTemplate(template);
+    }
+
+    function applyTemplateById(id) {
+        const template = TEMPLATE_CACHE.find(t => Number(t.id) === Number(id));
+        if (!template) return;
+
+        CURRENT_TEMPLATE_ID = template.id;
+
+        openCreatePanel();
+        applyTemplate(template);
+    }
+
+    function applyTemplate(template) {
+        const participants = template.participants || [];
+
+        const internalIds = participants
+            .filter(p => p.type === "internal" && p.b24_user_id)
+            .map(p => p.b24_user_id);
+
+        const externalEmails = participants
+            .filter(p => p.type === "external" && p.email)
+            .map(p => p.email);
+
+        const internalInput = document.getElementById("form-internal");
+        if (internalInput) {
+            internalInput.value = internalIds.join(", ");
+            renderInternalChipsFromInput();
+        }
+
+        saveExternalList(externalEmails);
+        renderExternalChipsFromHidden();
+    }
+
+    function saveCurrentAsTemplate() {
+        const nameInput = document.getElementById("template-name-input");
+        const scopeSelect = document.getElementById("template-scope-select");
+        const groupInput = document.getElementById("template-group-input");
+
+        const name = nameInput ? nameInput.value.trim() : "";
+        const scope = scopeSelect ? scopeSelect.value : "private";
+        const groupRaw = groupInput ? groupInput.value.trim() : "";
+
+        if (!name) {
+            alert("Укажите название шаблона.");
+            return;
+        }
+        const flowTypeInput = document.querySelector('input[name="flow_type"]:checked');
+        const flowType = flowTypeInput ? flowTypeInput.value : "parallel";
+
+        const participants = [];
+        let order = 0;
+
+        if (flowType === "sequential" &&
+            Array.isArray(sequentialParticipants) &&
+            sequentialParticipants.length) {
+            sequentialParticipants.forEach((p) => {
+                participants.push({
+                    type: p.type,
+                    b24_user_id: p.type === "internal"
+                        ? (p.b24_user_id ? Number(p.b24_user_id) : null)
+                        : null,
+                    email: p.type === "external" ? (p.email || "") : "",
+                    name: p.name || "",
+                    order_index: order++,
+                    note: ""
+                });
+            });
+        } else {
+            const internalInput = document.getElementById("form-internal");
+            const internalRaw = internalInput ? internalInput.value : "";
+            const internalIds = internalRaw
+                .split(",")
+                .map(x => parseInt(x.trim(), 10))
+                .filter(x => !isNaN(x));
+
+            const externalEmails = parseExternalList();
+
+            internalIds.forEach(id => {
+                participants.push({
+                    type: "internal",
+                    b24_user_id: id,
+                    email: "",
+                    name: "",
+                    order_index: order++,
+                    note: ""
+                });
+            });
+
+            externalEmails.forEach(email => {
+                participants.push({
+                    type: "external",
+                    b24_user_id: null,
+                    email: email,
+                    name: "",
+                    order_index: order++,
+                    note: ""
+                });
+            });
+        }
+
+        let sharedWith = [];
+        if (scope === "group" && groupRaw) {
+            sharedWith = groupRaw
+                .split(",")
+                .map(x => parseInt(x.trim(), 10))
+                .filter(x => !isNaN(x));
+        }
+
+        const payload = {
+            name: name,
+            description: "",
+            scope: scope,
+            participants: participants,
+            shared_with: sharedWith,
+            flow_type: flowType
+        };
+
+        apiFetch("/api/templates/", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(payload)
+        })
+            .then((tpl) => {
+                alert("Шаблон сохранён.");
+                if (tpl && typeof tpl.id !== "undefined") {
+                    CURRENT_TEMPLATE_ID = tpl.id;
+                }
+
+                loadTemplatesSelect();
+                if (MODE === "templates") {
+                    loadTemplatesList();
+                }
+            })
+            .catch(e => setError(e.message || "Не удалось сохранить шаблон."));
+    }
+
+
+    function deleteTemplate(id) {
+        if (!confirm("Удалить этот шаблон?")) return;
+        apiFetch(`/api/templates/${id}/`, {
+            method: "DELETE"
+        })
+            .then(() => {
+                if (MODE === "templates") {
+                    loadTemplatesList();
+                }
+                loadTemplatesSelect();
+            })
+            .catch(e => setError(e.message || "Не удалось удалить шаблон."));
+    }
+
+    function openTemplateGroupSelector() {
+        if (!window.BX24 || !BX24.selectUsers) {
+            alert("Выбор группы через диалог доступен только внутри Битрикс24.");
+            return;
+        }
+
+        BX24.selectUsers(function (users) {
+            if (!users || !users.length) return;
+
+            const ids = users.map(u => u.id);
+            const input = document.getElementById("template-group-input");
+            if (!input) return;
+
+            const existingRaw = input.value || "";
+            const existing = existingRaw
+                ? existingRaw.split(",").map(x => x.trim()).filter(x => x)
+                : [];
+            const merged = Array.from(new Set([
+                ...existing,
+                ...ids.map(String),
+            ]));
+
+            input.value = merged.join(", ");
+        });
+    }
+
+    function onTemplateScopeChange() {
+        const scopeSelect = document.getElementById("template-scope-select");
+        const groupRow = document.getElementById("template-group-row");
+        if (!scopeSelect || !groupRow) return;
+
+        if (scopeSelect.value === "group") {
+            groupRow.style.display = "flex";
+        } else {
+            groupRow.style.display = "none";
+        }
+    }
+
+    /* LIST RENDERING + LOADERS */
+
+    function loadTodo() {
+        apiFetch("/api/agreements/todo/")
+            .then(data => {
+                CURRENT_LIST = Array.isArray(data)
+                    ? data
+                    : (data && Array.isArray(data.results) ? data.results : []);
+                renderList();
+            })
+            .catch(e => setError(e.message));
+    }
+
+    function loadMy() {
+        apiFetch("/api/agreements/my/")
+            .then(data => {
+                CURRENT_LIST = Array.isArray(data)
+                    ? data
+                    : (data && Array.isArray(data.results) ? data.results : []);
+                renderList();
+            })
+            .catch(e => setError(e.message));
+    }
+
+    function loadAll() {
+        Promise.all([
+            apiFetch("/api/agreements/my/"),
+            apiFetch("/api/agreements/participated/")
+        ])
+            .then(([myData, participatedData]) => {
+                const normalize = (data) =>
+                    Array.isArray(data)
+                        ? data
+                        : (data && Array.isArray(data.results) ? data.results : []);
+
+                const mapById = new Map();
+                normalize(myData).forEach(item => {
+                    if (item && typeof item.id !== "undefined") {
+                        mapById.set(item.id, item);
+                    }
+                });
+                normalize(participatedData).forEach(item => {
+                    if (item && typeof item.id !== "undefined") {
+                        mapById.set(item.id, item);
+                    }
+                });
+                CURRENT_LIST = Array.from(mapById.values()).sort((a, b) => {
+                    const da = a.created_at ? new Date(a.created_at) : 0;
+                    const db = b.created_at ? new Date(b.created_at) : 0;
+                    return db - da;
+                });
+
+                renderList();
+            })
+            .catch(e => setError(e.message || "Не удалось загрузить согласования."));
+    }
+
+    function renderList() {
+        const container = document.getElementById("list-container");
+        const listTitleEl = document.getElementById("list-title");
+        if (!container) return;
+
+        if (!Array.isArray(CURRENT_LIST)) {
+            CURRENT_LIST = [];
+        }
+
+        container.innerHTML = "";
+
+        if (listTitleEl) {
+            let baseTitle = "Список";
+            if (MODE === "todo") baseTitle = "Требуется действие";
+            if (MODE === "my") baseTitle = "Созданные мной";
+            if (MODE === "all") baseTitle = "Все согласования";
+            if (MODE === "templates") baseTitle = "Шаблоны";
+            listTitleEl.textContent = baseTitle + ` (${CURRENT_LIST.length})`;
+        }
+
+        if (CURRENT_LIST.length === 0) {
+            container.innerHTML = '<div class="empty-hint">Ничего не найдено.</div>';
+            return;
+        }
+
+        const isTemplates = (MODE === "templates");
+
+        CURRENT_LIST.forEach(item => {
+            const card = document.createElement("div");
+            card.className = "item-card";
+
+            if (isTemplates) {
+                const participants = item.participants || [];
+                const internalCount = participants.filter(p => p.type === "internal").length;
+                const externalCount = participants.filter(p => p.type === "external").length;
+                const totalCount = participants.length;
+
+                let scopeLabel = "Только мне";
+                if (item.scope === "public") scopeLabel = "Всем пользователям";
+                if (item.scope === "group") scopeLabel = "Группа";
+
+                card.innerHTML = `
+                    <div class="item-title-row">
+                        <div class="item-title">${escapeHtml(item.name || "")}</div>
+                        <button class="btn btn-secondary"
+                                style="padding:2px 6px; font-size:11px;"
+                                onclick="event.stopPropagation(); deleteTemplate(${item.id});">
+                            Удалить
+                        </button>
+                    </div>
+                    <div class="item-sub">
+                        Автор: ${item.author_b24_id ?? "—"} • ${scopeLabel}
+                    </div>
+                    <div class="item-tags">
+                        Участников: ${totalCount}
+                        ${internalCount ? " • внутренних: " + internalCount : ""}
+                        ${externalCount ? " • внешних: " + externalCount : ""}
+                    </div>
+                `;
+
+                card.addEventListener("click", () => {
+                    applyTemplateById(item.id);
+                });
+
+                container.appendChild(card);
+                return;
+            }
+
+            const statusPill = renderStatusPill(item.status);
+            const participantsRow = renderParticipantsRow(item);
+
+            let createdStr = "";
+            try {
+                createdStr = new Date(item.created_at).toLocaleDateString('ru-RU');
+            } catch (e) {}
+
+            let deadlineStr = "";
+            if (item.deadline) {
+                try {
+                    deadlineStr = new Date(item.deadline).toLocaleDateString('ru-RU');
+                } catch (e) {
+                    deadlineStr = item.deadline;
+                }
+            }
+
+            card.innerHTML = `
+                <div class="item-title-row">
+                    <div class="item-title">#${item.id} ${escapeHtml(item.title || "")}</div>
+                    <div>${statusPill}</div>
+                </div>
+                <div class="item-sub">
+                    Автор: ${item.author_b24_id ?? "—"}
+                    ${createdStr ? " • " + createdStr : ""}
+                    ${deadlineStr ? " • Дедлайн: " + deadlineStr : ""}
+                </div>
+                <div class="item-tags">${participantsRow}</div>
+            `;
+            card.addEventListener("click", () => openDetail(item.id));
+            container.appendChild(card);
+        });
+    }
+
+    function renderStatusPill(status) {
+        let text = "В работе";
+        let cls = "in_progress";
+
+        if (status === "draft") {
+            text = "Черновик";
+            cls = "draft";
+        } else if (status === "completed") {
+            text = "Согласован";
+            cls = "completed";
+        } else if (status === "rejected") {
+            text = "Отклонён";
+            cls = "rejected";
+        } else if (status === "canceled") {
+            text = "Отменено";
+            cls = "canceled";
+        }
+
+        return `<span class="status-pill ${cls}">${text}</span>`;
+    }
+
+    function renderParticipantsRow(item) {
+        if (!item.participants || item.participants.length === 0) return "";
+        return item.participants.map(p => {
+            const name = p.b24_user_id ? ("#" + p.b24_user_id) : (p.email || "участник");
+            let cls = "";
+            if (p.status === "waiting") cls = "waiting";
+            if (p.status === "approved") cls = "approved";
+            if (p.status === "rejected") cls = "rejected";
+            return `<span class="participant-pill ${cls}">${escapeHtml(name)}</span>`;
+        }).join(" ");
+    }
+
+    /* DETAIL VIEW */
+
+    function openDetail(id) {
+        setError("");
+        apiFetch(`/api/agreements/${id}/`)
+            .then(data => {
+                try {
+                    CURRENT_AGREEMENT = data;
+                    renderDetail();
+                    loadB24UsersForAgreement(data);
+                } catch (e) {
+                    console.error("renderDetail error:", e);
+                    // Покажем более человеческое сообщение
+                    setError((e.name || "Error") + ": " + (e.message || "unknown error"));
+                }
+            })
+            .catch(e => {
+                console.error("apiFetch /agreements/:id error:", e);
+                setError(e.message || "Ошибка загрузки карточки.");
+            });
+    }
+
+    function renderDetail() {
+        const container = document.getElementById("detail-container");
+        if (!container) return;
+
+        if (!CURRENT_AGREEMENT) {
+            container.innerHTML =
+                '<div class="detail-placeholder">Выберите согласование в списке слева.</div>';
+            return;
+        }
+
+        const a = CURRENT_AGREEMENT;
+
+        const statusChip = renderDetailStatusChip(a.status);
+        const sideHtml = renderDetailSide(a);
+
+        let createdStr = "";
+        try {
+            createdStr = new Date(a.created_at).toLocaleString("ru-RU");
+        } catch (e) {}
+
+        let deadlineStr = "";
+        if (a.deadline) {
+            try {
+                deadlineStr = new Date(a.deadline).toLocaleDateString("ru-RU");
+            } catch (e) {
+                deadlineStr = a.deadline;
+            }
+        }
+
+        const descriptionHtml = a.description
+            ? escapeHtml(a.description).replace(/\n/g, "<br>")
+            : '<span style="color: var(--text-muted);">Описание не указано.</span>';
+
+        const docsUpdateButton =
+            Number(a.author_b24_id) === Number(B24_USER_ID)
+                ? `
+                    <button class="btn btn-secondary small-btn"
+                            type="button"
+                            onclick="toggleUpdateDocsPanel()">
+                        Обновить файлы
+                    </button>
+                `
+                : "";
+
+        container.innerHTML = `
+            <div class="detail-header-main">
+                <div>
+                    <div class="detail-title">#${a.id} ${escapeHtml(a.title)}</div>
+                    <div class="detail-meta">
+                        Автор: ${a.author_b24_id}
+                        ${createdStr ? " • Создано: " + createdStr : ""}
+                        ${deadlineStr ? " • Дедлайн: " + deadlineStr : ""}
+                    </div>
+                    <div style="margin-top:6px;">${statusChip}</div>
+                </div>
+            </div>
+
+            <div class="detail-columns">
+                <div>
+                    <div class="detail-card">
+                        <div class="detail-card-header">
+                            <span>Описание</span>
+                        </div>
+                        <div class="detail-card-body">
+                            ${descriptionHtml}
+                        </div>
+                    </div>
+
+                    <div class="detail-card">
+                        <div class="detail-card-header">
+                            <span>Документы</span>
+                            ${docsUpdateButton}
+                        </div>
+                        <div class="detail-card-body" id="detail-docs"></div>
+                        <div id="update-docs-panel" style="display:none; margin-top:8px;">
+                            <div id="update-files-container">
+                                <input type="file" class="update-file-input">
+                            </div>
+                            <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap;">
+                                <button type="button"
+                                        class="btn btn-secondary small-btn"
+                                        onclick="addUpdateFileInput()">
+                                    + Ещё файл
+                                </button>
+                                <button type="button"
+                                        class="btn btn-primary small-btn"
+                                        onclick="submitUpdateDocuments(${a.id})">
+                                    Загрузить
+                                </button>
+                            </div>
+                            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">
+                                Старый набор файлов будет полностью заменён новым.
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="detail-card">
+                        <div class="detail-card-header">
+                            <span>Ход согласования</span>
+                        </div>
+                        <div class="detail-card-body">
+                            <div id="detail-timeline" class="detail-timeline"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <div class="detail-card">
+                        <div class="detail-card-header">
+                            <span>Ваше решение</span>
+                        </div>
+                        <div class="detail-card-body">
+                            <div id="detail-actions"></div>
+                        </div>
+                    </div>
+
+                    <div class="detail-card">
+                        <div class="detail-card-header">
+                            <span>Участники</span>
+                        </div>
+                        <div class="detail-card-body">
+                            <div id="detail-participants"></div>
+                        </div>
+                    </div>
+
+                    <div class="detail-card">
+                        <div class="detail-card-header">
+                            <span>Сводка</span>
+                        </div>
+                        <div class="detail-card-body">
+                            ${sideHtml}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        const actionsBox = document.getElementById("detail-actions");
+        if (actionsBox) {
+            actionsBox.innerHTML = renderDecisionBlock(a);
+        }
+
+        renderDetailDocs(a);
+        renderDetailParticipants(a);
+        renderDetailTimeline(a);
+    }
+
+
+    function renderDetailStatusChip(status) {
+        let text = "В работе";
+        let cls = "detail-status-in_progress";
+
+        if (status === "draft") {
+            text = "Черновик";
+            cls = "detail-status-draft";
+        } else if (status === "completed") {
+            text = "Согласован";
+            cls = "detail-status-completed";
+        } else if (status === "rejected") {
+            text = "Отклонён";
+            cls = "detail-status-rejected";
+        } else if (status === "canceled") {
+            text = "Отменено";
+            cls = "detail-status-canceled";
+        }
+
+        return `<span class="detail-status-chip ${cls}">${text}</span>`;
+    }
+
+    function renderDetailSide(a) {
+        const amount = a.amount != null ? a.amount : null;
+        const crm = a.crm_link || "";
+        let crmHtml = "Не привязано";
+        if (crm) {
+            let text = crm;
+            if (text.length > 60) {
+                text = text.slice(0, 57) + "…";
+            }
+
+            crmHtml = `
+                <a href="${escapeHtml(crm)}"
+                   target="_blank"
+                   class="crm-link"
+                   title="${escapeHtml(crm)}">
+                    ${escapeHtml(text)}
+                </a>
+            `;
+        }
+
+        let manageHtml = "";
+
+        if (Number(a.author_b24_id) === Number(B24_USER_ID)) {
+            if (a.status === "rejected") {
+                manageHtml += `
+                    <div class="detail-side-block">
+                        <div class="detail-side-label">Управление</div>
+                        <button class="btn"
+                                style="width:100%;background:#ff9800;color:#fff;margin-bottom:6px;"
+                                onclick="restartAgreement(${a.id})">
+                            Перезапустить согласование
+                        </button>
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">
+                            Сбрасывает только отклонивших участников. Остальные решения сохраняются.
+                        </div>
+                    </div>
+                `;
+            }
+
+            if (a.status === "in_progress") {
+                manageHtml += `
+                    <div class="detail-side-block">
+                        <div class="detail-side-label">Отмена</div>
+                        <button class="btn"
+                                style="width:100%;background:#9e9e9e;color:#fff;"
+                                onclick="cancelAgreement(${a.id})">
+                            Отменить согласование
+                        </button>
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">
+                            Статус станет «Отменено», участники больше не смогут голосовать.
+                        </div>
+                    </div>
+                `;
+            }
+
+            manageHtml += `
+                <div class="detail-side-block">
+                    <div class="detail-side-label">Удаление</div>
+                    <button class="btn"
+                            style="width:100%;background:#f44336;color:#fff;"
+                            onclick="deleteAgreement(${a.id})">
+                        Удалить согласование
+                    </button>
+                    <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">
+                        Будут удалены все данные по этому согласованию.
+                    </div>
+                </div>
+            `;
+        }
+
+        return `
+            <div class="detail-side">
+                <div class="detail-side-block">
+                    <div class="detail-side-label">Инициатор</div>
+                    <div>#${a.author_b24_id}</div>
+                </div>
+                <div class="detail-side-block">
+                    <div class="detail-side-label">Сумма</div>
+                    <div>${amount !== null ? amount : "—"}</div>
+                </div>
+                <div class="detail-side-block">
+                    <div class="detail-side-label">CRM</div>
+                    <div>${crmHtml}</div>
+                </div>
+                ${manageHtml}
+            </div>
+        `;
+    }
+
+
+    function renderDetailDocs(a) {
+        const box = document.getElementById("detail-docs");
+        if (!box) return;
+
+        if (!a.documents || a.documents.length === 0) {
+            box.innerHTML = "<p style='font-size:13px; color: var(--text-muted);'>Документы не прикреплены.</p>";
+            return;
+        }
+
+        const html = a.documents.map(doc => {
+            const url = doc.file || doc.url || "#";
+            const name = doc.name || "Документ";
+            return `
+                <div class="doc-item">
+                    <div class="doc-name">${escapeHtml(name)}</div>
+                    <div class="doc-actions">
+                        <a href="${url}" download>📥 Скачать</a>
+                        <button type="button"
+                                class="link-btn"
+                                onclick="window.open('${url}', '_blank')">
+                            👁 Открыть
+                        </button>
+                    </div>
+                </div>
+            `;
+        }).join("");
+
+        box.innerHTML = html;
+    }
+
+    function loadB24UsersForAgreement(a) {
+        if (!window.BX24 || !BX24.callMethod || !a.participants) return;
+
+        const ids = [];
+        a.participants.forEach(p => {
+            if (p.type === "internal" && p.b24_user_id && !B24_USER_CACHE[p.b24_user_id]) {
+                ids.push(p.b24_user_id);
+            }
+        });
+
+        if (!ids.length) return;
+
+        ids.forEach(id => {
+            BX24.callMethod("user.get", { ID: id }, function (res) {
+                if (res.error()) {
+                    console.log("user.get error", res.error());
+                    return;
+                }
+                const arr = res.data && res.data();
+                const user = arr && arr[0];
+                if (!user) return;
+
+                const uid = parseInt(user.ID, 10);
+                B24_USER_CACHE[uid] = {
+                    id: uid,
+                    name: (user.LAST_NAME + " " + user.NAME).trim() || user.NAME || user.LAST_NAME || ("USER #" + uid),
+                    position: user.WORK_POSITION || "",
+                    avatar: user.PERSONAL_PHOTO || ""
+                };
+
+                renderDetailParticipants(CURRENT_AGREEMENT);
+            });
+        });
+    }
+
+    function renderDetailParticipants(a) {
+        const box = document.getElementById("detail-participants");
+        if (!box) return;
+
+        if (!a.participants || a.participants.length === 0) {
+            box.innerHTML = "<p style='font-size:13px; color: var(--text-muted);'>Участники не указаны.</p>";
+            return;
+        }
+
+        const html = a.participants.map(p => {
+            if (p.type === "internal" && p.b24_user_id) {
+                const info = B24_USER_CACHE[p.b24_user_id] || {
+                    name: "USER #" + p.b24_user_id,
+                    position: "",
+                    avatar: ""
+                };
+                const statusInfo = mapParticipantStatus(p.status);
+                const avatarHtml = info.avatar
+                    ? `<div class="participant-chip-avatar"><img src="${info.avatar}" alt=""></div>`
+                    : `<div class="participant-chip-avatar">${initialsFromName(info.name)}</div>`;
+
+                return `
+                    <div class="participant-card">
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            ${avatarHtml}
+                            <div>
+                                <div class="participant-name">${escapeHtml(info.name)}</div>
+                                ${info.position ? `<div class="participant-status">${escapeHtml(info.position)}</div>` : ""}
+                            </div>
+                        </div>
+                        <div class="participant-status">
+                            <span class="status-pill ${statusInfo.cls}">${statusInfo.text}</span>
+                        </div>
+                    </div>
+                `;
+            } else {
+                const name = p.email || "Участник";
+                const statusInfo = mapParticipantStatus(p.status);
+                return `
+                    <div class="participant-card">
+                        <div class="participant-name">${escapeHtml(name)}</div>
+                        <div class="participant-status">
+                            <span class="status-pill ${statusInfo.cls}">${statusInfo.text}</span>
+                        </div>
+                    </div>
+                `;
+            }
+        }).join("");
+
+        box.innerHTML = html;
+    }
+
+    function renderDetailTimeline(a) {
+        const box = document.getElementById("detail-timeline");
+        if (!box) return;
+
+        const logs = a.decision_logs || [];
+        if (logs.length === 0) {
+            box.innerHTML = "<p style='font-size:13px; color: var(--text-muted);'>Пока ничего не происходило.</p>";
+            return;
+        }
+
+        const html = logs.map(log => {
+            const p = log.participant;
+            const name = p.b24_user_id ? `USER #${p.b24_user_id}` : (p.email || "Участник");
+            const statusInfo = mapParticipantStatus(log.status);
+            const dt = new Date(log.decided_at).toLocaleString('ru-RU');
+            const comment = log.comment || "";
+            return `
+                <div class="timeline-item">
+                    <div class="timeline-meta">
+                        <strong>${escapeHtml(name)}</strong> — ${statusInfo.text.toLowerCase()} • ${dt}
+                    </div>
+                    ${comment ? `<div class="timeline-comment">${escapeHtml(comment)}</div>` : ""}
+                </div>
+            `;
+        }).join("");
+
+        box.innerHTML = html;
+    }
+
+    function mapParticipantStatus(status) {
+        if (status === "approved") return { cls: "completed", text: "Согласовано" };
+        if (status === "rejected") return { cls: "rejected", text: "Отклонено" };
+        return { cls: "in_progress", text: "Ожидаем" };
+    }
+
+    function showDetailTab(tab) {
+        ["docs", "participants", "timeline"].forEach(t => {
+            const btn = document.getElementById(`tab-${t}-btn`);
+            const pane = document.getElementById(`detail-${t}`);
+            if (!btn || !pane) return;
+            const active = t === tab;
+            btn.classList.toggle("active", active);
+            pane.classList.toggle("active", active);
+        });
+    }
+
+    /* DECISION PANEL + ACTIONS */
+
+    function renderDecisionBlock(detail) {
+        // нет участников — нечего рисовать
+        if (!detail.participants || !detail.participants.length) return "";
+
+        // вообще не знаем, кто пользователь
+        if (!B24_USER_ID && !B24_USER_EMAIL) return "";
+
+        let me = null;
+
+        // 1) пробуем найти внутреннего участника по B24_USER_ID
+        if (B24_USER_ID) {
+            me = detail.participants.find(
+                p => p.type === "internal" &&
+                    Number(p.b24_user_id) === Number(B24_USER_ID)
+            );
+        }
+
+        // 2) если не нашли, а e-mail знаем — ищем внешнего по e-mail
+        if (!me && B24_USER_EMAIL) {
+            const myEmail = String(B24_USER_EMAIL).toLowerCase();
+            me = detail.participants.find(
+                p =>
+                    p.type === "external" &&
+                    p.email &&
+                    String(p.email).toLowerCase() === myEmail
+            );
+        }
+
+        // вообще не нашлось соответствующего участника — ничего не показываем
+        if (!me) return "";
+
+        const statusMap = {
+            waiting:  "Ожидаем",
+            approved: "Согласовано",
+            rejected: "Отклонено"
+        };
+
+        const statusClassMap = {
+            waiting:  "",
+            approved: "detail-status-completed",
+            rejected: "detail-status-rejected"
+        };
+
+        const currentText  = statusMap[me.status] || "—";
+        const currentClass = statusClassMap[me.status] || "";
+
+        const hasPrev = !!me.prev_status;
+        const prevText  = hasPrev ? (statusMap[me.prev_status] || "—") : "";
+        const prevClass = hasPrev ? (statusClassMap[me.prev_status] || "") : "";
+
+        // 1) согласование уже завершено или отменено — только статус и комментарий
+        if (detail.status === "completed" || detail.status === "canceled") {
+            const mainLabel = detail.status === "completed"
+                ? "Согласование завершено. Изменить решение невозможно."
+                : "Согласование отменено. Изменить решение невозможно.";
+
+            return `
+                <div class="detail-card">
+                    <div class="detail-card-header">Ваше решение</div>
+                    <div class="detail-card-body">
+                        <div class="decision-label">${mainLabel}</div>
+
+                        <div class="decision-label">Ваше решение:</div>
+                        <div class="decision-current">
+                            <span class="detail-status-chip ${currentClass}">
+                                ${currentText}
+                            </span>
+                        </div>
+
+                        <div class="decision-label">Комментарий:</div>
+                        <div class="decision-comment-text">
+                            ${escapeHtml(me.comment || "—")}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // 2) ещё не голосовал (waiting) — показываем поле ввода и кнопки
+        if (me.status === "waiting") {
+            const prevBlock = hasPrev ? `
+                <div class="decision-prev">
+                    <div class="decision-label">Ваше предыдущее решение:</div>
+                    <div class="decision-current">
+                        <span class="detail-status-chip ${prevClass}">
+                            ${prevText}
+                        </span>
+                    </div>
+                    <div class="decision-label">Комментарий:</div>
+                    <div class="decision-comment-text">
+                        ${escapeHtml(me.prev_comment || "—")}
+                    </div>
+                    <hr class="decision-separator" />
+                </div>
+            ` : "";
+
+            return `
+                <div class="detail-card">
+                    <div class="detail-card-header">Ваше решение</div>
+                    <div class="detail-card-body">
+                        ${prevBlock}
+
+                        <div class="decision-label">Текущее решение: ожидаем</div>
+
+                        <textarea id="decision-comment"
+                                class="decision-comment-input"
+                                placeholder="Комментарий (при отклонении обязателен)">${escapeHtml(me.comment || "")}</textarea>
+
+                        <div class="decision-actions">
+                            <button class="btn btn-secondary"
+                                    onclick="sendDecision(${detail.id}, ${me.id}, 'reject')">
+                                Отклонить
+                            </button>
+                            <button class="btn btn-primary"
+                                    onclick="sendDecision(${detail.id}, ${me.id}, 'approve')">
+                                Согласовать
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // 3) уже голосовал (approved / rejected) — показываем текущее решение
+        return `
+            <div class="detail-card">
+                <div class="detail-card-header">Ваше решение</div>
+                <div class="detail-card-body">
+                    <div class="decision-label">Ваше решение:</div>
+                    <div class="decision-current">
+                        <span class="detail-status-chip ${currentClass}">
+                            ${currentText}
+                        </span>
+                    </div>
+
+                    <div class="decision-label">Комментарий:</div>
+                    <div class="decision-comment-text">
+                        ${escapeHtml(me.comment || "—")}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+
+    function sendDecision(agreementId, participantId, decision) {
+        setError("");
+        const commentEl = document.getElementById("decision-comment");
+        const comment = commentEl ? commentEl.value : "";
+
+        if (decision === "reject" && !comment.trim()) {
+            setError("При отклонении документа необходимо указать комментарий.");
+            return;
+        }
+
+        apiFetch(`/api/agreements/${agreementId}/decide/`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                participant_id: participantId,
+                decision: decision,
+                comment: comment
+            })
+        }).then(() => {
+            openDetail(agreementId);
+            if (MODE === "todo") loadTodo();
+            else if (MODE === "my") loadMy();
+            else loadAll();
+        }).catch(e => setError(e.message));
+    }
+
+        function restartAgreement(id) {
+            if (!confirm("Перезапустить согласование? Отклонённые голоса будут сброшены, остальные сохранятся.")) {
+                return;
+            }
+            setError("");
+
+            apiFetch(`/api/agreements/${id}/restart/`, {
+                method: "POST"
+            })
+                .then((data) => {
+                    CURRENT_AGREEMENT = data;
+                    try {
+                        const rawIds = data.internal_to_notify || [];
+                        const userIds = rawIds
+                            .map((val) => Number(val))
+                            .filter((id) => !Number.isNaN(id));
+
+                        console.log("internal_to_notify from backend:", rawIds, "=> userIds:", userIds);
+
+                        if (userIds.length) {
+                            notifyBitrixUsersOnRestart(data, userIds);
+                        }
+                    } catch (e) {
+                        console.log("notifyBitrixUsersOnRestart error", e);
+                    }
+                    renderDetail();
+                    if (MODE === "todo") loadTodo();
+                    else if (MODE === "my") loadMy();
+                    else loadAll();
+                })
+                .catch((e) => setError(e.message));
+        }
+
+
+
+    function cancelAgreement(id) {
+        if (!confirm("Отменить согласование? Участники больше не смогут менять решения.")) {
+            return;
+        }
+        setError("");
+        apiFetch(`/api/agreements/${id}/cancel/`, {
+            method: "POST"
+        }).then(data => {
+            CURRENT_AGREEMENT = data;
+            renderDetail();
+            if (MODE === "todo") loadTodo();
+            else if (MODE === "my") loadMy();
+            else loadAll();
+        }).catch(e => setError(e.message));
+    }
+
+    function deleteAgreement(id) {
+        if (!confirm("Точно удалить это согласование? Восстановить будет нельзя.")) {
+            return;
+        }
+        setError("");
+
+        const headers = {};
+        if (B24_USER_ID) {
+            headers["X-B24-User"] = B24_USER_ID;
+        }
+
+        fetch(`/api/agreements/${id}/`, {
+            method: "DELETE",
+            headers: headers,
+        })
+            .then(resp => {
+                if (!resp.ok && resp.status !== 204) {
+                    return resp.json().then(data => {
+                        throw new Error(data.detail || "Ошибка удаления");
+                    }).catch(() => {
+                        throw new Error("Ошибка удаления");
+                    });
+                }
+                CURRENT_AGREEMENT = null;
+                const container = document.getElementById("detail-container");
+                if (container) {
+                    container.innerHTML = '<div class="detail-placeholder">Выберите согласование в списке слева, чтобы посмотреть детали.</div>';
+                }
+                if (MODE === "todo") loadTodo();
+                else if (MODE === "my") loadMy();
+                else loadAll();
+            })
+            .catch(e => setError(e.message));
+    }
+
+
+
+    function notifyBitrixUsersOnCreate(agreement, userIds) {
+        if (!window.BX24 || !BX24.callMethod) return;
+        if (!userIds || !userIds.length) return;
+
+        const msg =
+            'Вам назначено согласование #' + agreement.id + ' "' + agreement.title + '".\n' +
+            'Откройте приложение «Мини-СЭД», чтобы посмотреть детали.';
+
+        userIds.forEach((uid) => {
+            BX24.callMethod(
+                "im.notify",
+                {
+                    to: uid,
+                    message: msg
+                },
+                function (res) {
+                    if (res.error()) {
+                        console.log("Ошибка im.notify для пользователя", uid, res.error());
+                    }
+                }
+            );
+        });
+    }
+
+        function notifyBitrixUsersOnRestart(agreement, userIds) {
+            if (!window.BX24 || !BX24.callMethod) return;
+            if (!userIds || !userIds.length) return;
+
+            const msg =
+                'Перезапущено согласование #' + agreement.id + ' "' + agreement.title + '".\n' +
+                'Вам нужно снова принять решение по документу. Откройте приложение «Мини-СЭД», чтобы посмотреть детали.';
+
+            userIds.forEach((uid) => {
+                BX24.callMethod(
+                    "im.notify",
+                    {
+                        to: uid,
+                        message: msg
+                    },
+                    function (res) {
+                        if (res.error()) {
+                            console.log("Ошибка im.notify (restart) для пользователя", uid, res.error());
+                        }
+                    }
+                );
+            });
+        }
+
+    function renderSequentialList() {
+        const box = document.getElementById("seq-list");
+        if (!box) return;
+
+        box.innerHTML = "";
+        sequentialParticipants.forEach((p, index) => {
+            const row = document.createElement("div");
+            row.className = "participant-chip " + (p.type === "internal" ? "internal" : "external");
+
+            const label =
+                p.type === "internal"
+                    ? (p.name ? `${p.name} (ID ${p.b24_user_id})` : `Пользователь ID ${p.b24_user_id}`)
+                    : p.email;
+
+            const typeText = p.type === "internal" ? "Внутренний участник" : "Внешний участник";
+
+            row.innerHTML = `
+                <div class="participant-chip-avatar">${p.type === "internal" ? "B" : "@"}</div>
+                <div class="participant-chip-main">
+                    <div class="participant-chip-name">${escapeHtml(label)}</div>
+                    <div class="participant-chip-pos">${typeText}</div>
+                </div>
+                <div class="participant-chip-actions">
+                    <button type="button" class="link-btn" onclick="seqMoveUp(${index})">↑</button>
+                    <button type="button" class="link-btn" onclick="seqMoveDown(${index})">↓</button>
+                    <button type="button" class="link-btn" onclick="seqRemove(${index})">✕</button>
+                </div>
+            `;
+
+            box.appendChild(row);
+        });
+    }
+
+    function seqMoveUp(index) {
+        if (index <= 0) return;
+        const tmp = sequentialParticipants[index - 1];
+        sequentialParticipants[index - 1] = sequentialParticipants[index];
+        sequentialParticipants[index] = tmp;
+        renderSequentialList();
+    }
+
+    function seqMoveDown(index) {
+        if (index >= sequentialParticipants.length - 1) return;
+        const tmp = sequentialParticipants[index + 1];
+        sequentialParticipants[index + 1] = sequentialParticipants[index];
+        sequentialParticipants[index] = tmp;
+        renderSequentialList();
+    }
+
+    function seqRemove(index) {
+        sequentialParticipants.splice(index, 1);
+        renderSequentialList();
+    }
+
+    function seqAddInternal() {
+        if (!window.BX24 || !BX24.selectUsers) {
+            alert("Выбор сотрудников через диалог доступен только внутри Битрикс24.");
+            return;
+        }
+
+        BX24.selectUsers(function (users) {
+            if (!users || !users.length) return;
+
+            users.forEach(u => {
+                sequentialParticipants.push({
+                    type: "internal",
+                    b24_user_id: u.id,
+                    email: "",
+                    name: u.name || "",
+                });
+            });
+            renderSequentialList();
+        });
+    }
+
+    function seqAddExternal() {
+        const input = document.getElementById("seq-external-input");
+        if (!input) return;
+        const email = (input.value || "").trim();
+        if (!email) return;
+
+        sequentialParticipants.push({
+            type: "external",
+            b24_user_id: null,
+            email: email,
+            name: "",
+        });
+        input.value = "";
+        renderSequentialList();
+    }
+
+
+    /* AUTH / INIT */
+
+    function showBitrixLoginHint() {
+        const hint = document.getElementById("auth-hint");
+        if (hint) {
+            hint.classList.remove("hidden");
+            const block = hint.closest(".sidebar-block");
+            if (block) {
+                block.style.display = "block";
+            }
+        }
+    }
+
+    function hideBitrixLoginHint() {
+        const hint = document.getElementById("auth-hint");
+        if (hint) {
+            hint.classList.add("hidden");
+            const block = hint.closest(".sidebar-block");
+            if (block) {
+                block.style.display = "none";
+            }
+        }
+    }
+
+    function handleFlowTypeChange() {
+        const flowTypeInput = document.querySelector('input[name="flow_type"]:checked');
+        const flowType = flowTypeInput ? flowTypeInput.value : "parallel";
+
+        const parallelBlock = document.getElementById("parallel-block");
+        const seqBlock = document.getElementById("sequential-block");
+
+        if (parallelBlock && seqBlock) {
+            if (flowType === "sequential") {
+                parallelBlock.style.display = "none";
+                seqBlock.style.display = "block";
+            } else {
+                parallelBlock.style.display = "block";
+                seqBlock.style.display = "none";
+            }
+        }
+    }
+
+    function initApp() {
+        if (typeof SESSION_B24_USER_ID !== "undefined" && SESSION_B24_USER_ID) {
+            B24_USER_ID = SESSION_B24_USER_ID;
+            const label = document.getElementById("b24-id-label");
+            if (label) label.textContent = B24_USER_ID;
+
+            const internalInput = document.getElementById("form-internal");
+            if (internalInput) {
+                internalInput.addEventListener("change", renderInternalChipsFromInput);
+                internalInput.addEventListener("keyup", renderInternalChipsFromInput);
+            }
+
+            const externalHidden = document.getElementById("form-external");
+            if (externalHidden) {
+                externalHidden.addEventListener("change", renderExternalChipsFromHidden);
+                renderExternalChipsFromHidden();
+            }
+
+            hideBitrixLoginHint();
+            console.log("Init via SESSION_B24_USER_ID =", B24_USER_ID);
+            setMode("todo");
+            return;
+        }
+
+        if (window.BX24 && BX24.init) {
+            BX24.init(function () {
+                try {
+                    if (BX24.isAdmin && BX24.isAdmin() && BX24.installFinish) {
+                        BX24.installFinish();
+                        console.log("BX24.installFinish() вызван");
+                    }
+                } catch (e) {
+                    console.log("Ошибка BX24.installFinish()", e);
+                }
+
+                BX24.callMethod("user.current", {}, function (res) {
+                    if (res.error()) {
+                        console.log("BX24 error", res.error());
+                        showBitrixLoginHint();
+                        return;
+                    }
+
+                    const user = res.data();
+                    B24_USER_ID = parseInt(user.ID, 10);
+
+                    // ⬇ сохраняем e-mail текущего битрикс-пользователя
+                    if (user.EMAIL) {
+                        B24_USER_EMAIL = String(user.EMAIL).toLowerCase();
+                    } else if (user.PERSONAL_MAILBOX) {
+                        B24_USER_EMAIL = String(user.PERSONAL_MAILBOX).toLowerCase();
+                    }
+
+                    const label = document.getElementById("b24-id-label");
+                    if (label) label.textContent = B24_USER_ID;;
+
+                    const internalInput = document.getElementById("form-internal");
+                    if (internalInput) {
+                        internalInput.addEventListener("change", renderInternalChipsFromInput);
+                        internalInput.addEventListener("keyup", renderInternalChipsFromInput);
+                    }
+
+                    const externalHidden = document.getElementById("form-external");
+                    if (externalHidden) {
+                        externalHidden.addEventListener("change", renderExternalChipsFromHidden);
+                        renderExternalChipsFromHidden();
+                    }
+
+                    hideBitrixLoginHint();
+                    console.log("Init via BX24, B24_USER_ID =", B24_USER_ID);
+                    setMode("todo");
+                });
+            });
+            return;
+        }
+        showBitrixLoginHint();
+    }
+
+    const flowRadios = document.querySelectorAll('input[name="flow_type"]');
+    flowRadios.forEach(r => {
+        r.addEventListener("change", handleFlowTypeChange);
+    });
+    handleFlowTypeChange();
+
+    document.addEventListener("DOMContentLoaded", initApp);
+</script>
+</body>
+</html>

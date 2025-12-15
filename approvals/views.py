@@ -1,0 +1,1054 @@
+import os
+import requests
+from django.db import transaction
+from django.shortcuts import render
+from datetime import datetime
+from rest_framework import viewsets, status
+from rest_framework.decorators import action, api_view, parser_classes
+from rest_framework.response import Response
+from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.exceptions import AuthenticationFailed
+from rest_framework.permissions import AllowAny
+from django.utils import timezone
+from .models import (
+    Agreement,
+    AgreementDocument,
+    Participant,
+    DecisionLog,
+    ApprovalTemplate,
+    B24Identity,
+)
+from .models import (
+    Agreement as AgreementModel,
+)
+from .serializers import (
+    AgreementSerializer,
+    ApprovalTemplateSerializer,
+)
+from django.shortcuts import redirect
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
+from django.urls import reverse
+from django.core.mail import send_mail
+from django.conf import settings
+from django.db.models import Q
+from urllib.parse import urlencode
+
+
+@csrf_exempt
+def app_view(request):
+    code = request.GET.get("code")
+    domain = request.GET.get("domain")
+    server_domain = request.GET.get("server_domain")
+
+    if code and domain and server_domain:
+        try:
+            token_resp = requests.get(
+                f"https://{server_domain}/oauth/token/",
+                params={
+                    "grant_type": "authorization_code",
+                    "client_id": settings.BITRIX_CLIENT_ID,
+                    "client_secret": settings.BITRIX_CLIENT_SECRET,
+                    "code": code,
+                    "redirect_uri": request.build_absolute_uri(request.path),
+                },
+                timeout=10,
+            )
+            token_data = token_resp.json()
+            access_token = token_data.get("access_token")
+            b24_id = token_data.get("user_id")
+
+            if b24_id:
+                request.session["b24_user_id"] = int(b24_id)
+            try:
+                if access_token:
+                    user_resp = requests.get(
+                        f"https://{domain}/rest/user.current",
+                        params={"auth": access_token},
+                        timeout=5,
+                    )
+                    user_data = user_resp.json().get("result", {})
+                    email = user_data.get("EMAIL") or user_data.get("WORK_EMAIL")
+                    if email:
+                        request.session["b24_email"] = email
+            except Exception as e:
+                print(f"[Bitrix OAuth] user.current failed: {e}")
+
+        except Exception as e:
+            print(f"[Bitrix OAuth] token exchange error: {e}")
+        return redirect("/app")
+    return render(
+        request,
+        "approvals/app.html",
+        {"session_b24_id": request.session.get("b24_user_id")},
+    )
+
+
+def bitrix_auth_callback(request):
+    """
+    Callback после логина в Bitrix.
+    Сохраняем b24_user_id + email в сессии и в таблице B24Identity,
+    затем возвращаем пользователя на нужную страницу.
+    """
+    code = request.GET.get("code")
+    if not code:
+        return redirect("/approvals/app")
+
+    redirect_uri = request.build_absolute_uri(settings.BITRIX_OAUTH_REDIRECT_PATH)
+
+    data = {
+        "grant_type": "authorization_code",
+        "client_id": settings.BITRIX_CLIENT_ID,
+        "client_secret": settings.BITRIX_CLIENT_SECRET,
+        "code": code,
+        "redirect_uri": redirect_uri,
+    }
+    resp = requests.post(settings.BITRIX_OAUTH_TOKEN_URL, data=data, timeout=10)
+    token_data = resp.json()
+
+    access_token = token_data.get("access_token")
+    domain = token_data.get("domain")
+    if not access_token or not domain:
+        return redirect("/approvals/app")
+
+    user_resp = requests.get(
+        f"https://{domain}/rest/user.current",
+        params={"auth": access_token},
+        timeout=10,
+    )
+    user_info = user_resp.json().get("result", {}) or {}
+    b24_id = user_info.get("ID")
+    raw_email = user_info.get("EMAIL") or user_info.get("WORK_EMAIL")
+
+    if b24_id:
+        request.session["b24_user_id"] = int(b24_id)
+
+    if raw_email:
+        email = raw_email.strip().lower()
+        request.session["b24_email"] = email
+        try:
+            B24Identity.objects.update_or_create(
+                b24_user_id=int(b24_id),
+                defaults={"email": email},
+            )
+        except Exception as e:
+            print("[Bitrix OAuth] B24Identity save error:", e)
+
+    next_url = request.session.pop("auth_next", "/approvals/app")
+    return redirect(next_url)
+
+
+def bitrix_auth_start(request):
+    """
+    Старт OAuth-авторизации через Bitrix24.
+    """
+    next_url = request.GET.get("next") or "/approvals/app"
+    request.session["auth_next"] = next_url
+
+    redirect_uri = request.build_absolute_uri(settings.BITRIX_OAUTH_REDIRECT_PATH)
+
+    params = {
+        "client_id": settings.BITRIX_CLIENT_ID,
+        "response_type": "code",
+        "redirect_uri": redirect_uri,
+    }
+    url = f"{settings.BITRIX_OAUTH_AUTHORIZE_URL}?{urlencode(params)}"
+    return redirect(url)
+
+
+def get_current_b24_id(request):
+    """
+    1) Если запрос идёт из приложения внутри портала —
+    берём ID из заголовка X-B24-User.
+    2) Если зашли извне и прошли OAuth — берём ID из сессии (b24_user_id).
+    """
+    header = request.META.get("HTTP_X_B24_USER")
+    print(
+        "X-B24-User header =",
+        header,
+        "session b24 =",
+        request.session.get("b24_user_id"),
+    )
+    if header:
+        try:
+            return int(header)
+        except ValueError:
+            pass
+
+    session_id = request.session.get("b24_user_id")
+    if session_id:
+        try:
+            return int(session_id)
+        except ValueError:
+            pass
+
+    return None
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AgreementViewSet(viewsets.ModelViewSet):
+    """
+    /api/agreements/        -> все согласования (без фильтрации, без пагинации)
+    /api/agreements/my/     -> только созданные текущим пользователем
+    /api/agreements/todo/   -> где текущий пользователь ждёт решения
+    """
+
+    queryset = (
+        Agreement.objects.all()
+        .order_by("-created_at")
+        .prefetch_related("participants", "documents", "decision_logs")
+    )
+    serializer_class = AgreementSerializer
+    pagination_class = None
+    permission_classes = [AllowAny]
+
+    def get_queryset(self):
+        """Базовый queryset: согласования, к которым текущий пользователь
+        имеет отношение:
+        - инициатор;
+        - внутренний участник (по b24_user_id);
+        - внешний участник (по email, привязанному к его Б24-профилю).
+        """
+        base_qs = super().get_queryset()
+        request = getattr(self, "request", None)
+        if request is None:
+            return base_qs.none()
+
+        user_id = get_current_b24_id(request)
+        if not user_id:
+            return base_qs.none()
+        email = getattr(self, "b24_email", None)
+        if email is None:
+            try:
+                identity = B24Identity.objects.get(b24_user_id=user_id)
+                email = identity.email
+            except B24Identity.DoesNotExist:
+                email = None
+
+        base_q = Q(author_b24_id=user_id) | Q(
+            participants__type=Participant.TYPE_INTERNAL,
+            participants__b24_user_id=user_id,
+        )
+
+        if email:
+            base_q |= Q(
+                participants__type=Participant.TYPE_EXTERNAL,
+                participants__email__iexact=email,
+            )
+
+        return base_qs.filter(base_q).distinct()
+
+    def perform_create(self, serializer):
+        agreement = serializer.save()
+
+        try:
+            req = getattr(self, "request", None)
+            if req is not None:
+                raw_crm = (req.data.get("crm_link") or "").strip()
+                if raw_crm and agreement.crm_link != raw_crm:
+                    agreement.crm_link = raw_crm
+                    agreement.save(update_fields=["crm_link"])
+        except Exception as e:
+            print("CRM UPDATE ERROR in perform_create:", e)
+
+        if agreement.flow_type == Agreement.FLOW_SEQUENTIAL:
+            first_waiting = self._get_next_waiting(agreement)
+            if first_waiting:
+                self._notify_participant(agreement, first_waiting)
+        else:
+            for p in agreement.participants.filter(status=Participant.STATUS_WAITING):
+                self._notify_participant(agreement, p)
+
+    def initial(self, request, *args, **kwargs):
+        self.b24_id = get_current_b24_id(request)
+        if not self.b24_id:
+            raise AuthenticationFailed("Откройте приложение «Мини-СЭД» из Битрикс24.")
+
+        self.b24_email = None
+        try:
+            identity = B24Identity.objects.get(b24_user_id=self.b24_id)
+            self.b24_email = identity.email
+        except B24Identity.DoesNotExist:
+            pass
+
+        return super().initial(request, *args, **kwargs)
+
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        ctx["current_b24_id"] = getattr(self, "b24_id", None)
+        return ctx
+
+    def _get_next_waiting(self, agreement: Agreement):
+        """
+        Первый по порядку (order_index) участник со статусом waiting.
+        Нужен, чтобы понять, кому отправлять уведомление дальше.
+        """
+        return (
+            agreement.participants.filter(status=Participant.STATUS_WAITING)
+            .order_by("order_index")
+            .first()
+        )
+
+    def _is_participant_turn(
+        self, agreement: Agreement, participant: Participant
+    ) -> bool:
+        """
+        Сейчас ли очередь этого участника?
+        Он может голосовать только если:
+        - сам в статусе waiting
+        - перед ним (с меньшим order_index) НЕТ участников в статусе waiting
+        """
+        if agreement.flow_type == Agreement.FLOW_PARALLEL:
+            return participant.status == Participant.STATUS_WAITING
+
+        if participant.status != Participant.STATUS_WAITING:
+            return False
+
+        return not agreement.participants.filter(   # type: ignore
+            order_index__lt=participant.order_index,
+            status=Participant.STATUS_WAITING,
+        ).exists()
+
+    def _notify_participant(self, agreement: Agreement,
+                            participant: Participant):
+        """
+        Уведомления:
+
+        - ВНЕШНИЕ участники (type=external):
+            отправляем письмо с ссылкой на страницу согласования.
+        - ВНУТРЕННИЕ (type=internal):
+            ничего не шлём — уведомление отправляет фронт через BX24.im.notify.
+        """
+        if participant.type == Participant.TYPE_EXTERNAL and participant.email:
+            try:
+                approve_url = self.request.build_absolute_uri(
+                    reverse("external_approve", args=[participant.external_token])
+                )
+            except Exception as e:
+                print("ERROR build approve_url in _notify_participant:", e)
+                return
+
+            subject = f"Согласование #{agreement.id}: {agreement.title}"
+            body_lines = [
+                "Вам отправлен документ на согласование.",
+                "",
+                f"Название: {agreement.title}",
+            ]
+            if agreement.description:
+                body_lines.append(f"Описание: {agreement.description}")
+            if agreement.amount is not None:
+                body_lines.append(f"Сумма: {agreement.amount}")
+            if agreement.crm_link:
+                body_lines.append(f"CRM: {agreement.crm_link}")
+
+            body_lines.extend(
+                [
+                    "",
+                    f"Перейти к согласованию: {approve_url}",
+                ]
+            )
+            body = "\n".join(body_lines)
+
+            try:
+                send_mail(
+                    subject,
+                    body,
+                    settings.DEFAULT_FROM_EMAIL,
+                    [participant.email],
+                    fail_silently=False,
+                )
+            except Exception as e:
+                print(
+                    "EMAIL ERROR in _notify_participant for participant",
+                    participant.id,
+                    e,
+                )
+        elif participant.type == Participant.TYPE_INTERNAL and participant.b24_user_id:
+            print(
+                f"Internal participant {participant.b24_user_id}: "
+                f"уведомление отправит фронт через BX24.im.notify"
+            )
+
+    @action(detail=False, methods=["get"])
+    def my(self, request):
+        qs = self.get_queryset().filter(author_b24_id=self.b24_id)
+        serializer = self.get_serializer(qs, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"])
+    def todo(self, request):
+        """
+        Согласования, где текущему пользователю нужно принять решение:
+        - как внутреннему участнику (по b24_user_id),
+        - как внешнему участнику (по email из B24Identity).
+        """
+        email = getattr(self, "b24_email", None)
+
+        cond_internal = Q(
+            participants__type=Participant.TYPE_INTERNAL,
+            participants__b24_user_id=self.b24_id,
+            participants__status=Participant.STATUS_WAITING,
+        )
+
+        cond_external = Q()
+        if email:
+            cond_external = Q(
+                participants__type=Participant.TYPE_EXTERNAL,
+                participants__email__iexact=email,
+                participants__status=Participant.STATUS_WAITING,
+            )
+
+        qs = (
+            self.get_queryset()
+            .filter(
+                Q(status=Agreement.STATUS_IN_PROGRESS) & (cond_internal | cond_external)
+            )
+            .distinct()
+        )
+        serializer = self.get_serializer(qs, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["post"])
+    def decide(self, request, pk=None):
+        """
+        Решение участника (через API внутри Б24).
+        В body: {participant_id, decision, comment}
+
+        Если flow_type = sequential — голосовать может только тот,
+        чей черёд (order_index) и у кого статус waiting.
+        Если flow_type = parallel — любой участник со статусом waiting.
+        """
+        b24_id = get_current_b24_id(request)
+        if not b24_id:
+            raise AuthenticationFailed("Откройте приложение «Мини-СЭД» из Битрикс24.")
+
+        agreement = self.get_object()
+
+        participant_id = request.data.get("participant_id")
+        decision = request.data.get("decision")
+        comment = (request.data.get("comment") or "").strip()
+
+        try:
+            participant = agreement.participants.get(id=participant_id)
+        except Participant.DoesNotExist:
+            return Response(
+                {"detail": "Участник не найден"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if agreement.status == Agreement.STATUS_CANCELED:
+            return Response(
+                {"detail": "Согласование отменено, изменить решение нельзя."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if agreement.status == Agreement.STATUS_COMPLETED:
+            return Response(
+                {"detail": "Согласование уже завершено."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if participant.type == Participant.TYPE_INTERNAL and str(
+            participant.b24_user_id
+        ) != str(b24_id):
+            return Response(
+                {"detail": "Недостаточно прав"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if participant.status != Participant.STATUS_WAITING:
+            return Response(
+                {"detail": "Вы уже приняли решение по этому документу."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if agreement.flow_type == AgreementModel.FLOW_SEQUENTIAL:
+
+            if not self._is_participant_turn(agreement, participant):
+                return Response(
+                    {
+                        "detail": "Сначала должны принять решение участники выше по списку."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        if decision == "reject" and not comment:
+            return Response(
+                {"detail": "Комментарий обязателен при отклонении документа."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        now = timezone.now()
+
+        if decision == "approve":
+            participant.status = Participant.STATUS_APPROVED
+        elif decision == "reject":
+            participant.status = Participant.STATUS_REJECTED
+        else:
+            return Response(
+                {"detail": "Некорректное решение"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        participant.comment = comment
+        participant.decided_at = now
+        participant.save(update_fields=["status", "comment", "decided_at"])
+
+        DecisionLog.objects.create(
+            agreement=agreement,
+            participant=participant,
+            status=participant.status,
+            comment=participant.comment,
+            decided_at=participant.decided_at,
+        )
+
+        if agreement.participants.filter(status=Participant.STATUS_REJECTED).exists():
+            agreement.status = Agreement.STATUS_REJECTED
+        elif agreement.participants.filter(status=Participant.STATUS_WAITING).exists():
+            agreement.status = Agreement.STATUS_IN_PROGRESS
+        else:
+            agreement.status = Agreement.STATUS_COMPLETED
+
+        agreement.save(update_fields=["status"])
+
+        if (
+            agreement.flow_type == AgreementModel.FLOW_SEQUENTIAL
+            and agreement.status == Agreement.STATUS_IN_PROGRESS
+        ):
+            next_p = self._get_next_waiting(agreement)
+            if next_p:
+                self._notify_participant(agreement, next_p)
+
+        return Response({"status": participant.status})
+
+    @action(detail=True, methods=["post"])
+    def restart(self, request, pk=None):
+        """
+        Перезапуск согласования:
+        - только те участники, у кого статус REJECTED,
+        переводятся обратно в WAITING
+        - у них сохраняем prev_status/prev_comment
+        - возвращаем список внутренних участников,
+        которых нужно уведомить во фронте
+        """
+        agreement = self.get_object()
+
+        if agreement.status not in [
+            Agreement.STATUS_REJECTED,
+            Agreement.STATUS_IN_PROGRESS,
+        ]:
+            return Response(
+                {
+                    "detail": "Перезапуск доступен только для отклонённых или незавершённых согласований."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        internal_to_notify: list[int] = []
+
+        with transaction.atomic():
+            rejected_participants = agreement.participants.filter(
+                status=Participant.STATUS_REJECTED
+            )
+
+            for p in rejected_participants:
+                p.prev_status = p.status
+                p.prev_comment = p.comment
+                p.status = Participant.STATUS_WAITING
+                p.comment = ""
+                p.decided_at = None
+                p.save()
+
+                if p.type == Participant.TYPE_INTERNAL and p.b24_user_id:
+                    internal_to_notify.append(p.b24_user_id)
+                else:
+                    self._notify_participant(agreement, p)
+
+            if agreement.participants.filter(
+                status=Participant.STATUS_REJECTED
+            ).exists():
+                agreement.status = Agreement.STATUS_REJECTED
+            elif agreement.participants.filter(
+                status=Participant.STATUS_WAITING
+            ).exists():
+                agreement.status = Agreement.STATUS_IN_PROGRESS
+            else:
+                agreement.status = Agreement.STATUS_COMPLETED
+            agreement.save()
+
+        data = self.get_serializer(agreement).data
+        data["internal_to_notify"] = internal_to_notify
+        return Response(data)
+
+    @action(detail=True, methods=["post"])
+    def cancel(self, request, pk=None):
+        """
+        Отменить согласование.
+        Только автор, нельзя отменить уже завершённое/отменённое.
+        """
+        b24_id = get_current_b24_id(request)
+        if not b24_id:
+            raise AuthenticationFailed("Откройте приложение «Мини-СЭД» из Битрикс24.")
+        agreement = self.get_object()
+
+        if agreement.author_b24_id != b24_id:
+            return Response(
+                {"detail": "Недостаточно прав для отмены согласования."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if agreement.status in (
+            Agreement.STATUS_COMPLETED,
+            Agreement.STATUS_CANCELED,
+        ):
+            return Response(
+                {
+                    "detail": "Нельзя отменить уже завершённое или отменённое согласование."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        agreement.status = Agreement.STATUS_CANCELED
+        agreement.save()
+
+        serializer = self.get_serializer(agreement)
+        return Response(serializer.data)
+
+    def destroy(self, request, *args, **kwargs):
+        """
+        Удалить согласование.
+        Только автор. При удалении удаляются
+        документы и участники (через CASCADE).
+        """
+        b24_id = get_current_b24_id(request)
+        if not b24_id:
+            raise AuthenticationFailed("Откройте приложение «Мини-СЭД» из Битрикс24.")
+        agreement = self.get_object()
+
+        if agreement.author_b24_id != b24_id:
+            return Response(
+                {"detail": "Недостаточно прав для удаления согласования."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        return super().destroy(request, *args, **kwargs)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def update_document(self, request, pk=None):
+        b24_id = get_current_b24_id(request)
+        if not b24_id:
+            raise AuthenticationFailed("Откройте приложение «Мини-СЭД» из Битрикс24.")
+        agreement = self.get_object()
+
+        if agreement.author_b24_id != b24_id:
+            return Response(
+                {"detail": "Недостаточно прав для обновления документа."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        files = request.FILES.getlist("files")
+        single = request.FILES.get("file")
+
+        if single and not files:
+            files = [single]
+
+        if not files:
+            return Response(
+                {"detail": "Файлы не переданы."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        AgreementDocument.objects.filter(
+            agreement=agreement,
+            type=AgreementDocument.TYPE_FILE,
+        ).delete()
+
+        for f in files:
+            AgreementDocument.objects.create(
+                agreement=agreement,
+                type=AgreementDocument.TYPE_FILE,
+                file=f,
+            )
+
+        serializer = self.get_serializer(agreement)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"])
+    def participated(self, request):
+        """
+        Согласования, где пользователь участвовал:
+        - как внутренний участник (по b24_user_id)
+        - как внешний участник (по email, привязанному к его Б24-профилю)
+        """
+        b24_id = get_current_b24_id(request)
+        if not b24_id:
+            raise AuthenticationFailed("Откройте приложение «Мини-СЭД» из Битрикс24.")
+
+        email = None
+        try:
+            identity = B24Identity.objects.get(b24_user_id=b24_id)
+            email = identity.email
+        except B24Identity.DoesNotExist:
+            pass
+
+        base_q = Q(
+            participants__type=Participant.TYPE_INTERNAL,
+            participants__b24_user_id=b24_id,
+        )
+        if email:
+            base_q |= Q(
+                participants__type=Participant.TYPE_EXTERNAL,
+                participants__email__iexact=email,
+            )
+
+        qs = self.get_queryset().filter(base_q).distinct()
+        serializer = self.get_serializer(qs, many=True)
+        return Response(serializer.data)
+
+
+@csrf_exempt
+@api_view(["POST"])
+@parser_classes([MultiPartParser, FormParser])
+def simple_create_agreement(request):
+    """
+    Упрощённое создание согласования.
+    Ожидает поля:
+      - title
+      - description (опц.)
+      - amount (опц.)
+      - deadline (опц., YYYY-MM-DD)
+      - crm_link (опц.)
+      - files (один или несколько файлов договора/приложений)
+      - internal_users: строка "12,34,56" (ID пользователей Б24)
+      - external_emails: строка "mail1@x.ru,mail2@y.ru"
+    """
+
+    b24_id = get_current_b24_id(request)
+    if not b24_id:
+        return Response(
+            {"detail": "Требуется авторизация Битрикс24."},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    title = request.data.get("title", "").strip()
+    if not title:
+        return Response({"detail": "Не заполнено название"}, status=400)
+
+    description = request.data.get("description", "").strip()
+    amount = request.data.get("amount")
+    deadline = request.data.get("deadline")
+    crm_link = request.data.get("crm_link", "").strip()
+
+    try:
+        amount_val = (
+            float(amount)
+            if amount
+            not in (
+                None,
+                "",
+            )
+            else None
+        )
+    except ValueError:
+        return Response({"detail": "Некорректная сумма"}, status=400)
+
+    deadline_val = None
+    if deadline:
+        try:
+            deadline_val = datetime.strptime(deadline, "%Y-%m-%d").date()
+        except ValueError:
+            return Response(
+                {"detail": "Некорректный формат дедлайна (нужно YYYY-MM-DD)"},
+                status=400,
+            )
+
+    agreement = Agreement.objects.create(
+        title=title,
+        description=description,
+        amount=amount_val,
+        deadline=deadline_val,
+        crm_link=crm_link,
+        author_b24_id=b24_id,
+        status=Agreement.STATUS_IN_PROGRESS,
+    )
+
+    files = request.FILES.getlist("files")
+    single = request.FILES.get("file")
+
+    if single and not files:
+        files = [single]
+
+    for f in files:
+        AgreementDocument.objects.create(
+            agreement=agreement,
+            type=AgreementDocument.TYPE_FILE,
+            file=f,
+        )
+    internal = request.data.get("internal_users", "")
+    for idx, user_id_str in enumerate(
+        filter(None, [x.strip() for x in internal.split(",")])
+    ):
+        try:
+            uid = int(user_id_str)
+        except ValueError:
+            continue
+        Participant.objects.create(
+            agreement=agreement,
+            type=Participant.TYPE_INTERNAL,
+            b24_user_id=uid,
+            order_index=idx,
+        )
+    external_raw = request.data.get("external_emails", "") or ""
+    print("DEBUG external_emails raw:", repr(external_raw))
+
+    external_list = [x.strip() for x in external_raw.split(",") if x.strip()]
+    print("DEBUG external_emails parsed:", external_list)
+
+    for idx, email in enumerate(external_list, start=100):
+        participant = Participant.objects.create(
+            agreement=agreement,
+            type=Participant.TYPE_EXTERNAL,
+            email=email,
+            order_index=idx,
+        )
+
+        try:
+            approve_url = request.build_absolute_uri(
+                reverse("external_approve", args=[participant.external_token])
+            )
+        except Exception as e:
+            print("ERROR build approve_url:", e)
+            approve_url = ""
+
+        subject = f"Согласование документа: {agreement.title}"
+
+        message_lines = [
+            "Вам направлен документ на согласование.",
+            "",
+            f"Название: {agreement.title}",
+        ]
+        if agreement.description:
+            message_lines.append(f"Описание: {agreement.description}")
+        if agreement.amount is not None:
+            message_lines.append(f"Сумма: {agreement.amount}")
+        if agreement.deadline:
+            message_lines.append(f"Дедлайн: {agreement.deadline}")
+        message_lines.append("")
+        if approve_url:
+            message_lines.append(
+                "Перейдите по ссылке, чтобы согласовать или отклонить документ:"
+            )
+            message_lines.append(approve_url)
+
+        message = "\n".join(message_lines)
+
+        try:
+            print(
+                f"DEBUG send_mail to {email}: "
+                f"from={getattr(settings, 'DEFAULT_FROM_EMAIL', None)}"
+            )
+            send_mail(
+                subject,
+                message,
+                getattr(settings, "DEFAULT_FROM_EMAIL", None),
+                [email],
+                fail_silently=False,
+            )
+        except Exception as e:
+            print(f"ERROR send_mail to {email}: {e}")
+
+    serializer = AgreementSerializer(agreement)
+    return Response(serializer.data, status=201)
+
+
+@api_view(["POST"])
+def register_b24_identity(request):
+    """
+    Регистрирует связку b24_user_id ↔ email.
+    Вызывается из фронта после BX24.user.current().
+    """
+    user_id = get_current_b24_id(request)
+    if not user_id:
+        return Response(
+            {"detail": "Требуется авторизация Битрикс24."},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    email = (request.data.get("email") or "").strip().lower()
+    if not email:
+        return Response(
+            {"detail": "Не передан email"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    identity, created = B24Identity.objects.update_or_create(
+        b24_user_id=user_id,
+        defaults={"email": email},
+    )
+    return Response(
+        {"b24_user_id": identity.b24_user_id, "email": identity.email},
+        status=status.HTTP_200_OK,
+    )
+
+
+@csrf_exempt
+def external_approve_view(request, token):
+    try:
+        participant = Participant.objects.select_related("agreement").get(
+            external_token=token,
+            type=Participant.TYPE_EXTERNAL,
+        )
+    except Participant.DoesNotExist:
+        return render(
+            request,
+            "approvals/external_not_found.html",
+            status=404,
+        )
+
+    agreement = participant.agreement
+    documents = []
+    for d in agreement.documents.all():  # type: ignore
+        url = None
+        name = None
+
+        if d.file:
+            url = d.file.url
+            name = os.path.basename(d.file.name)
+        elif d.url:
+            url = d.url
+            name = d.url
+
+        if not url:
+            continue
+
+        documents.append(
+            {
+                "url": url,
+                "name": name or "Документ",
+            }
+        )
+    file_url = documents[0]["url"] if documents else None
+
+    if request.method == "POST":
+        decision = request.POST.get("decision")
+        comment = request.POST.get("comment", "").strip()
+        if participant.status != Participant.STATUS_WAITING:
+            return render(
+                request,
+                "approvals/external_result.html",
+                {"agreement": agreement, "participant": participant},
+            )
+        if decision == "reject" and not comment:
+            return render(
+                request,
+                "approvals/external_approve.html",
+                {
+                    "agreement": agreement,
+                    "participant": participant,
+                    "documents": documents,
+                    "file_url": file_url,
+                    "deadline": agreement.deadline,
+                    "already_decided": False,
+                    "error": "При отклонении документа необходимо указать комментарий.",
+                    "force_comment": True,
+                    "comment_value": "",
+                },
+            )
+
+        if decision == "approve":
+            participant.status = Participant.STATUS_APPROVED
+        elif decision == "reject":
+            participant.status = Participant.STATUS_REJECTED
+        else:
+            return render(
+                request,
+                "approvals/external_approve.html",
+                {
+                    "agreement": agreement,
+                    "participant": participant,
+                    "documents": documents,
+                    "file_url": file_url,
+                    "deadline": agreement.deadline,
+                    "already_decided": False,
+                    "error": None,
+                    "force_comment": False,
+                    "comment_value": comment,
+                },
+            )
+
+        now = timezone.now()
+        participant.comment = comment
+        participant.decided_at = now
+        participant.save(update_fields=["status", "comment", "decided_at"])
+
+        # 🔹 пишем в историю решений
+        DecisionLog.objects.create(
+            agreement=agreement,
+            participant=participant,
+            status=participant.status,
+            comment=participant.comment,
+            decided_at=participant.decided_at,
+        )
+
+        # пересчитываем статус соглашения
+        if agreement.participants.filter(status=Participant.STATUS_REJECTED).exists():
+            agreement.status = Agreement.STATUS_REJECTED
+        elif not agreement.participants.filter(
+            status=Participant.STATUS_WAITING
+        ).exists():
+            agreement.status = Agreement.STATUS_COMPLETED
+        else:
+            agreement.status = Agreement.STATUS_IN_PROGRESS
+        agreement.save(update_fields=["status"])
+
+        return render(
+            request,
+            "approvals/external_result.html",
+            {"agreement": agreement, "participant": participant},
+        )
+
+    already = participant.status != Participant.STATUS_WAITING
+    return render(
+        request,
+        "approvals/external_approve.html",
+        {
+            "agreement": agreement,
+            "participant": participant,
+            "documents": documents,
+            "file_url": file_url,
+            "deadline": agreement.deadline,
+            "already_decided": already,
+            "error": None,
+            "force_comment": False,
+            "comment_value": "",
+        },
+    )
+
+
+class ApprovalTemplateViewSet(viewsets.ModelViewSet):
+    serializer_class = ApprovalTemplateSerializer
+    permission_classes = [AllowAny]
+
+    def get_queryset(self):
+        user_id = get_current_b24_id(self.request)
+        qs = ApprovalTemplate.objects.all()
+
+        if not user_id:
+            return qs.none()
+
+        return qs.filter(
+            Q(scope=ApprovalTemplate.SCOPE_PUBLIC)
+            | Q(scope=ApprovalTemplate.SCOPE_PRIVATE, author_b24_id=user_id)
+            | Q(
+                scope=ApprovalTemplate.SCOPE_GROUP,
+                accesses__b24_user_id=user_id,
+            )
+        ).distinct()
+
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        ctx["current_b24_id"] = get_current_b24_id(self.request)
+        return ctx
