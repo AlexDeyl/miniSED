@@ -3,9 +3,9 @@
 # Mini-СЭД — скрипт деплоя на продакшн-сервер
 #
 # Использование (вручную с сервера):
-#   export PROJECT_PATH=/root/minised/miniSED
+#   export PROJECT_PATH=~/minised/miniSED
 #   export BRANCH=main
-#   export DJANGO_SERVICE_NAME=minised
+#   export DJANGO_SERVICE_NAME=microSED
 #   export NGINX_SERVICE_NAME=nginx
 #   bash scripts/deploy.sh
 #
@@ -85,13 +85,14 @@ fi
 
 # --- 4. Получаем и применяем обновления из git ---
 echo ""
-echo "[deploy] 2/8  git fetch origin $BRANCH ..."
-git fetch origin "$BRANCH"
+echo "[deploy] 2/8  git fetch origin ..."
+git fetch origin
 
-echo "[deploy] 3/8  git reset --hard origin/$BRANCH ..."
-# reset --hard затрагивает только отслеживаемые файлы.
-# .env, db.sqlite3, media/ — не отслеживаются (.gitignore) и не пострадают.
-git reset --hard "origin/$BRANCH"
+echo "[deploy]      Состояние ветки до pull:"
+git status -sb
+
+echo "[deploy] 3/8  git pull origin $BRANCH ..."
+git pull origin "$BRANCH"
 
 echo "[deploy]      Текущий коммит: $(git log -1 --oneline)"
 
