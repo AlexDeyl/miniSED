@@ -331,3 +331,21 @@ class ApprovalTemplateAccess(models.Model):
 
     def __str__(self):
         return f"{self.template_id} -> USER#{self.b24_user_id}"  # type: ignore
+
+
+class B24UserEmail(models.Model):
+    b24_user_id = models.IntegerField("ID пользователя Б24")
+    email = models.EmailField("Email")
+
+    class Meta:
+        unique_together = ("b24_user_id", "email")
+        verbose_name = "Email пользователя Б24"
+        verbose_name_plural = "Email-адреса пользователей Б24"
+        ordering = ["b24_user_id", "email"]
+
+    def save(self, *args, **kwargs):
+        self.email = self.email.strip().lower()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"USER#{self.b24_user_id} → {self.email}"

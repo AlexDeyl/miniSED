@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Agreement, AgreementDocument, Participant
+from .models import Agreement, AgreementDocument, Participant, B24UserEmail
 
 
 class AgreementDocumentInline(admin.TabularInline):
@@ -18,6 +18,13 @@ class AgreementAdmin(admin.ModelAdmin):
     list_filter = ("status",)
     search_fields = ("title", "description")
     inlines = [AgreementDocumentInline, ParticipantInline]
+
+
+@admin.register(B24UserEmail)
+class B24UserEmailAdmin(admin.ModelAdmin):
+    list_display = ("b24_user_id", "email")
+    search_fields = ("b24_user_id", "email")
+    ordering = ("b24_user_id", "email")
 
 
 admin.site.register(Participant)

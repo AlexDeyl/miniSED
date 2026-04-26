@@ -17,6 +17,7 @@ from .models import (
     DecisionLog,
     ApprovalTemplate,
     B24Identity,
+    B24UserEmail,
 )
 from .models import (
     Agreement as AgreementModel,
@@ -217,23 +218,22 @@ class AgreementViewSet(viewsets.ModelViewSet):
         user_id = get_current_b24_id(request)
         if not user_id:
             return base_qs.none()
-        email = getattr(self, "b24_email", None)
-        if email is None:
-            try:
-                identity = B24Identity.objects.get(b24_user_id=user_id)
-                email = identity.email
-            except B24Identity.DoesNotExist:
-                email = None
+        emails = getattr(self, "b24_emails", None)
+        if emails is None:
+            emails = list(
+                B24UserEmail.objects.filter(b24_user_id=user_id)
+                .values_list("email", flat=True)
+            )
 
         base_q = Q(author_b24_id=user_id) | Q(
             participants__type=Participant.TYPE_INTERNAL,
             participants__b24_user_id=user_id,
         )
 
-        if email:
+        if emails:
             base_q |= Q(
                 participants__type=Participant.TYPE_EXTERNAL,
-                participants__email__iexact=email,
+                participants__email__in=emails,
             )
 
         return base_qs.filter(base_q).distinct()
@@ -264,12 +264,10 @@ class AgreementViewSet(viewsets.ModelViewSet):
         if not self.b24_id:
             raise AuthenticationFailed("Откройте приложение «Мини-СЭД» из Битрикс24.")
 
-        self.b24_email = None
-        try:
-            identity = B24Identity.objects.get(b24_user_id=self.b24_id)
-            self.b24_email = identity.email
-        except B24Identity.DoesNotExist:
-            pass
+        self.b24_emails = list(
+            B24UserEmail.objects.filter(b24_user_id=self.b24_id)
+            .values_list("email", flat=True)
+        )
 
         return super().initial(request, *args, **kwargs)
 
@@ -382,7 +380,7 @@ class AgreementViewSet(viewsets.ModelViewSet):
         - как внутреннему участнику (по b24_user_id),
         - как внешнему участнику (по email из B24Identity).
         """
-        email = getattr(self, "b24_email", None)
+        emails = getattr(self, "b24_emails", [])
 
         cond_internal = Q(
             participants__type=Participant.TYPE_INTERNAL,
@@ -391,10 +389,10 @@ class AgreementViewSet(viewsets.ModelViewSet):
         )
 
         cond_external = Q()
-        if email:
+        if emails:
             cond_external = Q(
                 participants__type=Participant.TYPE_EXTERNAL,
-                participants__email__iexact=email,
+                participants__email__in=emails,
                 participants__status=Participant.STATUS_WAITING,
             )
 
@@ -687,21 +685,19 @@ class AgreementViewSet(viewsets.ModelViewSet):
         if not b24_id:
             raise AuthenticationFailed("Откройте приложение «Мини-СЭД» из Битрикс24.")
 
-        email = None
-        try:
-            identity = B24Identity.objects.get(b24_user_id=b24_id)
-            email = identity.email
-        except B24Identity.DoesNotExist:
-            pass
+        emails = list(
+            B24UserEmail.objects.filter(b24_user_id=b24_id)
+            .values_list("email", flat=True)
+        )
 
         base_q = Q(
             participants__type=Participant.TYPE_INTERNAL,
             participants__b24_user_id=b24_id,
         )
-        if email:
+        if emails:
             base_q |= Q(
                 participants__type=Participant.TYPE_EXTERNAL,
-                participants__email__iexact=email,
+                participants__email__in=emails,
             )
 
         qs = self.get_queryset().filter(base_q).distinct()
