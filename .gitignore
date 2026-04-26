@@ -1,0 +1,38 @@
+# Django
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+
+# Виртуальное окружение
+venv/
+.venv/
+env/
+
+# База данных SQLite (хранится на сервере, не в репозитории)
+db.sqlite3
+db.sqlite3-journal
+
+# Переменные окружения (секреты)
+.env
+.env.*
+!.env.example
+
+# Загруженные пользователями файлы
+media/
+
+# Собранная статика (генерируется collectstatic)
+staticfiles/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Логи
+*.log

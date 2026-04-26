@@ -1,0 +1,53 @@
+name: Deploy to Production
+
+# Запускаем только при push в main (не при pull_request)
+on:
+  push:
+    branches:
+      - main
+
+# Защита от одновременных деплоев:
+# cancel-in-progress: false — новый деплой ждёт завершения текущего,
+# а не отменяет его на полпути.
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          port: ${{ secrets.SERVER_PORT }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          # script_stop: true — весь SSH-скрипт упадёт при первой ошибке
+          script_stop: true
+          script: |
+            # --- Bootstrap: получаем свежий код включая сам deploy.sh ---
+            cd ${{ secrets.PROJECT_PATH }}
+
+            if [ ! -d ".git" ]; then
+              echo "ОШИБКА: PROJECT_PATH не является git-репозиторием"
+              exit 1
+            fi
+
+            git fetch origin main
+            git reset --hard origin/main
+
+            # --- Запускаем скрипт деплоя ---
+            export PROJECT_PATH="${{ secrets.PROJECT_PATH }}"
+            export BRANCH="main"
+            export DJANGO_SERVICE_NAME="${{ secrets.DJANGO_SERVICE_NAME }}"
+            export NGINX_SERVICE_NAME="${{ secrets.NGINX_SERVICE_NAME }}"
+            export HEALTH_CHECK_URL="${{ secrets.HEALTH_CHECK_URL }}"
+
+            bash scripts/deploy.sh
