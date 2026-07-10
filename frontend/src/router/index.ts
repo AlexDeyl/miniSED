@@ -11,6 +11,12 @@ const router = createRouter({
       meta: { title: 'Мои задачи' },
     },
     {
+      path: '/deals',
+      name: 'deals',
+      component: () => import('@/views/DealSearchView.vue'),
+      meta: { title: 'Поиск сделок' },
+    },
+    {
       path: '/agreements/:id',
       name: 'agreement',
       component: () => import('@/views/AgreementDetailView.vue'),

@@ -3,3 +3,8 @@ dist/
 *.local
 .vite/
 npm-debug.log*
+
+# артефакты сборки vue-tsc -b
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts

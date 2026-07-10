@@ -112,6 +112,17 @@ def bitrix_auth_callback(request):
     if not access_token or not domain:
         return redirect("/approvals/app")
 
+    # 🔹 Сохраняем токены портала, чтобы сервер мог сам вызывать REST Битрикса
+    # (в т.ч. при прямом открытии MiniSED с домена). Ранее токен терялся.
+    try:
+        from bitrix.views import _upsert_portal
+        from bitrix.client import store_token
+
+        portal = _upsert_portal(domain, token_data.get("member_id"))
+        store_token(portal, token_data)
+    except Exception as e:
+        print("[Bitrix OAuth] token store error:", e)
+
     user_resp = requests.get(
         f"https://{domain}/rest/user.current",
         params={"auth": access_token},

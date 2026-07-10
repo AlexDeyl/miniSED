@@ -41,6 +41,7 @@ urlpatterns = [
     path("auth/bitrix/start/", bitrix_auth_start, name="bitrix_auth_start"),
     path("auth/bitrix/callback/", bitrix_auth_callback,
          name="bitrix_auth_callback"),
+    path("api/bitrix/", include("bitrix.urls")),
     path("api/", include(router.urls)),
 ]
 
