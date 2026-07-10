@@ -1,3 +1,320 @@
-from django.test import TestCase
+"""
+Тесты текущего рабочего сценария согласования скидок/документов.
 
-# Create your tests here.
+Назначение: зафиксировать существующее поведение ДО рефактора Этапа 4
+(универсальное ядро согласований), чтобы отследить регрессии.
+
+Личность пользователя определяется по заголовку X-B24-User (HTTP_X_B24_USER).
+"""
+
+from django.test import TestCase, Client
+from django.urls import reverse
+from rest_framework.test import APIClient
+
+from .models import (
+    Agreement,
+    Participant,
+    DecisionLog,
+    B24UserEmail,
+)
+
+AUTHOR = 100
+APPROVER_A = 200
+APPROVER_B = 300
+OUTSIDER = 999
+
+
+def api(uid=None):
+    """APIClient с проставленным (или нет) заголовком X-B24-User."""
+    client = APIClient()
+    if uid is not None:
+        client.credentials(HTTP_X_B24_USER=str(uid))
+    return client
+
+
+class Factory:
+    """Хелперы создания согласований напрямую через ORM."""
+
+    @staticmethod
+    def agreement(flow=Agreement.FLOW_PARALLEL, author=AUTHOR, **kwargs):
+        return Agreement.objects.create(
+            title=kwargs.pop("title", "Скидка 10%"),
+            author_b24_id=author,
+            flow_type=flow,
+            status=Agreement.STATUS_IN_PROGRESS,
+            **kwargs,
+        )
+
+    @staticmethod
+    def internal(agreement, uid, order=0):
+        return Participant.objects.create(
+            agreement=agreement,
+            type=Participant.TYPE_INTERNAL,
+            b24_user_id=uid,
+            order_index=order,
+        )
+
+    @staticmethod
+    def external(agreement, email, order=100):
+        return Participant.objects.create(
+            agreement=agreement,
+            type=Participant.TYPE_EXTERNAL,
+            email=email,
+            order_index=order,
+        )
+
+
+class AuthTests(TestCase):
+    def test_list_requires_b24_header(self):
+        Factory.agreement()
+        resp = api().get("/api/agreements/")
+        # initial() кидает AuthenticationFailed -> 401/403
+        self.assertIn(resp.status_code, (401, 403))
+
+    def test_list_scoped_to_related_user(self):
+        a = Factory.agreement(author=AUTHOR)
+        Factory.internal(a, APPROVER_A)
+        # автор видит своё согласование
+        self.assertEqual(len(api(AUTHOR).get("/api/agreements/").json()), 1)
+        # участник видит согласование
+        self.assertEqual(len(api(APPROVER_A).get("/api/agreements/").json()), 1)
+        # посторонний не видит ничего
+        self.assertEqual(len(api(OUTSIDER).get("/api/agreements/").json()), 0)
+
+
+class ParallelFlowTests(TestCase):
+    def _decide(self, client, agreement, participant, decision, comment=""):
+        return client.post(
+            f"/api/agreements/{agreement.id}/decide/",
+            {"participant_id": participant.id, "decision": decision, "comment": comment},
+            format="json",
+        )
+
+    def test_all_approve_completes(self):
+        a = Factory.agreement(flow=Agreement.FLOW_PARALLEL)
+        p1 = Factory.internal(a, APPROVER_A)
+        p2 = Factory.internal(a, APPROVER_B)
+
+        r1 = self._decide(api(APPROVER_A), a, p1, "approve")
+        self.assertEqual(r1.status_code, 200)
+        a.refresh_from_db()
+        # ещё один ждёт — статус в работе
+        self.assertEqual(a.status, Agreement.STATUS_IN_PROGRESS)
+
+        self._decide(api(APPROVER_B), a, p2, "approve")
+        a.refresh_from_db()
+        self.assertEqual(a.status, Agreement.STATUS_COMPLETED)
+        self.assertEqual(DecisionLog.objects.filter(agreement=a).count(), 2)
+
+    def test_reject_sets_rejected(self):
+        a = Factory.agreement()
+        p1 = Factory.internal(a, APPROVER_A)
+
+        r = self._decide(api(APPROVER_A), a, p1, "reject", comment="не согласен")
+        self.assertEqual(r.status_code, 200)
+        a.refresh_from_db()
+        self.assertEqual(a.status, Agreement.STATUS_REJECTED)
+
+    def test_reject_requires_comment(self):
+        a = Factory.agreement()
+        p1 = Factory.internal(a, APPROVER_A)
+
+        r = self._decide(api(APPROVER_A), a, p1, "reject", comment="")
+        self.assertEqual(r.status_code, 400)
+        a.refresh_from_db()
+        self.assertEqual(a.status, Agreement.STATUS_IN_PROGRESS)
+
+    def test_cannot_decide_for_other_participant(self):
+        a = Factory.agreement()
+        p1 = Factory.internal(a, APPROVER_A)
+        Factory.internal(a, APPROVER_B)  # чтобы APPROVER_B видел согласование
+        # APPROVER_B пытается проголосовать за участника p1 (APPROVER_A)
+        r = self._decide(api(APPROVER_B), a, p1, "approve")
+        self.assertEqual(r.status_code, 403)
+
+    def test_cannot_decide_twice(self):
+        a = Factory.agreement()
+        p1 = Factory.internal(a, APPROVER_A)
+        p2 = Factory.internal(a, APPROVER_B)
+        self._decide(api(APPROVER_A), a, p1, "approve")
+        r = self._decide(api(APPROVER_A), a, p1, "approve")
+        self.assertEqual(r.status_code, 400)
+
+
+class SequentialFlowTests(TestCase):
+    def _decide(self, uid, agreement, participant, decision, comment=""):
+        return api(uid).post(
+            f"/api/agreements/{agreement.id}/decide/",
+            {"participant_id": participant.id, "decision": decision, "comment": comment},
+            format="json",
+        )
+
+    def test_out_of_turn_blocked(self):
+        a = Factory.agreement(flow=Agreement.FLOW_SEQUENTIAL)
+        p1 = Factory.internal(a, APPROVER_A, order=0)
+        p2 = Factory.internal(a, APPROVER_B, order=1)
+
+        # второй по очереди не может голосовать раньше первого
+        r = self._decide(APPROVER_B, a, p2, "approve")
+        self.assertEqual(r.status_code, 400)
+
+    def test_in_order_completes(self):
+        a = Factory.agreement(flow=Agreement.FLOW_SEQUENTIAL)
+        p1 = Factory.internal(a, APPROVER_A, order=0)
+        p2 = Factory.internal(a, APPROVER_B, order=1)
+
+        self.assertEqual(self._decide(APPROVER_A, a, p1, "approve").status_code, 200)
+        self.assertEqual(self._decide(APPROVER_B, a, p2, "approve").status_code, 200)
+        a.refresh_from_db()
+        self.assertEqual(a.status, Agreement.STATUS_COMPLETED)
+
+
+class PermissionTests(TestCase):
+    def test_cancel_only_by_author(self):
+        a = Factory.agreement(author=AUTHOR)
+        Factory.internal(a, APPROVER_A)
+
+        # участник (не автор) не может отменить
+        r = api(APPROVER_A).post(f"/api/agreements/{a.id}/cancel/")
+        self.assertEqual(r.status_code, 403)
+
+        # автор может
+        r = api(AUTHOR).post(f"/api/agreements/{a.id}/cancel/")
+        self.assertEqual(r.status_code, 200)
+        a.refresh_from_db()
+        self.assertEqual(a.status, Agreement.STATUS_CANCELED)
+
+    def test_delete_only_by_author(self):
+        a = Factory.agreement(author=AUTHOR)
+        Factory.internal(a, APPROVER_A)
+
+        r = api(APPROVER_A).delete(f"/api/agreements/{a.id}/")
+        self.assertEqual(r.status_code, 403)
+        self.assertTrue(Agreement.objects.filter(id=a.id).exists())
+
+        r = api(AUTHOR).delete(f"/api/agreements/{a.id}/")
+        self.assertIn(r.status_code, (200, 204))
+        self.assertFalse(Agreement.objects.filter(id=a.id).exists())
+
+
+class RegistryTests(TestCase):
+    def test_my_lists_authored(self):
+        mine = Factory.agreement(author=AUTHOR, title="моё")
+        other = Factory.agreement(author=APPROVER_A, title="чужое")
+        Factory.internal(other, AUTHOR)  # автор тут лишь участник
+
+        data = api(AUTHOR).get("/api/agreements/my/").json()
+        titles = {x["title"] for x in data}
+        self.assertEqual(titles, {"моё"})
+
+    def test_todo_lists_waiting_for_me(self):
+        a = Factory.agreement(author=APPROVER_B)
+        Factory.internal(a, AUTHOR)  # AUTHOR должен решить
+
+        data = api(AUTHOR).get("/api/agreements/todo/").json()
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["id"], a.id)
+
+    def test_external_participant_matched_by_registered_email(self):
+        """Внешний участник виден пользователю, если его email привязан
+        к b24_user_id через B24UserEmail."""
+        a = Factory.agreement(author=APPROVER_B)
+        Factory.external(a, "manager@nordhotels.ru")
+        B24UserEmail.objects.create(
+            b24_user_id=AUTHOR, email="manager@nordhotels.ru"
+        )
+
+        data = api(AUTHOR).get("/api/agreements/todo/").json()
+        self.assertEqual(len(data), 1)
+
+
+class ExternalApproveTests(TestCase):
+    def test_external_token_approve(self):
+        a = Factory.agreement(author=AUTHOR)
+        p = Factory.external(a, "vendor@x.ru")
+        self.assertTrue(p.external_token)
+
+        url = reverse("external_approve", args=[p.external_token])
+        # GET открывает страницу согласования
+        self.assertEqual(Client().get(url).status_code, 200)
+
+        # POST c approve фиксирует решение
+        resp = Client().post(url, {"decision": "approve", "comment": ""})
+        self.assertEqual(resp.status_code, 200)
+        p.refresh_from_db()
+        self.assertEqual(p.status, Participant.STATUS_APPROVED)
+        a.refresh_from_db()
+        self.assertEqual(a.status, Agreement.STATUS_COMPLETED)
+
+    def test_external_reject_requires_comment(self):
+        a = Factory.agreement(author=AUTHOR)
+        p = Factory.external(a, "vendor@x.ru")
+        url = reverse("external_approve", args=[p.external_token])
+
+        Client().post(url, {"decision": "reject", "comment": ""})
+        p.refresh_from_db()
+        # без комментария решение не принято
+        self.assertEqual(p.status, Participant.STATUS_WAITING)
+
+    def test_unknown_token_404(self):
+        self.assertEqual(
+            Client().get(reverse("external_approve", args=["nope"])).status_code, 404
+        )
+
+
+class RestartTests(TestCase):
+    def test_restart_returns_rejected_to_waiting(self):
+        a = Factory.agreement(author=AUTHOR)
+        p1 = Factory.internal(a, APPROVER_A)
+        # участник отклонил
+        api(APPROVER_A).post(
+            f"/api/agreements/{a.id}/decide/",
+            {"participant_id": p1.id, "decision": "reject", "comment": "правьте"},
+            format="json",
+        )
+        a.refresh_from_db()
+        self.assertEqual(a.status, Agreement.STATUS_REJECTED)
+
+        # перезапуск
+        r = api(AUTHOR).post(f"/api/agreements/{a.id}/restart/")
+        self.assertEqual(r.status_code, 200)
+        p1.refresh_from_db()
+        self.assertEqual(p1.status, Participant.STATUS_WAITING)
+        self.assertEqual(p1.prev_status, Participant.STATUS_REJECTED)
+        self.assertEqual(p1.prev_comment, "правьте")
+
+
+class SimpleCreateEndpointTests(TestCase):
+    def test_create_with_participants(self):
+        resp = api(AUTHOR).post(
+            "/api/agreements/create_simple/",
+            {
+                "title": "Согласование договора",
+                "internal_users": f"{APPROVER_A},{APPROVER_B}",
+                "external_emails": "vendor@x.ru",
+            },
+            format="multipart",
+        )
+        self.assertEqual(resp.status_code, 201)
+        a = Agreement.objects.get(title="Согласование договора")
+        self.assertEqual(a.author_b24_id, AUTHOR)
+        self.assertEqual(
+            a.participants.filter(type=Participant.TYPE_INTERNAL).count(), 2
+        )
+        self.assertEqual(
+            a.participants.filter(type=Participant.TYPE_EXTERNAL).count(), 1
+        )
+
+    def test_create_requires_auth(self):
+        resp = api().post(
+            "/api/agreements/create_simple/",
+            {"title": "x"},
+            format="multipart",
+        )
+        self.assertEqual(resp.status_code, 401)
+
+    def test_create_requires_title(self):
+        resp = api(AUTHOR).post(
+            "/api/agreements/create_simple/", {"title": ""}, format="multipart"
+        )
+        self.assertEqual(resp.status_code, 400)
