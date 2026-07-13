@@ -46,6 +46,24 @@ export const agreements = {
     return api.postForm<Agreement>('/agreements/create_simple/', form)
   },
 
+  sheetPdfUrl: (id: number) => `/api/agreements/${id}/sheet_pdf/`,
+
+  // версионируемые документы через приложение documents
+  addDocument: (agreementId: number, file: File, title: string) => {
+    const form = new FormData()
+    form.append('title', title)
+    form.append('linked_type', 'approvals.agreement')
+    form.append('linked_id', String(agreementId))
+    form.append('file', file)
+    return api.postForm('/documents/', form)
+  },
+  addVersion: (docId: number, file: File, comment = '') => {
+    const form = new FormData()
+    form.append('file', file)
+    if (comment) form.append('change_comment', comment)
+    return api.postForm(`/documents/${docId}/versions/`, form)
+  },
+
   templates: () => api.get<AgreementTemplate[]>('/templates/'),
   createTemplate: (payload: {
     name: string

@@ -111,16 +111,43 @@ async function remove() {
   await loadList()
 }
 
-const fileInput = ref<HTMLInputElement | null>(null)
-async function updateDocs(e: Event) {
-  const input = e.target as HTMLInputElement
-  const files = Array.from(input.files || [])
-  if (!files.length) return
-  await run(() => agreements.updateDocuments(selected.value!.id, files))
-  input.value = ''
-}
 function dl(url: string | null, name: string) {
   if (url) api.download(url, name).catch((e) => (error.value = e.message))
+}
+
+// --- версионируемые документы (ТЗ п.7.1-7.3) ---
+const newDocInput = ref<HTMLInputElement | null>(null)
+const versionInput = ref<HTMLInputElement | null>(null)
+const versionDocId = ref<number | null>(null)
+
+async function uploadNewDoc(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  await run(() => agreements.addDocument(selected.value!.id, file, file.name))
+  input.value = ''
+}
+function pickVersion(docId: number) {
+  versionDocId.value = docId
+  versionInput.value?.click()
+}
+async function uploadVersion(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  const did = versionDocId.value
+  if (!file || did == null) { input.value = ''; return }
+  const comment = window.prompt('Комментарий к версии (что изменено, необязательно):') || ''
+  await run(() => agreements.addVersion(did, file, comment))
+  input.value = ''
+  versionDocId.value = null
+}
+
+// --- лист согласования (ТЗ п.7.7) ---
+function downloadSheet() {
+  if (selected.value) {
+    api.download(agreements.sheetPdfUrl(selected.value.id), `Лист_согласования_${selected.value.id}.pdf`)
+      .catch((e) => (error.value = e.message))
+  }
 }
 
 const isAuthor = computed(() => selected.value?.author_b24_id === uid.value)
@@ -315,19 +342,44 @@ onMounted(loadList)
               <div class="ag-card">
                 <div class="ag-card-header">
                   <span>Документы</span>
-                  <button v-if="isAuthor" class="ag-btn ag-btn--soft" :disabled="busy" @click="fileInput?.click()">Обновить файлы</button>
-                  <input ref="fileInput" type="file" multiple style="display:none" @change="updateDocs" />
+                  <button v-if="isAuthor" class="ag-btn ag-btn--soft" :disabled="busy" @click="newDocInput?.click()">+ Документ</button>
+                  <input ref="newDocInput" type="file" style="display:none" @change="uploadNewDoc" />
+                  <input ref="versionInput" type="file" style="display:none" @change="uploadVersion" />
                 </div>
-                <div v-if="selected.documents.length">
-                  <div v-for="d in selected.documents" :key="d.id" class="doc-item">
-                    <div class="doc-name">{{ d.name }}</div>
-                    <div class="doc-actions">
-                      <a href="#" class="doc-link" @click.prevent="dl(d.file || d.url, d.name)">⭳ Скачать</a>
-                      <a v-if="d.file || d.url" class="doc-link" :href="d.file || d.url" target="_blank" rel="noopener">◵ Открыть</a>
-                    </div>
+
+                <!-- версионируемые документы (несколько версий) -->
+                <div v-for="d in selected.documents_v" :key="'v' + d.id" class="doc-item">
+                  <div class="doc-name">{{ d.title }} <span class="ag-muted">· актуальная v{{ d.current_version_number }}</span></div>
+                  <div class="doc-actions">
+                    <a v-for="v in d.versions" :key="v.id" href="#" class="doc-link" :title="v.change_comment"
+                       @click.prevent="dl(v.download_url, `${d.title} v${v.version_number}`)">
+                      v{{ v.version_number }}{{ v.is_current ? ' ✓' : '' }}
+                    </a>
+                    <button v-if="isAuthor" type="button" class="doc-link doc-linkbtn" @click="pickVersion(d.id)">＋ новая версия</button>
+                  </div>
+                  <template v-for="v in d.versions" :key="'c' + v.id">
+                    <div v-if="v.change_comment" class="ag-muted" style="margin-top:2px">v{{ v.version_number }}: {{ v.change_comment }}</div>
+                  </template>
+                </div>
+
+                <!-- унаследованные файлы (без версий) -->
+                <div v-for="d in selected.documents" :key="d.id" class="doc-item">
+                  <div class="doc-name">{{ d.name }}</div>
+                  <div class="doc-actions">
+                    <a href="#" class="doc-link" @click.prevent="dl(d.file || d.url, d.name)">⭳ Скачать</a>
+                    <a v-if="d.file || d.url" class="doc-link" :href="d.file || d.url" target="_blank" rel="noopener">◵ Открыть</a>
                   </div>
                 </div>
-                <div v-else class="ag-muted">Документы не прикреплены.</div>
+
+                <div v-if="!selected.documents.length && !selected.documents_v.length" class="ag-muted">Документы не прикреплены.</div>
+                <div v-if="isAuthor && selected.documents_v.length" class="ag-muted" style="margin-top:6px">
+                  Правки: скачайте версию, измените локально и загрузите как «новую версию» — старая сохранится в истории.
+                </div>
+              </div>
+
+              <div class="ag-card">
+                <div class="ag-card-header">Лист согласования</div>
+                <button class="ag-btn ag-btn--soft ag-btn--wide" :disabled="busy" @click="downloadSheet">Скачать лист согласования (PDF)</button>
               </div>
 
               <div class="ag-card">
@@ -574,6 +626,8 @@ onMounted(loadList)
 .doc-actions { font-size: 12px; display: flex; gap: 14px; }
 .doc-link { color: var(--green-main); text-decoration: none; cursor: pointer; }
 .doc-link:hover { text-decoration: underline; }
+.doc-linkbtn { border: none; background: transparent; padding: 0; cursor: pointer; color: var(--green-main); font: inherit; font-size: 12px; }
+.doc-linkbtn:hover { text-decoration: underline; }
 
 .participant-card { background: #fff; border-radius: 8px; border: 1px solid #e0e0e0; padding: 8px 10px; margin-bottom: 6px; font-size: 13px; }
 .pc-left { display: flex; gap: 8px; align-items: flex-start; min-width: 0; }

@@ -153,6 +153,7 @@ class AgreementSerializer(serializers.ModelSerializer):
     documents = AgreementDocumentSerializer(many=True, required=False)
     participants = ParticipantSerializer(many=True, required=False)
     decision_logs = DecisionLogSerializer(many=True, read_only=True)
+    documents_v = serializers.SerializerMethodField()
 
     class Meta:
         model = Agreement
@@ -168,9 +169,41 @@ class AgreementSerializer(serializers.ModelSerializer):
             "status",
             "created_at",
             "documents",
+            "documents_v",
             "participants",
             "decision_logs",
         ]
+
+    def get_documents_v(self, obj):
+        """Версионируемые документы (ТЗ п.7.1-7.3) — через приложение documents."""
+        from django.contrib.contenttypes.models import ContentType
+        from documents.models import Document
+
+        ct = ContentType.objects.get_for_model(Agreement)
+        docs = Document.objects.filter(
+            content_type=ct, object_id=obj.pk, deleted_at__isnull=True
+        ).prefetch_related("versions")
+        out = []
+        for d in docs:
+            versions = [
+                {
+                    "id": v.id,
+                    "version_number": v.version_number,
+                    "uploaded_at": v.uploaded_at,
+                    "uploaded_by_b24_id": v.uploaded_by_b24_id,
+                    "change_comment": v.change_comment,
+                    "is_current": v.is_current,
+                    "download_url": f"/api/documents/{d.id}/versions/{v.id}/download/",
+                }
+                for v in d.versions.all().order_by("version_number")
+            ]
+            out.append({
+                "id": d.id,
+                "title": d.title,
+                "current_version_number": d.current_version.version_number if d.current_version else None,
+                "versions": versions,
+            })
+        return out
         read_only_fields = ["status", "created_at", "author_b24_id"]
 
     def validate_crm_link(self, value):

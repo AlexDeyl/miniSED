@@ -284,6 +284,31 @@ class RestartTests(TestCase):
         self.assertEqual(p1.prev_comment, "правьте")
 
 
+class SheetAndVersionedDocsTests(TestCase):
+    def test_sheet_pdf(self):
+        a = Factory.agreement(author=AUTHOR)
+        Factory.internal(a, APPROVER_A)
+        resp = api(AUTHOR).get(f"/api/agreements/{a.id}/sheet_pdf/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp["Content-Type"], "application/pdf")
+        self.assertTrue(b"".join(resp.streaming_content).startswith(b"%PDF"))
+
+    def test_versioned_documents_in_detail(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from documents import services as docsvc
+
+        a = Factory.agreement(author=AUTHOR)
+        doc = docsvc.create_document(title="Договор", linked_object=a)
+        docsvc.add_version(doc, SimpleUploadedFile("d.pdf", b"v1"))
+        docsvc.add_version(doc, SimpleUploadedFile("d.pdf", b"v2"), change_comment="правки")
+
+        data = api(AUTHOR).get(f"/api/agreements/{a.id}/").json()
+        self.assertEqual(len(data["documents_v"]), 1)
+        dv = data["documents_v"][0]
+        self.assertEqual(dv["current_version_number"], 2)
+        self.assertEqual(len(dv["versions"]), 2)
+
+
 class SimpleCreateEndpointTests(TestCase):
     def test_create_with_participants(self):
         resp = api(AUTHOR).post(

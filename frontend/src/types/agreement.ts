@@ -41,6 +41,23 @@ export interface DecisionLog {
   decided_at: string
 }
 
+export interface DocVersion {
+  id: number
+  version_number: number
+  uploaded_at: string
+  uploaded_by_b24_id: number | null
+  change_comment: string
+  is_current: boolean
+  download_url: string
+}
+
+export interface VersionedDoc {
+  id: number
+  title: string
+  current_version_number: number | null
+  versions: DocVersion[]
+}
+
 export interface Agreement {
   id: number
   title: string
@@ -53,6 +70,7 @@ export interface Agreement {
   status: AgreementStatus
   created_at: string
   documents: AgDocument[]
+  documents_v: VersionedDoc[]
   participants: AgParticipant[]
   decision_logs: DecisionLog[]
 }

@@ -1,6 +1,8 @@
+import io
 import os
 import requests
 from django.db import transaction
+from django.http import FileResponse
 from django.shortcuts import render
 from datetime import datetime
 from rest_framework import viewsets, status
@@ -753,6 +755,18 @@ class AgreementViewSet(viewsets.ModelViewSet):
         qs = self.get_queryset().filter(base_q).distinct()
         serializer = self.get_serializer(qs, many=True)
         return Response(serializer.data)
+
+    @action(detail=True, methods=["get"], url_path="sheet_pdf")
+    def sheet_pdf(self, request, pk=None):
+        """Лист согласования в PDF (ТЗ п.7.7), формируется на лету."""
+        agreement = self.get_object()
+        from .sheet import render_pdf
+
+        pdf = render_pdf(agreement)
+        return FileResponse(
+            io.BytesIO(pdf), content_type="application/pdf",
+            filename=f"list_soglasovaniya_{agreement.id}.pdf",
+        )
 
 
 @csrf_exempt
