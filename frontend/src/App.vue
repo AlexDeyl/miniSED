@@ -49,8 +49,11 @@ async function doLogout() {
         </div>
       </header>
 
-      <div class="main-body">
-        <div class="main-body-inner">
+      <div class="main-body" :class="{ 'main-body--wide': route.meta.wide }">
+        <div v-if="route.meta.wide" class="main-body-wide">
+          <RouterView />
+        </div>
+        <div v-else class="main-body-inner">
           <RouterView />
         </div>
       </div>

@@ -14,7 +14,7 @@ const router = createRouter({
       path: '/svetofor',
       name: 'svetofor',
       component: () => import('@/views/SvetoforView.vue'),
-      meta: { title: 'Согласования' },
+      meta: { title: 'Согласования', wide: true },
     },
     {
       path: '/tasks',

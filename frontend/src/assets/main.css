@@ -80,6 +80,9 @@ a { color: var(--green-main); text-decoration: none; }
 .main-header-right strong { color: var(--text-main); }
 .main-body { flex: 1; overflow-y: auto; padding: 16px 18px; background: var(--gray-bg); }
 .main-body-inner { max-width: 980px; margin: 0 auto; }
+/* широкий режим (светофор): контент на всю ширину, список прижат к сайдбару */
+.main-body--wide { padding: 14px 16px; }
+.main-body-wide { width: 100%; }
 
 /* --- Заголовки страниц --- */
 .page-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
