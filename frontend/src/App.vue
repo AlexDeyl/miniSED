@@ -23,6 +23,7 @@ onMounted(() => {
       <nav class="sidebar-nav">
         <RouterLink to="/tasks"><span>Мои задачи</span></RouterLink>
         <RouterLink to="/flow"><span>Согласования</span></RouterLink>
+        <RouterLink to="/requests"><span>Регламентные заявки</span></RouterLink>
         <RouterLink to="/deals"><span>Поиск сделок</span></RouterLink>
       </nav>
       <div class="sidebar-footer">

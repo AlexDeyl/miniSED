@@ -60,6 +60,7 @@ INSTALLED_APPS = [
     "core",
     "documents",
     "approvalflow",
+    "requests_reg",
     "approvals",
     "bitrix",
 ]

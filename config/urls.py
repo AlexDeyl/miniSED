@@ -44,6 +44,7 @@ urlpatterns = [
     path("api/bitrix/", include("bitrix.urls")),
     path("api/core/", include("core.urls")),
     path("api/approvalflow/", include("approvalflow.urls")),
+    path("api/reg/", include("requests_reg.urls")),
     path("api/", include("documents.urls")),
     path("api/", include(router.urls)),
 ]

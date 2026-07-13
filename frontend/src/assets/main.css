@@ -110,11 +110,25 @@ a { color: var(--green-main); text-decoration: none; }
   border-radius: 999px; font-size: 10px; font-weight: 600; color: #fff; white-space: nowrap;
 }
 .status-pill.in_progress { background: var(--orange-main); }
-.status-pill.completed, .status-pill.closed { background: #4caf50; }
+.status-pill.completed { background: #4caf50; }
 .status-pill.rejected { background: var(--red-main); }
 .status-pill.returned { background: var(--orange-main); }
 .status-pill.draft { background: #9e9e9e; }
 .status-pill.canceled { background: #bdbdbd; }
+/* статусы регламентных заявок */
+.status-pill.on_approval { background: var(--orange-main); }
+.status-pill.approved { background: #4caf50; }
+.status-pill.in_work { background: #1976d2; }
+.status-pill.issued { background: var(--green-main); }
+.status-pill.closed { background: #9e9e9e; }
+
+/* фильтр-табы (пилюли) */
+.filter-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+.filter-tab {
+  border: 1px solid var(--gray-border); background: #fff; color: var(--text-muted);
+  border-radius: 999px; padding: 5px 12px; font-size: 13px; cursor: pointer;
+}
+.filter-tab.active { background: var(--green-light); color: var(--green-main); border-color: var(--green-main); font-weight: 500; }
 
 .participant-pill { padding: 2px 8px; border-radius: 999px; font-size: 10px; background: #e0e0e0; }
 .participant-pill.waiting { background: #ffe0b2; }

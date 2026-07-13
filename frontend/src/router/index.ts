@@ -30,6 +30,25 @@ const router = createRouter({
       meta: { title: 'Согласование' },
     },
     {
+      path: '/requests',
+      name: 'requests',
+      component: () => import('@/views/RequestsView.vue'),
+      meta: { title: 'Регламентные заявки' },
+    },
+    {
+      path: '/requests/new',
+      name: 'request-new',
+      component: () => import('@/views/RequestCreateView.vue'),
+      meta: { title: 'Новая заявка' },
+    },
+    {
+      path: '/requests/:id',
+      name: 'request-detail',
+      component: () => import('@/views/RequestDetailView.vue'),
+      props: true,
+      meta: { title: 'Заявка' },
+    },
+    {
       path: '/deals',
       name: 'deals',
       component: () => import('@/views/DealSearchView.vue'),
