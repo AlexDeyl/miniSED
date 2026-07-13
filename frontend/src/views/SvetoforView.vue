@@ -56,7 +56,9 @@ function setMode(m: Mode) {
   loadList()
 }
 
+const decisionComment = ref('')
 async function open(id: number) {
+  decisionComment.value = ''
   try {
     selected.value = await agreements.get(id)
   } catch (e) {
@@ -70,20 +72,20 @@ async function reloadSelected() {
 }
 
 // --- решения ---
-function myWaiting(a: Agreement): AgParticipant | null {
-  return a.participants.find(
-    (p) => p.type === 'internal' && p.b24_user_id === uid.value && p.status === 'waiting',
-  ) ?? null
-}
-
 async function decide(p: AgParticipant, decision: 'approve' | 'reject') {
-  let comment = ''
-  if (decision === 'reject') {
-    comment = window.prompt('Комментарий (обязателен при отклонении):') || ''
-    if (!comment.trim()) return
+  const comment = decisionComment.value.trim()
+  if (decision === 'reject' && !comment) {
+    error.value = 'Комментарий обязателен при отклонении.'
+    return
   }
   await run(() => agreements.decide(selected.value!.id, p.id, decision, comment))
+  decisionComment.value = ''
 }
+
+// решение текущего пользователя (для блока «Ваше решение»)
+const myPart = computed(() =>
+  selected.value?.participants.find((p) => p.type === 'internal' && p.b24_user_id === uid.value) ?? null,
+)
 
 async function run(fn: () => Promise<unknown>) {
   busy.value = true
@@ -220,16 +222,8 @@ onMounted(loadList)
           </div>
 
           <div class="detail-grid">
+            <!-- Центр: описание, документы, ход -->
             <div>
-              <!-- Ваше решение -->
-              <div v-if="myWaiting(selected)" class="detail-card">
-                <div class="detail-card-header">Ваше решение</div>
-                <div class="row-actions">
-                  <button class="btn btn--ok" :disabled="busy" @click="decide(myWaiting(selected)!, 'approve')">Согласовать</button>
-                  <button class="btn btn--no" :disabled="busy" @click="decide(myWaiting(selected)!, 'reject')">Отклонить</button>
-                </div>
-              </div>
-
               <div class="detail-card">
                 <div class="detail-card-header">Описание</div>
                 <p style="margin:0;white-space:pre-line">{{ selected.description || 'Описание не указано.' }}</p>
@@ -263,8 +257,35 @@ onMounted(loadList)
               </div>
             </div>
 
-            <!-- Правая сводка -->
+            <!-- Правая колонка: решение, участники, сводка, управление -->
             <div class="detail-side">
+              <!-- Ваше решение -->
+              <div class="detail-side-block">
+                <div class="detail-card-header">Ваше решение</div>
+                <template v-if="myPart && myPart.status === 'waiting' && selected.status === 'in_progress'">
+                  <div class="muted" style="font-size:12px;margin-bottom:6px">Текущее решение: ожидаем</div>
+                  <textarea v-model="decisionComment" rows="3" placeholder="Комментарий (при отклонении обязателен)"
+                            style="width:100%;padding:8px;border:1px solid var(--gray-border);border-radius:6px;font:inherit;resize:vertical"></textarea>
+                  <div class="row-actions" style="margin-top:8px">
+                    <button class="btn" :disabled="busy" @click="decide(myPart, 'reject')">Отклонить</button>
+                    <button class="btn btn--ok" :disabled="busy" @click="decide(myPart, 'approve')">Согласовать</button>
+                  </div>
+                </template>
+                <template v-else-if="myPart">
+                  <div class="muted" style="font-size:13px">
+                    <template v-if="selected.status === 'completed' || selected.status === 'rejected' || selected.status === 'canceled'">
+                      Согласование завершено. Изменить решение невозможно.<br />
+                    </template>
+                    Ваше решение:
+                    <span class="participant-pill" :class="myPart.status">
+                      {{ myPart.status === 'approved' ? 'Согласовано' : myPart.status === 'rejected' ? 'Отклонено' : 'Ожидаем' }}
+                    </span>
+                  </div>
+                </template>
+                <div v-else class="muted" style="font-size:13px">Вы не участник этого согласования.</div>
+              </div>
+
+              <!-- Участники -->
               <div class="detail-side-block">
                 <div class="detail-card-header">Участники</div>
                 <div v-for="p in selected.participants" :key="p.id" style="margin-bottom:8px">
@@ -275,6 +296,7 @@ onMounted(loadList)
                 </div>
               </div>
 
+              <!-- Сводка -->
               <div class="detail-side-block">
                 <div class="detail-card-header">Сводка</div>
                 <div class="kv"><span>Инициатор</span><b>#{{ selected.author_b24_id }}</b></div>
@@ -285,13 +307,25 @@ onMounted(loadList)
                 </div>
               </div>
 
-              <div v-if="isAuthor && selected.status !== 'canceled' && selected.status !== 'completed'" class="detail-side-block">
+              <!-- Управление: перезапуск (для отклонённых) -->
+              <div v-if="isAuthor && (selected.status === 'rejected' || selected.status === 'in_progress')" class="detail-side-block">
                 <div class="detail-card-header">Управление</div>
-                <div style="display:grid;gap:8px">
-                  <button v-if="selected.status === 'rejected' || selected.status === 'in_progress'" class="btn" style="background:var(--orange-main);color:#fff;border:none" :disabled="busy" @click="restart">Перезапустить согласование</button>
-                  <button v-if="selected.status === 'in_progress'" class="btn btn--ghost" :disabled="busy" @click="cancel">Отменить согласование</button>
-                  <button class="btn btn--no" :disabled="busy" @click="remove">Удалить согласование</button>
-                </div>
+                <button class="btn" style="width:100%;background:var(--orange-main);color:#fff;border:none" :disabled="busy" @click="restart">Перезапустить согласование</button>
+                <p class="muted" style="font-size:11px;margin:8px 0 0">Сбрасывает только отклонивших участников. Остальные решения сохраняются.</p>
+              </div>
+
+              <!-- Отмена -->
+              <div v-if="isAuthor && selected.status === 'in_progress'" class="detail-side-block">
+                <div class="detail-card-header">Отмена</div>
+                <button class="btn btn--ghost" style="width:100%" :disabled="busy" @click="cancel">Отменить согласование</button>
+                <p class="muted" style="font-size:11px;margin:8px 0 0">Статус станет «Отменено», участники больше не смогут голосовать.</p>
+              </div>
+
+              <!-- Удаление -->
+              <div v-if="isAuthor" class="detail-side-block">
+                <div class="detail-card-header">Удаление</div>
+                <button class="btn btn--no" style="width:100%" :disabled="busy" @click="remove">Удалить согласование</button>
+                <p class="muted" style="font-size:11px;margin:8px 0 0">Будут удалены все данные по этому согласованию.</p>
               </div>
             </div>
           </div>
