@@ -1,13 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { RouterLink } from 'vue-router'
 import { approvalflow } from '@/services/approvalflow'
 import { ApiError } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
-import {
-  type ApprovalDetail,
-  type ApprovalParticipant,
-  APPROVAL_STATUS_CLASS,
-} from '@/types/approval'
+import type { ApprovalDetail, ApprovalParticipant } from '@/types/approval'
 
 const props = defineProps<{ id: string }>()
 const auth = useAuthStore()
@@ -28,15 +25,6 @@ async function load() {
     loading.value = false
   }
 }
-
-const currentRound = computed(() => {
-  if (!approval.value) return null
-  return (
-    approval.value.rounds.find(
-      (r) => r.round_number === approval.value!.current_round,
-    ) ?? null
-  )
-})
 
 function canDecide(p: ApprovalParticipant): boolean {
   return (
@@ -81,42 +69,40 @@ async function generateSheet() {
   }
 }
 
-const isInitiator = computed(
-  () => approval.value?.initiator_b24_id === auth.b24UserId,
-)
+const isInitiator = computed(() => approval.value?.initiator_b24_id === auth.b24UserId)
 
 onMounted(load)
 </script>
 
 <template>
-  <section class="flow">
-    <RouterLink to="/flow" class="flow__back">← К списку</RouterLink>
+  <section>
+    <RouterLink to="/flow" class="back-link">← К списку</RouterLink>
 
-    <p v-if="loading" class="flow__state">Загрузка…</p>
-    <p v-else-if="error && !approval" class="flow__state--error">{{ error }}</p>
+    <p v-if="loading" class="state">Загрузка…</p>
+    <p v-else-if="error && !approval" class="state state--error">{{ error }}</p>
 
     <template v-else-if="approval">
-      <header class="detail__head">
-        <h1>#{{ approval.id }} {{ approval.title || '(без названия)' }}</h1>
-        <span class="badge" :data-status="APPROVAL_STATUS_CLASS[approval.status]">
-          {{ approval.status_display }}
-        </span>
-      </header>
-      <p class="muted">
-        {{ approval.approval_type }} ·
-        {{ approval.flow_type === 'parallel' ? 'параллельное' : 'последовательное' }}
-        · инициатор #{{ approval.initiator_b24_id }}
-      </p>
+      <div class="detail-header-main">
+        <div>
+          <h1 class="detail-title">#{{ approval.id }} {{ approval.title || '(без названия)' }}</h1>
+          <div class="detail-meta">
+            {{ approval.approval_type }} ·
+            {{ approval.flow_type === 'parallel' ? 'параллельное' : 'последовательное' }}
+            · инициатор #{{ approval.initiator_b24_id }}
+          </div>
+        </div>
+        <span class="status-pill" :class="approval.status">{{ approval.status_display }}</span>
+      </div>
 
-      <p v-if="error" class="flow__state--error">{{ error }}</p>
+      <p v-if="error" class="state state--error">{{ error }}</p>
 
       <!-- Круги -->
-      <div v-for="rnd in approval.rounds" :key="rnd.id" class="round">
-        <h3 class="round__title">
+      <div v-for="rnd in approval.rounds" :key="rnd.id" class="detail-card">
+        <div class="detail-card-header">
           Круг {{ rnd.round_number }}
-          <span class="badge" :data-round="rnd.result">{{ rnd.result }}</span>
-        </h3>
-        <table class="round__table">
+          <span class="participant-pill" :class="rnd.result">{{ rnd.result }}</span>
+        </div>
+        <table class="round-table">
           <thead>
             <tr><th>Согласующий</th><th>Роль</th><th>Решение</th><th></th></tr>
           </thead>
@@ -125,10 +111,10 @@ onMounted(load)
               <td>{{ p.type === 'internal' ? `USER #${p.b24_user_id}` : p.email }}</td>
               <td>{{ p.role || '—' }}</td>
               <td>
-                <span class="badge" :data-pstatus="p.decision">{{ p.decision }}</span>
+                <span class="participant-pill" :class="p.decision">{{ p.decision }}</span>
                 <em v-if="p.decision_comment"> — {{ p.decision_comment }}</em>
               </td>
-              <td class="round__actions">
+              <td class="row-actions">
                 <template v-if="canDecide(p)">
                   <button class="btn btn--ok" :disabled="busy" @click="decide(p, 'approve')">✓</button>
                   <button class="btn btn--no" :disabled="busy" @click="decide(p, 'reject')">✕</button>
@@ -137,25 +123,20 @@ onMounted(load)
             </tr>
           </tbody>
         </table>
-        <p v-if="rnd.comment" class="muted">Комментарий круга: {{ rnd.comment }}</p>
+        <p v-if="rnd.comment" class="muted" style="margin:8px 0 0">Комментарий круга: {{ rnd.comment }}</p>
       </div>
 
       <!-- Лист согласования -->
-      <div class="sheet">
-        <h3 class="round__title">Лист согласования</h3>
-        <ul v-if="approval.sheets.length" class="sheet__list">
+      <div class="detail-card">
+        <div class="detail-card-header">Лист согласования</div>
+        <ul v-if="approval.sheets.length" class="item-tags" style="flex-direction:column;align-items:flex-start;gap:6px;margin-bottom:8px">
           <li v-for="s in approval.sheets" :key="s.id">
             <a :href="s.file_url" target="_blank" rel="noopener">
               Лист от {{ new Date(s.generated_at).toLocaleString('ru') }} (PDF)
             </a>
           </li>
         </ul>
-        <button
-          v-if="isInitiator"
-          class="btn btn--ghost"
-          :disabled="busy"
-          @click="generateSheet"
-        >
+        <button v-if="isInitiator" class="btn btn--ghost" :disabled="busy" @click="generateSheet">
           Сформировать лист (PDF)
         </button>
       </div>

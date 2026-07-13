@@ -36,8 +36,43 @@ from django.db.models import Q
 from urllib.parse import urlencode
 
 
+def _store_bitrix_portal_token(domain, member_id, token_data):
+    """Сохраняет портал и его токены (для Bitrix Connector)."""
+    if not domain or not token_data.get("access_token"):
+        return
+    try:
+        from bitrix.views import _upsert_portal
+        from bitrix.client import store_token
+
+        portal = _upsert_portal(domain, member_id)
+        store_token(portal, token_data)
+    except Exception as e:
+        print("[Bitrix] portal token store error:", e)
+
+
 @csrf_exempt
 def app_view(request):
+    # Установка/открытие приложения из Битрикс24: обработчик получает
+    # токены прямо в POST (AUTH_ID/REFRESH_ID/member_id/DOMAIN). Сохраняем их,
+    # чтобы сервер (Bitrix Connector) мог сам вызывать REST портала.
+    if request.method == "POST" and request.POST.get("AUTH_ID"):
+        domain = request.POST.get("DOMAIN")
+        member_id = request.POST.get("member_id")
+        _store_bitrix_portal_token(
+            domain,
+            member_id,
+            {
+                "access_token": request.POST.get("AUTH_ID"),
+                "refresh_token": request.POST.get("REFRESH_ID", ""),
+                "expires_in": request.POST.get("AUTH_EXPIRES"),
+            },
+        )
+        return render(
+            request,
+            "approvals/app.html",
+            {"session_b24_id": request.session.get("b24_user_id")},
+        )
+
     code = request.GET.get("code")
     domain = request.GET.get("domain")
     server_domain = request.GET.get("server_domain")
@@ -58,6 +93,8 @@ def app_view(request):
             token_data = token_resp.json()
             access_token = token_data.get("access_token")
             b24_id = token_data.get("user_id")
+
+            _store_bitrix_portal_token(domain, token_data.get("member_id"), token_data)
 
             if b24_id:
                 request.session["b24_user_id"] = int(b24_id)

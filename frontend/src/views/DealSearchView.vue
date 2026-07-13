@@ -43,37 +43,32 @@ async function search() {
 </script>
 
 <template>
-  <section class="deals">
-    <h1 class="deals__title">Поиск CRM-сделок</h1>
+  <section>
+    <div class="page-head"><h1 class="page-title">Поиск CRM-сделок</h1></div>
 
-    <p v-if="connected === false" class="deals__hint">
+    <p v-if="connected === false" class="hint">
       Портал Битрикс24 не подключён. Откройте MiniSED из Битрикс24 или пройдите
       авторизацию — тогда поиск будет работать и напрямую с домена.
     </p>
 
     <input
       v-model="query"
-      class="deals__input"
+      class="search-input"
       type="search"
       placeholder="Название сделки…"
       @input="onInput"
     />
 
-    <p v-if="loading" class="deals__state">Поиск…</p>
-    <p v-else-if="error" class="deals__state deals__state--error">{{ error }}</p>
-    <p v-else-if="query && deals.length === 0" class="deals__state">Ничего не найдено.</p>
+    <p v-if="loading" class="state">Поиск…</p>
+    <p v-else-if="error" class="state state--error">{{ error }}</p>
+    <p v-else-if="query && deals.length === 0" class="state">Ничего не найдено.</p>
 
-    <ul v-else class="deals__list">
-      <li v-for="d in deals" :key="d.ID" class="card">
-        <div class="card__link">
-          <div class="card__head">
-            <span class="card__id">#{{ d.ID }}</span>
-            <span class="card__title">{{ d.TITLE }}</span>
-          </div>
-          <div v-if="d.OPPORTUNITY" class="card__meta">
-            <span>{{ d.OPPORTUNITY }} {{ d.CURRENCY_ID }}</span>
-          </div>
+    <ul v-else class="item-list">
+      <li v-for="d in deals" :key="d.ID" class="item-card">
+        <div class="item-title-row">
+          <span class="item-title">#{{ d.ID }} {{ d.TITLE }}</span>
         </div>
+        <div v-if="d.OPPORTUNITY" class="item-sub">{{ d.OPPORTUNITY }} {{ d.CURRENCY_ID }}</div>
       </li>
     </ul>
   </section>

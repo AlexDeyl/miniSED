@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
 import { approvalflow } from '@/services/approvalflow'
 import { ApiError } from '@/services/api'
 import type { FlowType, ParticipantInput } from '@/types/approval'
@@ -58,23 +58,23 @@ async function save() {
 </script>
 
 <template>
-  <section class="flow">
-    <RouterLink to="/flow" class="flow__back">← К списку</RouterLink>
-    <h1 class="flow__title">Новое согласование</h1>
+  <section>
+    <RouterLink to="/flow" class="back-link">← К списку</RouterLink>
+    <h1 class="page-title" style="margin-bottom:14px">Новое согласование</h1>
 
     <div class="form">
-      <label class="form__field">
+      <label class="form-field">
         <span>Название</span>
         <input v-model="title" type="text" placeholder="Скидка 10% по сделке №42" />
       </label>
 
-      <div class="form__row">
-        <label class="form__field">
+      <div class="form-row">
+        <label class="form-field">
           <span>Тип</span>
           <input v-model="approvalType" type="text" placeholder="discount / generic" />
         </label>
-        <label class="form__field">
-          <span>Порядок</span>
+        <label class="form-field">
+          <span>Порядок согласования</span>
           <select v-model="flowType">
             <option value="parallel">Параллельное</option>
             <option value="sequential">Последовательное</option>
@@ -82,19 +82,19 @@ async function save() {
         </label>
       </div>
 
-      <div class="form__field">
+      <div class="form-field">
         <span>Согласующие (ID сотрудника Б24)</span>
-        <div v-for="(row, i) in rows" :key="i" class="form__participant">
+        <div v-for="(row, i) in rows" :key="i" class="form-participant">
           <input v-model="row.b24_user_id" type="number" placeholder="ID Б24" />
           <input v-model="row.role" type="text" placeholder="роль (опц.)" />
-          <button type="button" class="btn btn--ghost" @click="removeRow(i)" :disabled="rows.length === 1">✕</button>
+          <button type="button" class="btn btn--ghost" :disabled="rows.length === 1" @click="removeRow(i)">✕</button>
         </div>
         <button type="button" class="btn btn--ghost" @click="addRow">+ участник</button>
       </div>
 
-      <p v-if="error" class="flow__state--error">{{ error }}</p>
+      <p v-if="error" class="state state--error">{{ error }}</p>
 
-      <div class="form__actions">
+      <div>
         <button class="btn btn--primary" :disabled="saving" @click="save">
           {{ saving ? 'Отправка…' : 'Создать и отправить' }}
         </button>
