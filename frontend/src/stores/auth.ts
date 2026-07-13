@@ -13,18 +13,42 @@ import { ref } from 'vue'
  * на серверную сессию/токен — правки будут в этом сторе.
  */
 export const useAuthStore = defineStore('auth', () => {
+  const STORAGE_KEY = 'minised_b24_user_id'
   const b24UserId = ref<number | null>(null)
   const ready = ref(false)
 
+  function setUser(id: number) {
+    b24UserId.value = id
+    try {
+      window.localStorage.setItem(STORAGE_KEY, String(id))
+    } catch {
+      /* localStorage может быть недоступен */
+    }
+  }
+
+  // 1) ?b24_user_id в URL (приоритет — можно переключить пользователя);
+  // 2) сохранённый ранее в localStorage (переживает перезагрузку и прямые ссылки).
   function initFromUrl(): boolean {
     const params = new URLSearchParams(window.location.search)
     const raw = params.get('b24_user_id')
     if (raw) {
       const id = parseInt(raw, 10)
       if (!Number.isNaN(id)) {
-        b24UserId.value = id
+        setUser(id)
         return true
       }
+    }
+    try {
+      const stored = window.localStorage.getItem(STORAGE_KEY)
+      if (stored) {
+        const id = parseInt(stored, 10)
+        if (!Number.isNaN(id)) {
+          b24UserId.value = id
+          return true
+        }
+      }
+    } catch {
+      /* игнорируем */
     }
     return false
   }
@@ -45,7 +69,7 @@ export const useAuthStore = defineStore('auth', () => {
           const user = res.data()
           const id = parseInt(String(user.ID), 10)
           if (!Number.isNaN(id)) {
-            b24UserId.value = id
+            setUser(id)
             resolve(true)
           } else {
             resolve(false)
