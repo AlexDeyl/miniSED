@@ -156,8 +156,15 @@ async function createApproval() {
 }
 
 function partLabel(p: AgParticipant): string {
-  if (p.type === 'internal') return `Сотрудник #${p.b24_user_id}`
+  if (p.type === 'internal') return `USER #${p.b24_user_id}`
   return p.email || p.name || 'Внешний участник'
+}
+function avatarText(p: AgParticipant): string {
+  if (p.type === 'internal') return 'U#'
+  return (p.email || '?').charAt(0).toUpperCase()
+}
+const PART_STATUS_LABEL: Record<string, string> = {
+  waiting: 'Ожидаем', approved: 'Согласовано', rejected: 'Отклонено',
 }
 
 onMounted(loadList)
@@ -212,124 +219,134 @@ onMounted(loadList)
       <div class="svet-detail">
         <p v-if="!selected" class="placeholder">Выберите согласование из списка слева, чтобы посмотреть детали.</p>
 
-        <template v-else>
-          <div class="detail-header-main">
-            <div>
-              <h1 class="detail-title">#{{ selected.id }} {{ selected.title }}</h1>
-              <div class="detail-meta">Автор: {{ selected.author_b24_id }} · Создано: {{ new Date(selected.created_at).toLocaleString('ru') }}</div>
+        <div v-else class="detail-inner">
+          <!-- Заголовок: название, метаданные, статус слева под ними -->
+          <div class="ag-head">
+            <h1 class="ag-title">#{{ selected.id }} {{ selected.title }}</h1>
+            <div class="ag-meta">
+              Автор: {{ selected.author_b24_id }} · Создано: {{ new Date(selected.created_at).toLocaleString('ru') }}
+              <template v-if="selected.deadline"> · Дедлайн: {{ new Date(selected.deadline).toLocaleDateString('ru') }}</template>
             </div>
-            <span class="status-pill" :class="selected.status">{{ AG_STATUS_LABEL[selected.status] }}</span>
+            <span class="ag-status" :class="selected.status">{{ AG_STATUS_LABEL[selected.status] }}</span>
           </div>
 
-          <div class="detail-grid">
-            <!-- Центр: описание, документы, ход -->
-            <div>
-              <div class="detail-card">
-                <div class="detail-card-header">Описание</div>
-                <p style="margin:0;white-space:pre-line">{{ selected.description || 'Описание не указано.' }}</p>
+          <div class="ag-cols">
+            <!-- Левая колонка -->
+            <div class="ag-main">
+              <div class="ag-card">
+                <div class="ag-card-header">Описание</div>
+                <div class="ag-card-body" style="white-space:pre-line">{{ selected.description || 'Описание не указано.' }}</div>
               </div>
 
-              <div class="detail-card">
-                <div class="detail-card-header">
-                  Документы
-                  <span style="flex:1"></span>
-                  <button v-if="isAuthor" class="btn btn--ghost" style="padding:4px 10px" @click="fileInput?.click()">Обновить файлы</button>
+              <div class="ag-card">
+                <div class="ag-card-header">
+                  <span>Документы</span>
+                  <button v-if="isAuthor" class="ag-btn ag-btn--soft" :disabled="busy" @click="fileInput?.click()">Обновить файлы</button>
                   <input ref="fileInput" type="file" multiple style="display:none" @change="updateDocs" />
                 </div>
-                <ul v-if="selected.documents.length" class="item-tags" style="flex-direction:column;align-items:flex-start;gap:6px">
-                  <li v-for="d in selected.documents" :key="d.id">
-                    <a href="#" @click.prevent="dl(d.file || d.url, d.name)">{{ d.name }}</a>
-                  </li>
-                </ul>
-                <p v-else class="muted" style="margin:0">Документы не прикреплены.</p>
+                <div v-if="selected.documents.length">
+                  <div v-for="d in selected.documents" :key="d.id" class="doc-item">
+                    <div class="doc-name">{{ d.name }}</div>
+                    <div class="doc-actions">
+                      <a href="#" class="doc-link" @click.prevent="dl(d.file || d.url, d.name)">⭳ Скачать</a>
+                      <a v-if="d.file || d.url" class="doc-link" :href="d.file || d.url" target="_blank" rel="noopener">◵ Открыть</a>
+                    </div>
+                  </div>
+                </div>
+                <div v-else class="ag-muted">Документы не прикреплены.</div>
               </div>
 
-              <div class="detail-card">
-                <div class="detail-card-header">Ход согласования</div>
-                <p v-if="!selected.decision_logs.length" class="muted" style="margin:0">Пока ничего не происходило.</p>
-                <div v-for="log in selected.decision_logs" :key="log.id" style="margin-bottom:8px">
+              <div class="ag-card">
+                <div class="ag-card-header">Ход согласования</div>
+                <div v-if="!selected.decision_logs.length" class="ag-muted">Пока ничего не происходило.</div>
+                <div v-for="log in selected.decision_logs" :key="log.id" class="log-item">
                   <b>{{ partLabel(log.participant) }}</b>
                   — <span :style="{ color: log.status === 'approved' ? 'var(--green-main)' : 'var(--red-main)' }">
                     {{ log.status === 'approved' ? 'согласовано' : 'отклонено' }}</span>
                   · {{ new Date(log.decided_at).toLocaleString('ru') }}
-                  <div v-if="log.comment" class="muted">{{ log.comment }}</div>
+                  <div v-if="log.comment" class="ag-muted">{{ log.comment }}</div>
                 </div>
               </div>
             </div>
 
-            <!-- Правая колонка: решение, участники, сводка, управление -->
-            <div class="detail-side">
+            <!-- Правая колонка -->
+            <div class="ag-side">
               <!-- Ваше решение -->
-              <div class="detail-side-block">
-                <div class="detail-card-header">Ваше решение</div>
-                <template v-if="myPart && myPart.status === 'waiting' && selected.status === 'in_progress'">
-                  <div class="muted" style="font-size:12px;margin-bottom:6px">Текущее решение: ожидаем</div>
-                  <textarea v-model="decisionComment" rows="3" placeholder="Комментарий (при отклонении обязателен)"
-                            style="width:100%;padding:8px;border:1px solid var(--gray-border);border-radius:6px;font:inherit;resize:vertical"></textarea>
-                  <div class="row-actions" style="margin-top:8px">
-                    <button class="btn" :disabled="busy" @click="decide(myPart, 'reject')">Отклонить</button>
-                    <button class="btn btn--ok" :disabled="busy" @click="decide(myPart, 'approve')">Согласовать</button>
-                  </div>
-                </template>
-                <template v-else-if="myPart">
-                  <div class="muted" style="font-size:13px">
-                    <template v-if="selected.status === 'completed' || selected.status === 'rejected' || selected.status === 'canceled'">
-                      Согласование завершено. Изменить решение невозможно.<br />
-                    </template>
-                    Ваше решение:
-                    <span class="participant-pill" :class="myPart.status">
-                      {{ myPart.status === 'approved' ? 'Согласовано' : myPart.status === 'rejected' ? 'Отклонено' : 'Ожидаем' }}
-                    </span>
-                  </div>
-                </template>
-                <div v-else class="muted" style="font-size:13px">Вы не участник этого согласования.</div>
+              <div class="ag-card">
+                <div class="ag-card-header">Ваше решение</div>
+                <div class="inner-box">
+                  <template v-if="myPart && myPart.status === 'waiting' && selected.status === 'in_progress'">
+                    <div class="ag-muted" style="margin-bottom:6px">Текущее решение: ожидаем</div>
+                    <textarea v-model="decisionComment" rows="3" class="ag-textarea"
+                              placeholder="Комментарий (при отклонении обязателен)"></textarea>
+                    <div class="decide-row">
+                      <button class="ag-btn ag-btn--soft" :disabled="busy" @click="decide(myPart, 'reject')">Отклонить</button>
+                      <button class="ag-btn ag-btn--green" :disabled="busy" @click="decide(myPart, 'approve')">Согласовать</button>
+                    </div>
+                  </template>
+                  <template v-else-if="myPart">
+                    <div class="ag-muted" v-if="selected.status !== 'in_progress'">Согласование завершено. Изменить решение невозможно.</div>
+                    <div style="margin-top:4px">Ваше решение:
+                      <span class="ag-badge" :class="myPart.status">{{ PART_STATUS_LABEL[myPart.status] }}</span>
+                    </div>
+                  </template>
+                  <div v-else class="ag-muted">Вы не участник этого согласования.</div>
+                </div>
               </div>
 
               <!-- Участники -->
-              <div class="detail-side-block">
-                <div class="detail-card-header">Участники</div>
-                <div v-for="p in selected.participants" :key="p.id" style="margin-bottom:8px">
-                  {{ partLabel(p) }}
-                  <span class="participant-pill" :class="p.status" style="display:block;width:fit-content;margin-top:2px">
-                    {{ p.status === 'waiting' ? 'Ожидаем' : p.status === 'approved' ? 'Согласовано' : 'Отклонено' }}
-                  </span>
+              <div class="ag-card">
+                <div class="ag-card-header">Участники</div>
+                <div v-for="p in selected.participants" :key="p.id" class="participant-card">
+                  <div class="pc-left">
+                    <div class="pc-avatar">{{ avatarText(p) }}</div>
+                    <div class="pc-main">
+                      <div class="pc-name">{{ partLabel(p) }}</div>
+                      <span class="ag-badge" :class="p.status">{{ PART_STATUS_LABEL[p.status] }}</span>
+                    </div>
+                  </div>
                 </div>
               </div>
 
               <!-- Сводка -->
-              <div class="detail-side-block">
-                <div class="detail-card-header">Сводка</div>
-                <div class="kv"><span>Инициатор</span><b>#{{ selected.author_b24_id }}</b></div>
-                <div class="kv"><span>Сумма</span><b>{{ selected.amount || '—' }}</b></div>
-                <div class="kv"><span>CRM</span>
-                  <a v-if="selected.crm_link" :href="selected.crm_link" target="_blank" rel="noopener">сделка ↗</a>
-                  <b v-else>Не привязано</b>
+              <div class="ag-card">
+                <div class="ag-card-header">Сводка</div>
+
+                <div class="sum-block">
+                  <div class="sum-label">Инициатор</div>
+                  <div>#{{ selected.author_b24_id }}</div>
                 </div>
-              </div>
+                <div class="sum-block">
+                  <div class="sum-label">Сумма</div>
+                  <div>{{ selected.amount || '—' }}</div>
+                </div>
+                <div class="sum-block">
+                  <div class="sum-label">CRM</div>
+                  <a v-if="selected.crm_link" class="crm-link" :href="selected.crm_link" target="_blank" rel="noopener">{{ selected.crm_link }}</a>
+                  <div v-else>Не привязано</div>
+                </div>
 
-              <!-- Управление: перезапуск (для отклонённых) -->
-              <div v-if="isAuthor && (selected.status === 'rejected' || selected.status === 'in_progress')" class="detail-side-block">
-                <div class="detail-card-header">Управление</div>
-                <button class="btn" style="width:100%;background:var(--orange-main);color:#fff;border:none" :disabled="busy" @click="restart">Перезапустить согласование</button>
-                <p class="muted" style="font-size:11px;margin:8px 0 0">Сбрасывает только отклонивших участников. Остальные решения сохраняются.</p>
-              </div>
+                <div v-if="isAuthor && (selected.status === 'rejected' || selected.status === 'in_progress')" class="sum-block">
+                  <div class="sum-label">Управление</div>
+                  <button class="ag-btn ag-btn--orange ag-btn--wide" :disabled="busy" @click="restart">Перезапустить согласование</button>
+                  <div class="sum-hint">Сбрасывает только отклонивших участников. Остальные решения сохраняются.</div>
+                </div>
 
-              <!-- Отмена -->
-              <div v-if="isAuthor && selected.status === 'in_progress'" class="detail-side-block">
-                <div class="detail-card-header">Отмена</div>
-                <button class="btn btn--ghost" style="width:100%" :disabled="busy" @click="cancel">Отменить согласование</button>
-                <p class="muted" style="font-size:11px;margin:8px 0 0">Статус станет «Отменено», участники больше не смогут голосовать.</p>
-              </div>
+                <div v-if="isAuthor && selected.status === 'in_progress'" class="sum-block">
+                  <div class="sum-label">Отмена</div>
+                  <button class="ag-btn ag-btn--soft ag-btn--wide" :disabled="busy" @click="cancel">Отменить согласование</button>
+                  <div class="sum-hint">Статус станет «Отменено», участники больше не смогут голосовать.</div>
+                </div>
 
-              <!-- Удаление -->
-              <div v-if="isAuthor" class="detail-side-block">
-                <div class="detail-card-header">Удаление</div>
-                <button class="btn btn--no" style="width:100%" :disabled="busy" @click="remove">Удалить согласование</button>
-                <p class="muted" style="font-size:11px;margin:8px 0 0">Будут удалены все данные по этому согласованию.</p>
+                <div v-if="isAuthor" class="sum-block">
+                  <div class="sum-label">Удаление</div>
+                  <button class="ag-btn ag-btn--red ag-btn--wide" :disabled="busy" @click="remove">Удалить согласование</button>
+                  <div class="sum-hint">Будут удалены все данные по этому согласованию.</div>
+                </div>
               </div>
             </div>
           </div>
-        </template>
+        </div>
       </div>
     </div>
 
@@ -382,10 +399,61 @@ onMounted(loadList)
 .svet-card.active { border-color: var(--green-main); }
 .svet-card-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .svet-card-title { font-weight: 600; font-size: 14px; }
-.detail-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr); gap: 14px; padding: 0 6px; }
-.kv { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; margin: 4px 0; }
-.kv span { color: var(--text-muted); }
 .radio { display: block; font-size: 13px; margin: 3px 0; }
+
+/* --- Деталь согласования (порт из старого app.html) --- */
+.detail-inner { max-width: 980px; margin: 0 auto; padding: 8px 12px 24px; }
+.ag-head { margin-bottom: 12px; }
+.ag-title { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+.ag-meta { font-size: 12px; color: var(--text-muted); }
+.ag-status { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 500; color: #fff; margin-top: 8px; }
+.ag-status.in_progress { background: var(--orange-main); }
+.ag-status.completed { background: var(--green-main); }
+.ag-status.rejected { background: var(--red-main); }
+.ag-status.draft, .ag-status.canceled { background: #9e9e9e; }
+
+.ag-cols { display: grid; grid-template-columns: minmax(0, 2fr) minmax(260px, 1.2fr); gap: 16px; align-items: start; }
+.ag-card { background: #fff; border-radius: 10px; padding: 10px 12px; box-shadow: var(--shadow-soft); border: 1px solid #f1f1f1; margin-bottom: 10px; overflow: hidden; }
+.ag-card-header { font-size: 13px; font-weight: 600; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.ag-card-body { font-size: 13px; }
+.ag-muted { font-size: 12px; color: var(--text-muted); }
+.log-item { font-size: 12px; margin-bottom: 8px; }
+
+.inner-box { border: 1px solid #e0e0e0; border-radius: 8px; padding: 8px 10px; }
+.ag-textarea { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #d0d0d0; border-radius: 6px; font: inherit; font-size: 13px; resize: vertical; }
+.decide-row { display: flex; gap: 8px; margin-top: 8px; }
+.decide-row .ag-btn { flex: 1; }
+
+.doc-item { background: #fff; border-radius: 8px; border: 1px solid #e0e0e0; padding: 8px 10px; margin-bottom: 8px; }
+.doc-name { font-size: 14px; font-weight: 500; margin-bottom: 4px; overflow-wrap: anywhere; word-break: break-word; }
+.doc-actions { font-size: 12px; display: flex; gap: 14px; }
+.doc-link { color: var(--green-main); text-decoration: none; cursor: pointer; }
+.doc-link:hover { text-decoration: underline; }
+
+.participant-card { background: #fff; border-radius: 8px; border: 1px solid #e0e0e0; padding: 8px 10px; margin-bottom: 6px; font-size: 13px; }
+.pc-left { display: flex; gap: 8px; align-items: flex-start; min-width: 0; }
+.pc-avatar { width: 28px; height: 28px; flex: 0 0 28px; border-radius: 999px; background: #e0f2f1; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 500; color: var(--green-main); }
+.pc-main { display: flex; flex-direction: column; min-width: 0; gap: 3px; }
+.pc-name { font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+
+.ag-badge { display: inline-block; width: fit-content; padding: 2px 8px; border-radius: 999px; font-size: 10px; background: #e0e0e0; }
+.ag-badge.waiting { background: #ffe0b2; }
+.ag-badge.approved { background: #c8e6c9; }
+.ag-badge.rejected { background: #ffcdd2; }
+
+.sum-block { border: 1px solid #e0e0e0; border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
+.sum-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted); margin-bottom: 4px; }
+.sum-hint { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
+.crm-link { display: inline-block; max-width: 100%; overflow-wrap: anywhere; word-break: break-all; text-decoration: none; color: #1976d2; font-size: 12px; }
+.crm-link:hover { text-decoration: underline; }
+
+.ag-btn { font: inherit; font-size: 13px; cursor: pointer; border-radius: 6px; border: 1px solid var(--gray-border); background: #fff; color: var(--text-main); padding: 7px 12px; }
+.ag-btn:disabled { opacity: 0.5; cursor: default; }
+.ag-btn--wide { width: 100%; }
+.ag-btn--soft { background: #f1f1f1; border-color: #e0e0e0; color: #333; }
+.ag-btn--green { background: var(--green-main); color: #fff; border-color: var(--green-main); }
+.ag-btn--orange { background: var(--orange-main); color: #fff; border-color: var(--orange-main); }
+.ag-btn--red { background: var(--red-main); color: #fff; border-color: var(--red-main); }
 
 .slideover-back { position: fixed; inset: 0; background: rgba(0,0,0,0.25); display: flex; justify-content: flex-end; z-index: 50; }
 .slideover { width: 420px; max-width: 92vw; background: #fff; height: 100%; display: flex; flex-direction: column; box-shadow: -2px 0 12px rgba(0,0,0,0.12); }
@@ -398,6 +466,6 @@ onMounted(loadList)
 @media (max-width: 900px) {
   .svet-body { flex-direction: column; overflow: visible; }
   .svet-list { width: 100%; }
-  .detail-grid { grid-template-columns: 1fr; }
+  .ag-cols { grid-template-columns: 1fr; }
 }
 </style>
