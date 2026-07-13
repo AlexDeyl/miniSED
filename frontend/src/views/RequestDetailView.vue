@@ -127,6 +127,8 @@ async function uploadFile(e: Event) {
     input.value = ''
   }
 }
+
+onMounted(load)
 </script>
 
 <template>
