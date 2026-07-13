@@ -2,6 +2,8 @@
 Тесты ядра: сид ролей/прав, RBAC, полиморфные внешние связи, аудит, API.
 """
 
+from unittest.mock import patch
+
 from django.test import TestCase
 from rest_framework.test import APIClient
 
@@ -189,3 +191,50 @@ class AuthTests(TestCase):
         # эндпоинт требует b24-личность; без X-B24-User, только по токену
         r = self.client.get("/api/reg/requests/")
         self.assertEqual(r.status_code, 200)
+
+
+class BitrixLoginTests(TestCase):
+    """Вход через Битрикс = тот же аккаунт (связка bitrix_id/email)."""
+
+    def _mock_user_current(self, bid, email, last="Тест", name="Юзер"):
+        class R:
+            def json(self_inner):
+                return {"result": {"ID": str(bid), "EMAIL": email, "LAST_NAME": last, "NAME": name}}
+        return R()
+
+    @patch("core.auth_views.requests")
+    def test_bitrix_login_matches_existing_profile_by_bitrix_id(self, req):
+        from django.contrib.auth.models import User
+        u = User.objects.create_user("ivanov@nord.ru", "ivanov@nord.ru", "secret123")
+        profile = UserProfile.objects.create(fio="Иванов", bitrix_id=1099, email="ivanov@nord.ru", auth_user=u)
+
+        req.get.return_value = self._mock_user_current(1099, "ivanov@nord.ru")
+        r = self.client.post("/api/auth/bitrix/", {"access_token": "acc", "domain": "portal.bitrix24.ru"}, format="json")
+        self.assertEqual(r.status_code, 200)
+        # тот же аккаунт: id профиля совпал
+        self.assertEqual(r.json()["id"], profile.id)
+        self.assertEqual(r.json()["bitrix_id"], 1099)
+        # токен = токен того же django-User
+        from rest_framework.authtoken.models import Token
+        self.assertEqual(r.json()["token"], Token.objects.get(user=u).key)
+
+    @patch("core.auth_views.requests")
+    def test_bitrix_login_links_by_email_and_sets_bitrix_id(self, req):
+        from django.contrib.auth.models import User
+        u = User.objects.create_user("petrov@nord.ru", "petrov@nord.ru", "secret123")
+        profile = UserProfile.objects.create(fio="Петров", email="petrov@nord.ru", auth_user=u)  # без bitrix_id
+
+        req.get.return_value = self._mock_user_current(2222, "petrov@nord.ru")
+        r = self.client.post("/api/auth/bitrix/", {"access_token": "acc", "domain": "p.bitrix24.ru"}, format="json")
+        self.assertEqual(r.status_code, 200)
+        profile.refresh_from_db()
+        self.assertEqual(profile.bitrix_id, 2222)  # долинковали
+        self.assertEqual(r.json()["id"], profile.id)
+
+    @patch("core.auth_views.requests")
+    def test_bitrix_login_provisions_new_account(self, req):
+        req.get.return_value = self._mock_user_current(3333, "new@nord.ru", last="Новый", name="Гость")
+        r = self.client.post("/api/auth/bitrix/", {"access_token": "acc", "domain": "p.bitrix24.ru"}, format="json")
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(UserProfile.objects.filter(bitrix_id=3333).exists())
+        self.assertIn("token", r.json())

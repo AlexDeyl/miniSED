@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { ApiError } from '@/services/api'
@@ -12,18 +12,72 @@ const password = ref('')
 const busy = ref(false)
 const error = ref<string | null>(null)
 
+interface BX24Auth { access_token?: string; domain?: string }
+interface BX24SDK {
+  init(cb: () => void): void
+  getAuth(): BX24Auth | false
+}
+
 async function submit() {
   error.value = null
   busy.value = true
   try {
     await auth.login(email.value.trim(), password.value)
-    router.push('/tasks')
+    router.push('/svetofor')
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Не удалось войти'
   } finally {
     busy.value = false
   }
 }
+
+// Вход через Битрикс24: внутри портала — BX24.getAuth(); на домене — OAuth-редирект.
+function loginViaBitrix() {
+  error.value = null
+  const BX24 = (window as unknown as { BX24?: BX24SDK }).BX24
+  if (BX24 && BX24.init) {
+    busy.value = true
+    BX24.init(async () => {
+      try {
+        const a = BX24.getAuth()
+        if (a && a.access_token && a.domain) {
+          await auth.bitrixLogin(a.access_token, a.domain)
+          router.push('/svetofor')
+        } else {
+          error.value = 'Не удалось получить авторизацию Битрикс24.'
+        }
+      } catch (e) {
+        error.value = e instanceof ApiError ? e.message : 'Ошибка входа через Битрикс24'
+      } finally {
+        busy.value = false
+      }
+    })
+    return
+  }
+  // домен: OAuth-редирект (Django обменяет код и вернёт с ?bitrix_token=)
+  const next = `${window.location.origin}/login`
+  window.location.href = `/api/auth/bitrix/start/?next=${encodeURIComponent(next)}`
+}
+
+onMounted(async () => {
+  const params = new URLSearchParams(window.location.search)
+  const t = params.get('bitrix_token')
+  if (t) {
+    busy.value = true
+    try {
+      await auth.applyToken(t)
+      // чистим URL от токена
+      window.history.replaceState({}, '', window.location.pathname)
+      router.push('/svetofor')
+    } catch (e) {
+      error.value = e instanceof ApiError ? e.message : 'Не удалось войти через Битрикс24'
+    } finally {
+      busy.value = false
+    }
+  } else if (params.get('bitrix_error')) {
+    error.value = 'Вход через Битрикс24 не удался. Попробуйте ещё раз.'
+  }
+})
 </script>
 
 <template>
@@ -48,6 +102,12 @@ async function submit() {
           {{ busy ? 'Вход…' : 'Войти' }}
         </button>
       </form>
+
+      <div class="login-or"><span>или</span></div>
+
+      <button class="btn login-bitrix" type="button" :disabled="busy" @click="loginViaBitrix">
+        Войти через Битрикс24
+      </button>
     </div>
   </div>
 </template>
@@ -57,4 +117,8 @@ async function submit() {
 .login-card { background: #fff; border: 1px solid var(--gray-border); border-radius: 12px; box-shadow: var(--shadow-soft); padding: 28px; width: 100%; max-width: 360px; }
 .login-logo { font-size: 24px; font-weight: 700; color: var(--green-main); }
 .login-sub { color: var(--text-muted); font-size: 13px; margin: 4px 0 20px; }
+.login-or { display: flex; align-items: center; gap: 10px; margin: 16px 0; color: var(--text-muted); font-size: 12px; }
+.login-or::before, .login-or::after { content: ''; flex: 1; height: 1px; background: var(--gray-border); }
+.login-bitrix { width: 100%; background: #2f6fd6; color: #fff; border-color: #2f6fd6; }
+.login-bitrix:hover { background: #2860bd; }
 </style>

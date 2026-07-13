@@ -17,7 +17,7 @@ router.beforeEach((to) => {
     return { name: 'login', query: to.fullPath !== '/' ? { next: to.fullPath } : {} }
   }
   if (to.name === 'login' && auth.isAuthenticated) {
-    return { path: '/tasks' }
+    return { path: '/svetofor' }
   }
   return true
 })

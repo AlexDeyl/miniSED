@@ -19,6 +19,8 @@ export interface LoginResult extends AuthProfile {
 export const authApi = {
   login: (email: string, password: string) =>
     api.post<LoginResult>('/auth/login/', { email, password }),
+  bitrixLogin: (accessToken: string, domain: string) =>
+    api.post<LoginResult>('/auth/bitrix/', { access_token: accessToken, domain }),
   me: () => api.get<AuthProfile>('/auth/me/'),
   logout: () => api.post<void>('/auth/logout/'),
 }

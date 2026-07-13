@@ -51,6 +51,21 @@ export const useAuthStore = defineStore('auth', () => {
     applyProfile(res)
   }
 
+  // вход через Битрикс из iframe (BX24.getAuth → access_token+domain)
+  async function bitrixLogin(accessToken: string, domain: string) {
+    const res = await authApi.bitrixLogin(accessToken, domain)
+    token.value = res.token
+    ls(TOKEN_KEY, res.token)
+    applyProfile(res)
+  }
+
+  // применить токен, полученный OAuth-редиректом (?bitrix_token=...)
+  async function applyToken(t: string) {
+    token.value = t
+    ls(TOKEN_KEY, t)
+    applyProfile(await authApi.me())
+  }
+
   async function logout() {
     try {
       if (token.value) await authApi.logout()
@@ -108,6 +123,6 @@ export const useAuthStore = defineStore('auth', () => {
 
   return {
     token, profile, b24UserId, ready, isAuthenticated, displayName,
-    login, logout, init,
+    login, bitrixLogin, applyToken, logout, init,
   }
 })
