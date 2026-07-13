@@ -3,12 +3,18 @@ import { createRouter, createWebHistory } from 'vue-router'
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', redirect: '/tasks' },
+    { path: '/', redirect: '/svetofor' },
     {
       path: '/login',
       name: 'login',
       component: () => import('@/views/LoginView.vue'),
       meta: { title: 'Вход', public: true, noShell: true },
+    },
+    {
+      path: '/svetofor',
+      name: 'svetofor',
+      component: () => import('@/views/SvetoforView.vue'),
+      meta: { title: 'Согласования' },
     },
     {
       path: '/tasks',

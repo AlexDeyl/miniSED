@@ -207,17 +207,19 @@ def bitrix_auth_start(request):
 
 def get_current_b24_id(request):
     """
-    1) Если запрос идёт из приложения внутри портала —
-    берём ID из заголовка X-B24-User.
-    2) Если зашли извне и прошли OAuth — берём ID из сессии (b24_user_id).
+    Определяет личность пользователя:
+    0) авторизованный пользователь MiniSED (вход по email+пароль) — по профилю;
+    1) запуск внутри портала — ID из заголовка X-B24-User;
+    2) вход извне через OAuth — ID из сессии (b24_user_id).
     """
+    # 0) авторизация MiniSED (email+пароль) — UserProfile.bitrix_id
+    user = getattr(request, "user", None)
+    if user is not None and getattr(user, "is_authenticated", False):
+        profile = getattr(user, "minised_profile", None)
+        if profile is not None and profile.bitrix_id:
+            return profile.bitrix_id
+
     header = request.META.get("HTTP_X_B24_USER")
-    print(
-        "X-B24-User header =",
-        header,
-        "session b24 =",
-        request.session.get("b24_user_id"),
-    )
     if header:
         try:
             return int(header)
