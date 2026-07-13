@@ -1,100 +1,113 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+import { authApi, type AuthProfile } from '@/services/auth'
 
 /**
- * Хранилище текущего пользователя.
+ * Авторизация MiniSED.
  *
- * ВРЕМЕННО: личность = b24_user_id, как в текущем бэкенде.
- * Источники (по приоритету):
- *   1) ?b24_user_id=... в URL (удобно для локальной отладки с домена);
- *   2) BX24.user.current() — когда приложение открыто внутри iframe Битрикс24.
- *
- * Этап 2 (Bitrix Connector) и нормальная авторизация MiniSED заменят это
- * на серверную сессию/токен — правки будут в этом сторе.
+ * Два режима:
+ *   1) Вход по email+пароль → токен (хранится в localStorage) → профиль.
+ *   2) Битрикс/дев: ?b24_user_id=<id> в URL (сохраняется в localStorage),
+ *      либо BX24 внутри портала.
+ * Личность для API — b24UserId (из профиля или из режима Битрикс).
  */
 export const useAuthStore = defineStore('auth', () => {
-  const STORAGE_KEY = 'minised_b24_user_id'
+  const TOKEN_KEY = 'minised_token'
+  const B24_KEY = 'minised_b24_user_id'
+
+  const token = ref<string | null>(null)
+  const profile = ref<AuthProfile | null>(null)
   const b24UserId = ref<number | null>(null)
   const ready = ref(false)
 
-  function setUser(id: number) {
-    b24UserId.value = id
+  const isAuthenticated = computed(() => !!token.value || !!b24UserId.value)
+  const displayName = computed(
+    () => profile.value?.fio || (b24UserId.value ? `Пользователь #${b24UserId.value}` : ''),
+  )
+
+  function ls(key: string, value?: string | null): string | null {
     try {
-      window.localStorage.setItem(STORAGE_KEY, String(id))
+      if (value === undefined) return window.localStorage.getItem(key)
+      if (value === null) window.localStorage.removeItem(key)
+      else window.localStorage.setItem(key, value)
     } catch {
-      /* localStorage может быть недоступен */
+      /* localStorage недоступен */
+    }
+    return null
+  }
+
+  function applyProfile(p: AuthProfile) {
+    profile.value = p
+    if (p.bitrix_id) {
+      b24UserId.value = p.bitrix_id
+      ls(B24_KEY, String(p.bitrix_id))
     }
   }
 
-  // 1) ?b24_user_id в URL (приоритет — можно переключить пользователя);
-  // 2) сохранённый ранее в localStorage (переживает перезагрузку и прямые ссылки).
-  function initFromUrl(): boolean {
-    const params = new URLSearchParams(window.location.search)
-    const raw = params.get('b24_user_id')
+  async function login(email: string, password: string) {
+    const res = await authApi.login(email, password)
+    token.value = res.token
+    ls(TOKEN_KEY, res.token)
+    applyProfile(res)
+  }
+
+  async function logout() {
+    try {
+      if (token.value) await authApi.logout()
+    } catch {
+      /* игнорируем сетевые ошибки при выходе */
+    }
+    token.value = null
+    profile.value = null
+    b24UserId.value = null
+    ls(TOKEN_KEY, null)
+    ls(B24_KEY, null)
+  }
+
+  function initB24FromUrl(): boolean {
+    const raw = new URLSearchParams(window.location.search).get('b24_user_id')
     if (raw) {
       const id = parseInt(raw, 10)
       if (!Number.isNaN(id)) {
-        setUser(id)
+        b24UserId.value = id
+        ls(B24_KEY, String(id))
         return true
       }
-    }
-    try {
-      const stored = window.localStorage.getItem(STORAGE_KEY)
-      if (stored) {
-        const id = parseInt(stored, 10)
-        if (!Number.isNaN(id)) {
-          b24UserId.value = id
-          return true
-        }
-      }
-    } catch {
-      /* игнорируем */
     }
     return false
   }
 
-  function initFromBitrix(): Promise<boolean> {
-    return new Promise((resolve) => {
-      const BX24 = (window as unknown as { BX24?: BitrixSDK }).BX24
-      if (!BX24 || !BX24.init) {
-        resolve(false)
-        return
-      }
-      BX24.init(() => {
-        BX24.callMethod('user.current', {}, (res) => {
-          if (res.error()) {
-            resolve(false)
-            return
-          }
-          const user = res.data()
-          const id = parseInt(String(user.ID), 10)
-          if (!Number.isNaN(id)) {
-            setUser(id)
-            resolve(true)
-          } else {
-            resolve(false)
-          }
-        })
-      })
-    })
-  }
-
   async function init() {
-    if (!initFromUrl()) {
-      await initFromBitrix()
+    // 1) явное переключение через URL (дев/Битрикс)
+    initB24FromUrl()
+
+    // 2) токен из хранилища → подтягиваем профиль
+    const savedToken = ls(TOKEN_KEY)
+    if (savedToken) {
+      token.value = savedToken
+      try {
+        applyProfile(await authApi.me())
+      } catch {
+        // токен протух — сбрасываем
+        token.value = null
+        ls(TOKEN_KEY, null)
+      }
     }
+
+    // 3) восстановить b24 из хранилища (если ещё не задан)
+    if (!b24UserId.value) {
+      const saved = ls(B24_KEY)
+      if (saved) {
+        const id = parseInt(saved, 10)
+        if (!Number.isNaN(id)) b24UserId.value = id
+      }
+    }
+
     ready.value = true
   }
 
-  return { b24UserId, ready, init }
+  return {
+    token, profile, b24UserId, ready, isAuthenticated, displayName,
+    login, logout, init,
+  }
 })
-
-// Минимальные типы BX24 SDK (только то, что используем на переходный период).
-interface BitrixSDK {
-  init(cb: () => void): void
-  callMethod(
-    method: string,
-    params: Record<string, unknown>,
-    cb: (res: { error(): unknown; data(): { ID: string | number } }) => void,
-  ): void
-}

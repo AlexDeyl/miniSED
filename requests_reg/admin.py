@@ -1,6 +1,13 @@
 from django.contrib import admin
 
-from .models import RegulatoryRequest, RoleAssignment
+from .models import PowerTemplate, RegulatoryRequest, RoleAssignment
+
+
+@admin.register(PowerTemplate)
+class PowerTemplateAdmin(admin.ModelAdmin):
+    list_display = ("code", "name", "is_active")
+    list_filter = ("is_active",)
+    search_fields = ("code", "name", "powers")
 
 
 @admin.register(RegulatoryRequest)

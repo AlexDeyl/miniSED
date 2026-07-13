@@ -14,7 +14,7 @@ from rest_framework.response import Response
 from core.auth import get_current_b24_id
 
 from . import constants, services
-from .models import RegulatoryRequest
+from .models import PowerTemplate, RegulatoryRequest
 from .serializers import (
     RegulatoryRequestDetailSerializer,
     RegulatoryRequestListSerializer,
@@ -162,3 +162,11 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
             "statuses": [{"code": c, "name": n} for c, n in constants.STATUS_CHOICES],
             "delivery_methods": [{"code": c, "name": n} for c, n in constants.DELIVERY_CHOICES],
         })
+
+    @action(detail=False, methods=["get"], url_path="power_templates")
+    def power_templates(self, request):
+        """Матрица шаблонов доверенностей (для выбора полномочий в анкете)."""
+        qs = PowerTemplate.objects.filter(is_active=True)
+        return Response([
+            {"code": t.code, "name": t.name, "powers": t.powers} for t in qs
+        ])

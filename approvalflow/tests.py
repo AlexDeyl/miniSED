@@ -193,7 +193,7 @@ class ApiTests(TestCase):
     APPROVER = 20
 
     def test_requires_auth(self):
-        self.assertEqual(api().get("/api/approvalflow/approvals/").status_code, 403)
+        self.assertIn(api().get("/api/approvalflow/approvals/").status_code, (401, 403))
 
     def test_create_submit_decide_flow(self):
         # создать черновик

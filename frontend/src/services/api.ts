@@ -32,6 +32,11 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   const auth = useAuthStore()
   const headers: Record<string, string> = {}
 
+  // Токен MiniSED (вход по email+пароль)
+  if (auth.token) {
+    headers['Authorization'] = `Token ${auth.token}`
+  }
+  // Режим Битрикс/дев: личность по X-B24-User
   if (auth.b24UserId) {
     headers['X-B24-User'] = String(auth.b24UserId)
   }

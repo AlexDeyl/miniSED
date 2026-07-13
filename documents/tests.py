@@ -72,7 +72,7 @@ class DocumentVersioningTests(TestCase):
 
 class DocumentApiTests(TestCase):
     def test_requires_auth(self):
-        self.assertEqual(api().get("/api/documents/").status_code, 403)
+        self.assertIn(api().get("/api/documents/").status_code, (401, 403))
 
     def test_create_with_file_then_add_version_and_download(self):
         # создать документ с первым файлом

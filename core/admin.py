@@ -1,4 +1,6 @@
+from django import forms
 from django.contrib import admin
+from django.contrib.auth.models import User
 
 from .models import (
     CFO,
@@ -72,12 +74,58 @@ class RoleAdmin(admin.ModelAdmin):
     filter_horizontal = ("permissions",)
 
 
+class UserProfileAdminForm(forms.ModelForm):
+    """Позволяет админу завести вход (email+пароль) прямо в карточке профиля."""
+
+    password = forms.CharField(
+        label="Пароль для входа",
+        required=False,
+        widget=forms.PasswordInput(render_value=False),
+        help_text="Задать/сменить пароль. Логин = email. Оставьте пустым, чтобы не менять.",
+    )
+
+    class Meta:
+        model = UserProfile
+        fields = "__all__"
+
+    def save(self, commit=True):
+        profile = super().save(commit=False)
+        email = (profile.email or "").strip().lower()
+        pwd = self.cleaned_data.get("password")
+
+        if email:
+            user = profile.auth_user
+            if user is None:
+                user, _ = User.objects.get_or_create(
+                    username=email, defaults={"email": email}
+                )
+                profile.auth_user = user
+            # синхронизируем email/username и активность
+            if user.username != email:
+                user.username = email
+            user.email = email
+            user.is_active = profile.is_active
+            if pwd:
+                user.set_password(pwd)
+            user.save()
+
+        if commit:
+            profile.save()
+            self.save_m2m()
+        return profile
+
+
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
-    list_display = ("fio", "email", "bitrix_id", "position", "is_active")
+    form = UserProfileAdminForm
+    list_display = ("fio", "email", "bitrix_id", "position", "has_login", "is_active")
     list_filter = ("is_active", "roles", "organizations")
     search_fields = ("fio", "email", "bitrix_id")
     filter_horizontal = ("roles", "organizations", "facilities")
+
+    @admin.display(boolean=True, description="Вход")
+    def has_login(self, obj):
+        return obj.auth_user_id is not None
 
 
 @admin.register(ExternalLink)

@@ -3,6 +3,7 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 from rest_framework.routers import DefaultRouter
+from core import auth_views
 from approvals.views import (
     AgreementViewSet,
     ApprovalTemplateViewSet,
@@ -41,6 +42,9 @@ urlpatterns = [
     path("auth/bitrix/start/", bitrix_auth_start, name="bitrix_auth_start"),
     path("auth/bitrix/callback/", bitrix_auth_callback,
          name="bitrix_auth_callback"),
+    path("api/auth/login/", auth_views.login, name="auth_login"),
+    path("api/auth/me/", auth_views.me, name="auth_me"),
+    path("api/auth/logout/", auth_views.logout, name="auth_logout"),
     path("api/bitrix/", include("bitrix.urls")),
     path("api/core/", include("core.urls")),
     path("api/approvalflow/", include("approvalflow.urls")),

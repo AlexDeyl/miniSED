@@ -181,6 +181,13 @@ class ApiTests(TestCase):
         queue = api(30).get("/api/reg/requests/legal_queue/").json()
         self.assertTrue(any(x["id"] == rid for x in queue))
 
+    def test_power_templates(self):
+        data = api(1).get("/api/reg/requests/power_templates/").json()
+        codes = {t["code"] for t in data}
+        self.assertIn("УПР1", codes)
+        self.assertIn("ФНС1", codes)
+        self.assertEqual(len(data), 16)
+
     def test_legal_execute_via_api(self):
         rid = self._create()
         r = api(1).post(f"/api/reg/requests/{rid}/submit/", {

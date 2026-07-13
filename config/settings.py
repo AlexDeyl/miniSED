@@ -57,6 +57,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
+    "rest_framework.authtoken",
     "core",
     "documents",
     "approvalflow",
@@ -101,7 +102,11 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 
 REST_FRAMEWORK = {
-    "DEFAULT_AUTHENTICATION_CLASSES": [],
+    # Token-авторизация MiniSED (вход по email+пароль). Битрикс-режим
+    # (заголовок X-B24-User) продолжает работать параллельно — см. core.auth.
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.TokenAuthentication",
+    ],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.AllowAny",
     ],

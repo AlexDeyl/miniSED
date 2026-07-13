@@ -5,6 +5,12 @@ const router = createRouter({
   routes: [
     { path: '/', redirect: '/tasks' },
     {
+      path: '/login',
+      name: 'login',
+      component: () => import('@/views/LoginView.vue'),
+      meta: { title: 'Вход', public: true, noShell: true },
+    },
+    {
       path: '/tasks',
       name: 'tasks',
       component: () => import('@/views/TasksView.vue'),

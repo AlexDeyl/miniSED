@@ -1,20 +1,26 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
-import { RouterView, RouterLink, useRoute } from 'vue-router'
+import { computed } from 'vue'
+import { RouterView, RouterLink, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
 const route = useRoute()
+const router = useRouter()
 
 const pageTitle = computed(() => (route.meta.title as string) || 'MiniSED')
+const bare = computed(() => route.meta.noShell === true)
 
-onMounted(() => {
-  auth.init()
-})
+async function doLogout() {
+  await auth.logout()
+  router.push('/login')
+}
 </script>
 
 <template>
-  <div class="app-shell">
+  <!-- Страница входа — без оболочки -->
+  <RouterView v-if="bare" />
+
+  <div v-else class="app-shell">
     <aside class="sidebar">
       <div class="sidebar-logo">
         MiniSED
@@ -28,8 +34,8 @@ onMounted(() => {
         <RouterLink to="/deals"><span>Поиск сделок</span></RouterLink>
       </nav>
       <div class="sidebar-footer">
-        <template v-if="auth.b24UserId">Пользователь #{{ auth.b24UserId }}</template>
-        <template v-else-if="auth.ready">не авторизован</template>
+        <div v-if="auth.displayName" style="margin-bottom:6px">{{ auth.displayName }}</div>
+        <button class="sidebar-logout" @click="doLogout">Выйти</button>
       </div>
     </aside>
 
@@ -46,8 +52,7 @@ onMounted(() => {
 
       <div class="main-body">
         <div class="main-body-inner">
-          <RouterView v-if="auth.ready" />
-          <p v-else class="state">Загрузка…</p>
+          <RouterView />
         </div>
       </div>
     </main>

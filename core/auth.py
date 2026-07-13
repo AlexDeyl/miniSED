@@ -1,16 +1,30 @@
 """
-Общий помощник определения текущего пользователя.
+Определение текущего пользователя.
 
-Переходный контракт (как в approvals): личность = b24_user_id, приходит
-заголовком X-B24-User (из фронта) или из сессии после OAuth. На этапе
-авторизации будет заменён на нормальную сессию/токен MiniSED — правки
-локализуются здесь.
+Два режима (параллельно):
+  1) Вход в MiniSED по email+пароль → токен → request.user (Django User),
+     связанный с UserProfile. Личность = UserProfile.bitrix_id.
+  2) Запуск из Битрикс24 → заголовок X-B24-User (переходный режим).
 """
 
 from __future__ import annotations
 
 
+def get_current_profile(request):
+    """UserProfile авторизованного пользователя MiniSED (или None)."""
+    user = getattr(request, "user", None)
+    if user is not None and user.is_authenticated:
+        return getattr(user, "minised_profile", None)
+    return None
+
+
 def get_current_b24_id(request) -> int | None:
+    # 1) авторизованный пользователь MiniSED
+    profile = get_current_profile(request)
+    if profile is not None and profile.bitrix_id:
+        return profile.bitrix_id
+
+    # 2) режим Битрикс24 — заголовок X-B24-User
     header = request.META.get("HTTP_X_B24_USER")
     if header:
         try:

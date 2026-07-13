@@ -13,6 +13,26 @@ from core.models import CFO, Facility, Organization
 from . import constants
 
 
+class PowerTemplate(models.Model):
+    """
+    Справочник шаблонов доверенностей (матрица полномочий, УПР1/ФНС1/…).
+    Используется в анкете заявки на доверенность для выбора полномочий.
+    """
+
+    code = models.CharField("Код", max_length=32, unique=True)
+    name = models.CharField("Наименование", max_length=255)
+    powers = models.TextField("Полномочия", blank=True)
+    is_active = models.BooleanField("Активен", default=True)
+
+    class Meta:
+        ordering = ["code"]
+        verbose_name = "Шаблон доверенности"
+        verbose_name_plural = "Шаблоны доверенностей (матрица)"
+
+    def __str__(self):
+        return f"{self.code} — {self.name}"
+
+
 class RoleAssignment(models.Model):
     """
     Кто исполняет маршрутную роль в заданном контексте (организация/ЦФО/объект).

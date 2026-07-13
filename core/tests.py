@@ -137,3 +137,55 @@ class DirectoryApiTests(TestCase):
         data = self.client.get("/api/core/organizations/").json()
         names = {o["short_name"] for o in data}
         self.assertNotIn("Скрытая", names)
+
+
+class AuthTests(TestCase):
+    def setUp(self):
+        from django.contrib.auth.models import User
+
+        self.user = User.objects.create_user(
+            username="ivanov@nord.ru", email="ivanov@nord.ru", password="secret123"
+        )
+        self.profile = UserProfile.objects.create(
+            fio="Иванов И.И.", email="ivanov@nord.ru", bitrix_id=1099, auth_user=self.user
+        )
+        self.profile.roles.add(Role.objects.get(code="initiator"))
+        self.client = APIClient()
+
+    def test_login_returns_token_and_profile(self):
+        r = self.client.post(
+            "/api/auth/login/", {"email": "ivanov@nord.ru", "password": "secret123"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("token", r.json())
+        self.assertEqual(r.json()["bitrix_id"], 1099)
+        self.assertIn("initiator", r.json()["roles"])
+
+    def test_login_wrong_password(self):
+        r = self.client.post(
+            "/api/auth/login/", {"email": "ivanov@nord.ru", "password": "nope"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 401)
+
+    def test_me_with_token(self):
+        token = self.client.post(
+            "/api/auth/login/", {"email": "ivanov@nord.ru", "password": "secret123"},
+            format="json",
+        ).json()["token"]
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token}")
+        r = self.client.get("/api/auth/me/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["fio"], "Иванов И.И.")
+
+    def test_token_resolves_identity_without_bitrix_header(self):
+        """Авторизованный пользователь MiniSED виден API как b24-пользователь."""
+        token = self.client.post(
+            "/api/auth/login/", {"email": "ivanov@nord.ru", "password": "secret123"},
+            format="json",
+        ).json()["token"]
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token}")
+        # эндпоинт требует b24-личность; без X-B24-User, только по токену
+        r = self.client.get("/api/reg/requests/")
+        self.assertEqual(r.status_code, 200)
