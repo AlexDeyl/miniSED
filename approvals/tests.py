@@ -382,6 +382,22 @@ class SheetAndVersionedDocsTests(TestCase):
         self.assertEqual(resp["Content-Type"], "application/pdf")
         self.assertTrue(b"".join(resp.streaming_content).startswith(b"%PDF"))
 
+    def test_sheet_resolves_participant_names(self):
+        from django.contrib.auth.models import User
+        from core.models import UserProfile
+        from approvals.sheet import _name_maps, _pname
+
+        u = User.objects.create_user("p@x.ru", "p@x.ru", "pass12345")
+        UserProfile.objects.create(fio="Пётр Иванов", bitrix_id=APPROVER_A, email="p@x.ru", auth_user=u)
+        UserProfile.objects.create(fio="Внешний Гость", email="guest@x.ru")
+
+        a = Factory.agreement(author=AUTHOR)
+        p_int = Factory.internal(a, APPROVER_A)
+        p_ext = Factory.external(a, "guest@x.ru")
+        by_bid, by_email = _name_maps(a)
+        self.assertEqual(_pname(p_int, by_bid, by_email), "Пётр Иванов")
+        self.assertEqual(_pname(p_ext, by_bid, by_email), "Внешний Гость")
+
     def test_versioned_documents_in_detail(self):
         from django.core.files.uploadedfile import SimpleUploadedFile
         from documents import services as docsvc

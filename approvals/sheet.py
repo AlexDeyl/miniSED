@@ -46,14 +46,50 @@ def _fmt(dt) -> str:
     return timezone.localtime(dt).strftime("%d.%m.%Y %H:%M")
 
 
-def _pname(p: Participant) -> str:
+def _name_maps(agreement: Agreement):
+    """
+    Карты «ID Б24 → ФИО» и «email → ФИО» из профилей пользователей
+    (UserProfile связывает почту и Bitrix ID). Один запрос на каждую карту.
+    """
+    from core.models import UserProfile
+
+    parts = list(agreement.participants.all())
+    bids = {p.b24_user_id for p in parts if p.b24_user_id}
+    if agreement.author_b24_id:
+        bids.add(agreement.author_b24_id)
+    emails = {p.email.strip().lower() for p in parts if p.email}
+
+    by_bid = {
+        u.bitrix_id: u.fio
+        for u in UserProfile.objects.filter(bitrix_id__in=bids)
+        if u.fio
+    }
+    by_email = {
+        u.email.strip().lower(): u.fio
+        for u in UserProfile.objects.filter(email__in=emails)
+        if u.fio
+    }
+    return by_bid, by_email
+
+
+def _pname(p: Participant, by_bid: dict, by_email: dict) -> str:
+    """Имя согласующего: ФИО из профиля, иначе — фолбэк на ID/email."""
     if p.type == Participant.TYPE_INTERNAL and p.b24_user_id:
-        return f"USER #{p.b24_user_id}"
-    return p.email or p.name or "участник"
+        return by_bid.get(p.b24_user_id) or f"USER #{p.b24_user_id}"
+    if p.email:
+        return by_email.get(p.email.strip().lower()) or p.email
+    return p.name or "участник"
+
+
+def _initiator_name(agreement: Agreement, by_bid: dict) -> str:
+    if agreement.author_b24_id and agreement.author_b24_id in by_bid:
+        return by_bid[agreement.author_b24_id]
+    return f"ID Б24 {agreement.author_b24_id}"
 
 
 def render_pdf(agreement: Agreement) -> bytes:
     font = _ensure_font()
+    by_bid, by_email = _name_maps(agreement)
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer, pagesize=A4,
@@ -73,7 +109,7 @@ def render_pdf(agreement: Agreement) -> bytes:
 
     head = Table(
         [[Paragraph(k, label), Paragraph(v, base)] for k, v in [
-            ("Инициатор (ID Б24)", str(agreement.author_b24_id)),
+            ("Инициатор", _initiator_name(agreement, by_bid)),
             ("Тип", "Параллельное" if agreement.flow_type == Agreement.FLOW_PARALLEL else "Последовательное"),
             ("Сумма", str(agreement.amount) if agreement.amount is not None else "—"),
             ("Дедлайн", str(agreement.deadline) if agreement.deadline else "—"),
@@ -91,9 +127,9 @@ def render_pdf(agreement: Agreement) -> bytes:
     # Участники и решения
     story.append(Paragraph("Согласующие", h2))
     data = [["Согласующий", "Решение", "Дата", "Комментарий"]]
-    for p in agreement.participants.all().order_by("order_index"):
+    for p in agreement.participants.all().order_by("round_number", "order_index"):
         data.append([
-            Paragraph(_pname(p), base),
+            Paragraph(_pname(p, by_bid, by_email), base),
             Paragraph(DEC_RU.get(p.status, p.status), base),
             Paragraph(_fmt(p.decided_at), base),
             Paragraph(p.comment or "—", base),
@@ -115,7 +151,7 @@ def render_pdf(agreement: Agreement) -> bytes:
         story.append(Paragraph("История согласования", h2))
         for log in logs:
             story.append(Paragraph(
-                f"{_pname(log.participant)} — {DEC_RU.get(log.status, log.status)} · {_fmt(log.decided_at)}"
+                f"{_pname(log.participant, by_bid, by_email)} — {DEC_RU.get(log.status, log.status)} · {_fmt(log.decided_at)}"
                 + (f" · {log.comment}" if log.comment else ""),
                 base,
             ))
