@@ -23,22 +23,46 @@ from . import constants as C
 from .models import PowerTemplate
 
 
+import re
+
+
 def _fmt_date(v) -> str:
-    return str(v) if v else "__.__.____"
+    """ГГГГ-ММ-ДД (из HTML-инпутов) → ДД.ММ.ГГГГ."""
+    if not v:
+        return "__.__.____"
+    s = str(v)
+    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})", s)
+    if m:
+        return f"{m.group(3)}.{m.group(2)}.{m.group(1)}"
+    return s
 
 
+# ■/□ надёжно есть в системных шрифтах (в отличие от ☑, который в Arial нет).
 def _checks(choices, selected: list[str]) -> str:
-    """Строка вида «☑ Разовая  ☐ Специальная …» — как чекбоксы в форме."""
+    """Список опций с отметкой выбранных (жирным)."""
     selected = set(selected or [])
     parts = []
     for code, name in choices:
-        mark = "☑" if code in selected else "☐"
-        parts.append(f"{mark} {name}")
+        if code in selected:
+            parts.append(f"■ <b>{name}</b>")
+        else:
+            parts.append(f"□ {name}")
     return "<br/>".join(parts)
 
 
 def _one(choices, code: str) -> str:
     return _checks(choices, [code] if code else [])
+
+
+def _initiator_name(request) -> str:
+    """ФИО инициатора из профиля (заводится админом); иначе — ID Б24."""
+    from core.models import UserProfile
+
+    if request.initiator_b24_id:
+        p = UserProfile.objects.filter(bitrix_id=request.initiator_b24_id).first()
+        if p and p.fio:
+            return p.fio
+    return f"ID Б24 {request.initiator_b24_id or '—'}"
 
 
 def render_pdf(request) -> bytes:
@@ -145,7 +169,7 @@ def render_pdf(request) -> bytes:
 
     story.append(Spacer(1, 10))
     story.append(Paragraph(
-        f"Инициатор (ID Б24): {request.initiator_b24_id or '—'} · "
+        f"Инициатор: {_initiator_name(request)} · "
         f"Сформировано: {timezone.localtime(timezone.now()):%d.%m.%Y %H:%M}", label,
     ))
 
