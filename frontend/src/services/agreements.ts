@@ -47,4 +47,9 @@ export const agreements = {
   },
 
   templates: () => api.get<AgreementTemplate[]>('/templates/'),
+  createTemplate: (payload: {
+    name: string
+    scope: string
+    participants: { type: string; b24_user_id: number | null; email: string; name: string; order_index: number }[]
+  }) => api.post<AgreementTemplate>('/templates/', payload),
 }

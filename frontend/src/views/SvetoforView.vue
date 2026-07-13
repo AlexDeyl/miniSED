@@ -129,11 +129,79 @@ const isAuthor = computed(() => selected.value?.author_b24_id === uid.value)
 const showForm = ref(false)
 const form = ref({
   title: '', description: '', amount: '', deadline: '', crm_link: '',
-  flow_type: 'parallel', internal_users: '', external_emails: '',
+  flow_type: 'parallel', internal_users: '',
 })
 const formFiles = ref<File[]>([])
 const savingForm = ref(false)
 
+// внешние участники — чипами (как в старой форме)
+const externalList = ref<string[]>([])
+const externalInput = ref('')
+function addExternal() {
+  const e = externalInput.value.trim()
+  if (e && !externalList.value.includes(e)) externalList.value.push(e)
+  externalInput.value = ''
+}
+function removeExternal(i: number) { externalList.value.splice(i, 1) }
+
+// шаблоны маршрута
+const formTemplates = ref<AgreementTemplate[]>([])
+const selectedTemplate = ref<number | ''>('')
+const templateName = ref('')
+const templateScope = ref('private')
+const savingTemplate = ref(false)
+
+async function loadFormTemplates() {
+  try { formTemplates.value = await agreements.templates() } catch { /* не критично */ }
+}
+function applyTemplate() {
+  const t = formTemplates.value.find((x) => x.id === selectedTemplate.value)
+  if (!t) return
+  form.value.internal_users = t.participants
+    .filter((p) => p.type === 'internal' && p.b24_user_id)
+    .map((p) => p.b24_user_id).join(', ')
+  externalList.value = t.participants.filter((p) => p.type === 'external').map((p) => p.email)
+}
+function buildParticipants() {
+  const parts: { type: string; b24_user_id: number | null; email: string; name: string; order_index: number }[] = []
+  let idx = 0
+  form.value.internal_users.split(',').map((s) => s.trim()).filter(Boolean).forEach((s) => {
+    const id = parseInt(s, 10)
+    if (!Number.isNaN(id)) parts.push({ type: 'internal', b24_user_id: id, email: '', name: '', order_index: idx++ })
+  })
+  externalList.value.forEach((email) => parts.push({ type: 'external', b24_user_id: null, email, name: '', order_index: idx++ }))
+  return parts
+}
+async function saveTemplate() {
+  const parts = buildParticipants()
+  if (!templateName.value.trim() || !parts.length) {
+    error.value = 'Укажите название шаблона и хотя бы одного участника.'
+    return
+  }
+  savingTemplate.value = true
+  error.value = null
+  try {
+    await agreements.createTemplate({ name: templateName.value.trim(), scope: templateScope.value, participants: parts })
+    templateName.value = ''
+    await loadFormTemplates()
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.message : 'Не удалось сохранить шаблон'
+  } finally {
+    savingTemplate.value = false
+  }
+}
+
+function crmDialogHint() {
+  alert('Выбор из CRM доступен внутри Битрикс24. Вставьте ссылку на сделку вручную.')
+}
+function b24DialogHint() {
+  alert('Выбор сотрудников через диалог доступен внутри Битрикс24. Укажите ID через запятую.')
+}
+
+function openForm() {
+  showForm.value = true
+  loadFormTemplates()
+}
 function onFormFiles(e: Event) {
   formFiles.value = Array.from((e.target as HTMLInputElement).files || [])
 }
@@ -142,10 +210,16 @@ async function createApproval() {
   savingForm.value = true
   error.value = null
   try {
-    const created = await agreements.create({ ...form.value, files: formFiles.value })
+    const created = await agreements.create({
+      ...form.value,
+      external_emails: externalList.value.join(','),
+      files: formFiles.value,
+    })
     showForm.value = false
-    form.value = { title: '', description: '', amount: '', deadline: '', crm_link: '', flow_type: 'parallel', internal_users: '', external_emails: '' }
+    form.value = { title: '', description: '', amount: '', deadline: '', crm_link: '', flow_type: 'parallel', internal_users: '' }
+    externalList.value = []
     formFiles.value = []
+    selectedTemplate.value = ''
     setMode('my')
     await open(created.id)
   } catch (e) {
@@ -178,7 +252,7 @@ onMounted(loadList)
           {{ t.label }}
         </button>
       </div>
-      <button class="btn btn--primary" @click="showForm = true">+ Новое согласование</button>
+      <button class="btn btn--primary" @click="openForm">+ Новое согласование</button>
     </div>
 
     <p v-if="error" class="state state--error" style="margin:8px 0">{{ error }}</p>
@@ -358,21 +432,92 @@ onMounted(loadList)
           <button class="link-btn" @click="showForm = false">Закрыть</button>
         </div>
         <div class="slideover-body">
-          <label class="form-field"><span>Название *</span><input v-model="form.title" /></label>
-          <label class="form-field"><span>Описание</span><textarea v-model="form.description" rows="3"></textarea></label>
-          <div class="form-field">
-            <span>Тип согласования</span>
-            <label class="radio"><input type="radio" value="parallel" v-model="form.flow_type" /> Параллельное (все сразу)</label>
-            <label class="radio"><input type="radio" value="sequential" v-model="form.flow_type" /> Последовательное (по очереди)</label>
+          <div class="fr">
+            <label class="fr-label fr-req">Название</label>
+            <input class="fr-input" v-model="form.title" />
           </div>
-          <div class="form-row">
-            <label class="form-field"><span>Сумма</span><input v-model="form.amount" type="number" /></label>
-            <label class="form-field"><span>Дедлайн</span><input v-model="form.deadline" type="date" /></label>
+
+          <div class="fr">
+            <label class="fr-label">Описание</label>
+            <textarea class="fr-input" v-model="form.description" rows="3"></textarea>
           </div>
-          <label class="form-field"><span>Привязка к CRM (ссылка)</span><input v-model="form.crm_link" placeholder="https://…/crm/deal/…" /></label>
-          <label class="form-field"><span>Участники из Б24 (ID через запятую)</span><input v-model="form.internal_users" placeholder="1099, 1535" /></label>
-          <label class="form-field"><span>Внешние участники (email через запятую)</span><input v-model="form.external_emails" placeholder="a@b.ru, c@d.ru" /></label>
-          <label class="form-field"><span>Файлы</span><input type="file" multiple @change="onFormFiles" /></label>
+
+          <div class="fr">
+            <label class="fr-label">Тип согласования</label>
+            <label class="fr-radio"><input type="radio" value="parallel" v-model="form.flow_type" /> Параллельное (все могут голосовать сразу)</label>
+            <label class="fr-radio"><input type="radio" value="sequential" v-model="form.flow_type" /> Последовательное (по очереди, в порядке добавления)</label>
+          </div>
+
+          <div class="fr">
+            <label class="fr-label">Сумма</label>
+            <input class="fr-input" v-model="form.amount" type="number" />
+          </div>
+
+          <div class="fr">
+            <label class="fr-label">Дедлайн</label>
+            <input class="fr-input" v-model="form.deadline" type="date" />
+            <div class="fr-hint">Необязательное поле, используется для напоминаний.</div>
+          </div>
+
+          <div class="fr">
+            <label class="fr-label">Привязка к CRM</label>
+            <div class="fr-inline">
+              <input class="fr-input" v-model="form.crm_link" placeholder="Вставьте ссылку или выберите" />
+              <button type="button" class="ag-btn ag-btn--blue" @click="crmDialogHint">Выбрать из CRM</button>
+            </div>
+            <div class="fr-hint">Можно вставить ссылку на сделку/счёт/контакт вручную или выбрать элемент CRM через диалог Битрикс24.</div>
+          </div>
+
+          <div class="fr">
+            <label class="fr-label">Участники из Б24</label>
+            <div class="fr-inline">
+              <input class="fr-input" v-model="form.internal_users" placeholder="Например: 1, 25, 37" />
+              <button type="button" class="ag-btn ag-btn--blue" @click="b24DialogHint">+ Выбрать в Б24</button>
+            </div>
+            <div class="fr-hint">Можно указать через запятую или выбрать через диалог Bitrix24.</div>
+          </div>
+
+          <div class="fr">
+            <label class="fr-label">Внешние участники (email)</label>
+            <div class="fr-inline">
+              <input class="fr-input" v-model="externalInput" type="email" placeholder="email@example.com" @keyup.enter="addExternal" />
+              <button type="button" class="ag-btn ag-btn--soft" @click="addExternal">+ Добавить</button>
+            </div>
+            <div v-if="externalList.length" class="chips">
+              <span v-for="(em, i) in externalList" :key="i" class="chip chip--ext">
+                {{ em }} <button type="button" class="chip-x" @click="removeExternal(i)">×</button>
+              </span>
+            </div>
+            <div class="fr-hint">На указанные адреса будет отправлена ссылка для согласования.</div>
+          </div>
+
+          <div class="fr">
+            <label class="fr-label">Шаблон согласования</label>
+            <div class="fr-inline">
+              <select class="fr-input" v-model="selectedTemplate" @change="applyTemplate">
+                <option value="">— Не использовать шаблон —</option>
+                <option v-for="t in formTemplates" :key="t.id" :value="t.id">{{ t.name }}</option>
+              </select>
+              <button type="button" class="ag-btn ag-btn--soft" @click="loadFormTemplates">Обновить</button>
+            </div>
+            <div class="fr-inline" style="margin-top:8px">
+              <input class="fr-input" v-model="templateName" placeholder="Название шаблона" />
+              <select class="fr-input" style="max-width:130px" v-model="templateScope">
+                <option value="private">Только мне</option>
+                <option value="public">Всем</option>
+              </select>
+            </div>
+            <button type="button" class="ag-btn ag-btn--green" style="margin-top:8px" :disabled="savingTemplate" @click="saveTemplate">
+              {{ savingTemplate ? 'Сохранение…' : 'Сохранить как шаблон' }}
+            </button>
+            <div class="fr-hint">Шаблон сохраняет только маршрут (список участников). Название и описание согласования вы задаёте отдельно при создании.</div>
+          </div>
+
+          <div class="fr">
+            <label class="fr-label">Файлы</label>
+            <input type="file" multiple @change="onFormFiles" />
+            <div class="fr-hint">Прикрепите документы, которые нужно согласовать.</div>
+          </div>
         </div>
         <div class="slideover-foot">
           <button class="btn btn--primary" :disabled="savingForm" @click="createApproval">
@@ -454,6 +599,22 @@ onMounted(loadList)
 .ag-btn--green { background: var(--green-main); color: #fff; border-color: var(--green-main); }
 .ag-btn--orange { background: var(--orange-main); color: #fff; border-color: var(--orange-main); }
 .ag-btn--red { background: var(--red-main); color: #fff; border-color: var(--red-main); }
+.ag-btn--blue { background: #2f6fd6; color: #fff; border-color: #2f6fd6; white-space: nowrap; }
+
+/* --- Форма создания (порт из старого app.html) --- */
+.fr { margin-bottom: 18px; }
+.fr-label { display: block; font-size: 12px; font-weight: 500; margin-bottom: 4px; }
+.fr-req::after { content: " *"; color: var(--red-main); }
+.fr-input { width: 100%; box-sizing: border-box; padding: 8px 11px; border-radius: 4px; border: 1px solid #d0d0d0; font: inherit; font-size: 14px; }
+textarea.fr-input { resize: vertical; min-height: 60px; }
+.fr-hint { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+.fr-radio { display: block; font-size: 13px; margin: 4px 0; }
+.fr-inline { display: flex; gap: 8px; align-items: center; }
+.fr-inline .fr-input { flex: 1; min-width: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 999px; background: #f1f3f4; font-size: 12px; }
+.chip--ext { background: #fff3e0; }
+.chip-x { border: none; background: transparent; cursor: pointer; font-size: 14px; line-height: 1; color: var(--text-muted); padding: 0; }
 
 .slideover-back { position: fixed; inset: 0; background: rgba(0,0,0,0.25); display: flex; justify-content: flex-end; z-index: 50; }
 .slideover { width: 420px; max-width: 92vw; background: #fff; height: 100%; display: flex; flex-direction: column; box-shadow: -2px 0 12px rgba(0,0,0,0.12); }
