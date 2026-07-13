@@ -11,6 +11,25 @@ const router = createRouter({
       meta: { title: 'Мои задачи' },
     },
     {
+      path: '/flow',
+      name: 'flow',
+      component: () => import('@/views/ApprovalsView.vue'),
+      meta: { title: 'Согласования' },
+    },
+    {
+      path: '/flow/new',
+      name: 'flow-new',
+      component: () => import('@/views/ApprovalCreateView.vue'),
+      meta: { title: 'Новое согласование' },
+    },
+    {
+      path: '/flow/:id',
+      name: 'flow-detail',
+      component: () => import('@/views/ApprovalDetailView.vue'),
+      props: true,
+      meta: { title: 'Согласование' },
+    },
+    {
       path: '/deals',
       name: 'deals',
       component: () => import('@/views/DealSearchView.vue'),

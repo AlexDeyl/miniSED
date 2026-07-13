@@ -4,6 +4,7 @@
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
+from rest_framework.test import APIClient
 
 from approvals.models import Agreement
 from .models import Document, DocumentVersion
@@ -12,6 +13,13 @@ from . import services
 
 def upload(name, content=b"data"):
     return SimpleUploadedFile(name, content, content_type="application/octet-stream")
+
+
+def api(uid=None):
+    client = APIClient()
+    if uid is not None:
+        client.credentials(HTTP_X_B24_USER=str(uid))
+    return client
 
 
 class DocumentVersioningTests(TestCase):
@@ -60,3 +68,45 @@ class DocumentVersioningTests(TestCase):
         services.add_version(doc, upload("b.pdf"))
         numbers = list(doc.versions.values_list("version_number", flat=True))
         self.assertEqual(sorted(numbers), [1, 2])
+
+
+class DocumentApiTests(TestCase):
+    def test_requires_auth(self):
+        self.assertEqual(api().get("/api/documents/").status_code, 403)
+
+    def test_create_with_file_then_add_version_and_download(self):
+        # создать документ с первым файлом
+        r = api(1).post(
+            "/api/documents/",
+            {"title": "Договор", "file": upload("d.pdf", b"v1")},
+            format="multipart",
+        )
+        self.assertEqual(r.status_code, 201)
+        doc_id = r.json()["id"]
+        self.assertEqual(r.json()["current_version_number"], 1)
+
+        # добавить новую версию
+        r = api(1).post(
+            f"/api/documents/{doc_id}/versions/",
+            {"file": upload("d.pdf", b"v2"), "change_comment": "правки"},
+            format="multipart",
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["current_version_number"], 2)
+        self.assertEqual(len(r.json()["versions"]), 2)
+
+        # скачать конкретную версию
+        v1 = next(v for v in r.json()["versions"] if v["version_number"] == 1)
+        resp = api(1).get(v1["download_url"])
+        self.assertEqual(resp.status_code, 200)
+
+    def test_soft_delete_hides_from_list(self):
+        r = api(1).post(
+            "/api/documents/",
+            {"title": "Скан", "file": upload("s.pdf")},
+            format="multipart",
+        )
+        doc_id = r.json()["id"]
+        self.assertEqual(api(1).delete(f"/api/documents/{doc_id}/").status_code, 204)
+        listing = api(1).get("/api/documents/").json()
+        self.assertEqual(len(listing), 0)

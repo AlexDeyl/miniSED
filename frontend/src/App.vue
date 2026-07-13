@@ -16,6 +16,7 @@ onMounted(() => {
       <div class="app__brand">MiniSED</div>
       <nav class="app__nav">
         <RouterLink to="/tasks">Мои задачи</RouterLink>
+        <RouterLink to="/flow">Согласования</RouterLink>
         <RouterLink to="/deals">Поиск сделок</RouterLink>
       </nav>
       <div class="app__user">

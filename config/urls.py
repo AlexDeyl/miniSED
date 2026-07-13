@@ -43,6 +43,8 @@ urlpatterns = [
          name="bitrix_auth_callback"),
     path("api/bitrix/", include("bitrix.urls")),
     path("api/core/", include("core.urls")),
+    path("api/approvalflow/", include("approvalflow.urls")),
+    path("api/", include("documents.urls")),
     path("api/", include(router.urls)),
 ]
 

@@ -4,11 +4,19 @@
 """
 
 from django.test import TestCase
+from rest_framework.test import APIClient
 
 from approvals.models import Agreement
 from .models import Approval, ApprovalParticipant, ApprovalRound
 from . import services
 from .sheet import generate_sheet, render_pdf
+
+
+def api(uid=None):
+    client = APIClient()
+    if uid is not None:
+        client.credentials(HTTP_X_B24_USER=str(uid))
+    return client
 
 
 def internal(uid, order=0, role=""):
@@ -178,3 +186,72 @@ class SheetPdfTests(TestCase):
         self.assertEqual(sheet.format, "pdf")
         sheet.generated_file.seek(0)
         self.assertTrue(sheet.generated_file.read(4) == b"%PDF")
+
+
+class ApiTests(TestCase):
+    AUTHOR = 1
+    APPROVER = 20
+
+    def test_requires_auth(self):
+        self.assertEqual(api().get("/api/approvalflow/approvals/").status_code, 403)
+
+    def test_create_submit_decide_flow(self):
+        # создать черновик
+        r = api(self.AUTHOR).post(
+            "/api/approvalflow/approvals/",
+            {"approval_type": "discount", "title": "Скидка", "flow_type": "parallel"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 201)
+        ap_id = r.json()["id"]
+
+        # отправить с участниками
+        r = api(self.AUTHOR).post(
+            f"/api/approvalflow/approvals/{ap_id}/submit/",
+            {"participants": [{"type": "internal", "b24_user_id": self.APPROVER, "order": 0}]},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 200)
+        data = r.json()
+        self.assertEqual(data["status"], "in_progress")
+        participant_id = data["rounds"][0]["participants"][0]["id"]
+
+        # согласующий принимает решение
+        r = api(self.APPROVER).post(
+            f"/api/approvalflow/approvals/{ap_id}/decide/",
+            {"participant_id": participant_id, "decision": "approve"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["status"], "completed")
+
+    def test_decide_forbidden_for_non_participant(self):
+        ap = Approval.objects.create(title="x", initiator_b24_id=self.AUTHOR)
+        rnd = services.submit(ap, [internal(self.APPROVER)])
+        pid = rnd.participants.first().id
+        # чужой пользователь (не тот участник)
+        r = api(999).post(
+            f"/api/approvalflow/approvals/{ap.id}/decide/",
+            {"participant_id": pid, "decision": "approve"},
+            format="json",
+        )
+        # 999 не участник -> согласование не в его выборке -> 404
+        self.assertIn(r.status_code, (403, 404))
+
+    def test_list_scoped_to_user(self):
+        mine = Approval.objects.create(title="моё", initiator_b24_id=self.AUTHOR)
+        Approval.objects.create(title="чужое", initiator_b24_id=555)
+        data = api(self.AUTHOR).get("/api/approvalflow/approvals/").json()
+        self.assertEqual({a["title"] for a in data}, {"моё"})
+
+    def test_generate_and_download_sheet(self):
+        ap = Approval.objects.create(title="x", initiator_b24_id=self.AUTHOR)
+        services.submit(ap, [internal(self.APPROVER)])
+        r = api(self.AUTHOR).post(
+            f"/api/approvalflow/approvals/{ap.id}/generate_sheet/"
+        )
+        self.assertEqual(r.status_code, 201)
+        url = r.json()["file_url"]
+        resp = api(self.AUTHOR).get(url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp["Content-Type"], "application/pdf")
