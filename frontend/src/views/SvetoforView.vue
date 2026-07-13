@@ -4,7 +4,7 @@ import { agreements } from '@/services/agreements'
 import { api, ApiError } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import {
-  type Agreement, type AgParticipant, type AgreementTemplate,
+  type Agreement, type AgParticipant, type AgreementTemplate, type DecisionLog,
   AG_STATUS_LABEL,
 } from '@/types/agreement'
 
@@ -82,10 +82,26 @@ async function decide(p: AgParticipant, decision: 'approve' | 'reject') {
   decisionComment.value = ''
 }
 
+// участники ТЕКУЩЕГО круга (ТЗ п.7.4)
+const currentParts = computed(() =>
+  selected.value ? selected.value.participants.filter((p) => p.round_number === selected.value!.current_round) : [],
+)
 // решение текущего пользователя (для блока «Ваше решение»)
 const myPart = computed(() =>
-  selected.value?.participants.find((p) => p.type === 'internal' && p.b24_user_id === uid.value) ?? null,
+  currentParts.value.find((p) => p.type === 'internal' && p.b24_user_id === uid.value) ?? null,
 )
+// история по кругам (ТЗ п.7.4)
+const roundsHistory = computed(() => {
+  if (!selected.value) return []
+  const byRound = new Map<number, DecisionLog[]>()
+  for (const log of selected.value.decision_logs) {
+    if (!byRound.has(log.round_number)) byRound.set(log.round_number, [])
+    byRound.get(log.round_number)!.push(log)
+  }
+  return [...byRound.entries()].sort((a, b) => a[0] - b[0]).map(([round, logs]) => ({ round, logs }))
+})
+// маршрут текущего круга можно менять, пока никто не принял решение
+const noneDecided = computed(() => currentParts.value.length > 0 && currentParts.value.every((p) => p.status === 'waiting'))
 
 async function run(fn: () => Promise<unknown>) {
   busy.value = true
@@ -101,6 +117,45 @@ async function run(fn: () => Promise<unknown>) {
 }
 
 function restart() { run(() => agreements.restart(selected.value!.id)) }
+
+// --- маршрут: смена согласующих (#6) и повторное согласование (#5) ---
+const routeEdit = ref(false)
+const routeInternal = ref('')
+const routeExternal = ref<string[]>([])
+const routeExtInput = ref('')
+function openRouteEditor() {
+  routeInternal.value = currentParts.value.filter((p) => p.type === 'internal').map((p) => p.b24_user_id).join(', ')
+  routeExternal.value = currentParts.value.filter((p) => p.type === 'external').map((p) => p.email)
+  routeExtInput.value = ''
+  routeEdit.value = true
+}
+function addRouteExt() {
+  const e = routeExtInput.value.trim()
+  if (e && !routeExternal.value.includes(e)) routeExternal.value.push(e)
+  routeExtInput.value = ''
+}
+function buildRoute() {
+  const parts: { type: string; b24_user_id: number | null; email: string; order_index: number }[] = []
+  let idx = 0
+  routeInternal.value.split(',').map((s) => s.trim()).filter(Boolean).forEach((s) => {
+    const id = parseInt(s, 10)
+    if (!Number.isNaN(id)) parts.push({ type: 'internal', b24_user_id: id, email: '', order_index: idx++ })
+  })
+  routeExternal.value.forEach((email) => parts.push({ type: 'external', b24_user_id: null, email, order_index: idx++ }))
+  return parts
+}
+async function saveRoute() {
+  const parts = buildRoute()
+  if (!parts.length) { error.value = 'Маршрут пуст.'; return }
+  await run(() => agreements.setRoute(selected.value!.id, parts))
+  routeEdit.value = false
+}
+async function resubmit(withEditedRoute: boolean) {
+  const parts = withEditedRoute ? buildRoute() : undefined
+  if (withEditedRoute && (!parts || !parts.length)) { error.value = 'Маршрут пуст.'; return }
+  await run(() => agreements.resubmit(selected.value!.id, parts))
+  routeEdit.value = false
+}
 function cancel() {
   if (confirm('Отменить согласование?')) run(() => agreements.cancel(selected.value!.id))
 }
@@ -383,14 +438,19 @@ onMounted(loadList)
               </div>
 
               <div class="ag-card">
-                <div class="ag-card-header">Ход согласования</div>
-                <div v-if="!selected.decision_logs.length" class="ag-muted">Пока ничего не происходило.</div>
-                <div v-for="log in selected.decision_logs" :key="log.id" class="log-item">
-                  <b>{{ partLabel(log.participant) }}</b>
-                  — <span :style="{ color: log.status === 'approved' ? 'var(--green-main)' : 'var(--red-main)' }">
-                    {{ log.status === 'approved' ? 'согласовано' : 'отклонено' }}</span>
-                  · {{ new Date(log.decided_at).toLocaleString('ru') }}
-                  <div v-if="log.comment" class="ag-muted">{{ log.comment }}</div>
+                <div class="ag-card-header">История согласования</div>
+                <div v-if="!roundsHistory.length" class="ag-muted">Пока ничего не происходило.</div>
+                <div v-for="grp in roundsHistory" :key="grp.round" style="margin-bottom:10px">
+                  <div style="font-weight:600;font-size:12px;margin-bottom:4px">
+                    Круг {{ grp.round }}<span v-if="grp.round === selected.current_round" class="ag-muted"> · текущий</span>
+                  </div>
+                  <div v-for="log in grp.logs" :key="log.id" class="log-item">
+                    <b>{{ partLabel(log.participant) }}</b>
+                    — <span :style="{ color: log.status === 'approved' ? 'var(--green-main)' : 'var(--red-main)' }">
+                      {{ log.status === 'approved' ? 'согласовано' : 'отклонено' }}</span>
+                    · {{ new Date(log.decided_at).toLocaleString('ru') }}
+                    <div v-if="log.comment" class="ag-muted">{{ log.comment }}</div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -420,10 +480,13 @@ onMounted(loadList)
                 </div>
               </div>
 
-              <!-- Участники -->
+              <!-- Участники (текущий круг) -->
               <div class="ag-card">
-                <div class="ag-card-header">Участники</div>
-                <div v-for="p in selected.participants" :key="p.id" class="participant-card">
+                <div class="ag-card-header">
+                  <span>Участники</span>
+                  <span class="ag-muted" style="font-weight:400">круг {{ selected.current_round }}</span>
+                </div>
+                <div v-for="p in currentParts" :key="p.id" class="participant-card">
                   <div class="pc-left">
                     <div class="pc-avatar">{{ avatarText(p) }}</div>
                     <div class="pc-main">
@@ -432,6 +495,38 @@ onMounted(loadList)
                     </div>
                   </div>
                 </div>
+
+                <!-- Смена согласующих / повторное согласование -->
+                <template v-if="isAuthor">
+                  <button v-if="!routeEdit" class="ag-btn ag-btn--soft ag-btn--wide" style="margin-top:6px" @click="openRouteEditor">
+                    Изменить маршрут / повторный круг
+                  </button>
+                  <div v-else class="inner-box" style="margin-top:8px">
+                    <div class="ag-muted" style="margin-bottom:4px">Согласующие (ID Б24, через запятую)</div>
+                    <input v-model="routeInternal" class="ag-textarea" style="min-height:auto" placeholder="1099, 1535" />
+                    <div class="ag-muted" style="margin:8px 0 4px">Внешние (email)</div>
+                    <div class="fr-inline">
+                      <input v-model="routeExtInput" class="ag-textarea" style="min-height:auto" placeholder="a@b.ru" @keyup.enter="addRouteExt" />
+                      <button class="ag-btn ag-btn--soft" @click="addRouteExt">+</button>
+                    </div>
+                    <div v-if="routeExternal.length" class="chips" style="margin-top:6px">
+                      <span v-for="(em, i) in routeExternal" :key="i" class="chip chip--ext">{{ em }} <button class="chip-x" @click="routeExternal.splice(i, 1)">×</button></span>
+                    </div>
+                    <div style="display:grid;gap:6px;margin-top:10px">
+                      <button v-if="noneDecided" class="ag-btn ag-btn--soft" :disabled="busy" @click="saveRoute">
+                        Сохранить маршрут (текущий круг)
+                      </button>
+                      <button class="ag-btn ag-btn--orange" :disabled="busy" @click="resubmit(true)">
+                        Отправить повторно новым кругом
+                      </button>
+                      <button class="ag-btn" style="background:transparent" @click="routeEdit = false">Отмена</button>
+                    </div>
+                    <div class="ag-muted" style="font-size:11px;margin-top:6px">
+                      «Сохранить маршрут» — меняет согласующих текущего круга (до первых решений).
+                      «Повторно новым кругом» — создаёт новый круг, история прошлых сохраняется.
+                    </div>
+                  </div>
+                </template>
               </div>
 
               <!-- Сводка -->

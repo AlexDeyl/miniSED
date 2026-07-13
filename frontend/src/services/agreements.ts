@@ -13,6 +13,10 @@ export const agreements = {
       participant_id: participantId, decision, comment,
     }),
   restart: (id: number) => api.post<Agreement & { internal_to_notify: number[] }>(`/agreements/${id}/restart/`),
+  resubmit: (id: number, participants?: { type: string; b24_user_id: number | null; email: string; order_index: number }[]) =>
+    api.post<Agreement>(`/agreements/${id}/resubmit/`, participants ? { participants } : {}),
+  setRoute: (id: number, participants: { type: string; b24_user_id: number | null; email: string; order_index: number }[]) =>
+    api.post<Agreement>(`/agreements/${id}/set_route/`, { participants }),
   cancel: (id: number) => api.post<Agreement>(`/agreements/${id}/cancel/`),
   remove: (id: number) => api.delete<void>(`/agreements/${id}/`),
 

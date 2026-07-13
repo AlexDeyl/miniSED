@@ -284,6 +284,95 @@ class RestartTests(TestCase):
         self.assertEqual(p1.prev_comment, "правьте")
 
 
+class RoundsTests(TestCase):
+    """ТЗ п.7.4-7.6: несколько кругов, повторное согласование, смена согласующих."""
+
+    def _decide(self, uid, a, p, decision, comment=""):
+        return api(uid).post(
+            f"/api/agreements/{a.id}/decide/",
+            {"participant_id": p.id, "decision": decision, "comment": comment},
+            format="json",
+        )
+
+    def test_resubmit_creates_new_round_keeps_history(self):
+        a = Factory.agreement(author=AUTHOR)
+        p1 = Factory.internal(a, APPROVER_A)
+        self._decide(APPROVER_A, a, p1, "reject", "правьте")
+        a.refresh_from_db()
+        self.assertEqual(a.status, Agreement.STATUS_REJECTED)
+
+        r = api(AUTHOR).post(f"/api/agreements/{a.id}/resubmit/")
+        self.assertEqual(r.status_code, 200)
+        a.refresh_from_db()
+        self.assertEqual(a.current_round, 2)
+        self.assertEqual(a.status, Agreement.STATUS_IN_PROGRESS)
+        # круг 2 — свежий участник waiting; круг 1 сохранён (rejected)
+        self.assertEqual(a.participants.filter(round_number=2, status="waiting").count(), 1)
+        self.assertEqual(a.participants.filter(round_number=1, status="rejected").count(), 1)
+
+    def test_resubmit_with_edited_route(self):
+        a = Factory.agreement(author=AUTHOR)
+        p1 = Factory.internal(a, APPROVER_A)
+        self._decide(APPROVER_A, a, p1, "reject", "нет")
+        r = api(AUTHOR).post(
+            f"/api/agreements/{a.id}/resubmit/",
+            {"participants": [
+                {"type": "internal", "b24_user_id": APPROVER_B, "order_index": 0},
+                {"type": "internal", "b24_user_id": 555, "order_index": 1},
+            ]},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 200)
+        a.refresh_from_db()
+        self.assertEqual(a.participants.filter(round_number=2).count(), 2)
+
+    def test_resubmit_only_author(self):
+        a = Factory.agreement(author=AUTHOR)
+        p1 = Factory.internal(a, APPROVER_A)
+        self._decide(APPROVER_A, a, p1, "reject", "нет")
+        r = api(APPROVER_A).post(f"/api/agreements/{a.id}/resubmit/")
+        self.assertEqual(r.status_code, 403)
+
+    def test_set_route_before_decisions(self):
+        a = Factory.agreement(author=AUTHOR)
+        Factory.internal(a, APPROVER_A, order=0)
+        r = api(AUTHOR).post(
+            f"/api/agreements/{a.id}/set_route/",
+            {"participants": [
+                {"type": "internal", "b24_user_id": APPROVER_B, "order_index": 0},
+                {"type": "internal", "b24_user_id": 555, "order_index": 1},
+            ]},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 200)
+        a.refresh_from_db()
+        self.assertEqual(a.participants.filter(round_number=1).count(), 2)
+        self.assertFalse(a.participants.filter(b24_user_id=APPROVER_A).exists())
+
+    def test_set_route_blocked_after_decision(self):
+        a = Factory.agreement(author=AUTHOR)
+        p1 = Factory.internal(a, APPROVER_A)
+        Factory.internal(a, APPROVER_B)
+        self._decide(APPROVER_A, a, p1, "approve")
+        r = api(AUTHOR).post(
+            f"/api/agreements/{a.id}/set_route/",
+            {"participants": [{"type": "internal", "b24_user_id": 555, "order_index": 0}]},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 400)
+
+    def test_second_round_decide_completes(self):
+        a = Factory.agreement(author=AUTHOR)
+        p1 = Factory.internal(a, APPROVER_A)
+        self._decide(APPROVER_A, a, p1, "reject", "правьте")
+        api(AUTHOR).post(f"/api/agreements/{a.id}/resubmit/")
+        a.refresh_from_db()
+        p2 = a.participants.get(round_number=2)
+        self._decide(APPROVER_A, a, p2, "approve")
+        a.refresh_from_db()
+        self.assertEqual(a.status, Agreement.STATUS_COMPLETED)
+
+
 class SheetAndVersionedDocsTests(TestCase):
     def test_sheet_pdf(self):
         a = Factory.agreement(author=AUTHOR)

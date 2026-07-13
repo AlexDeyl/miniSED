@@ -29,6 +29,7 @@ export interface AgParticipant {
   comment: string
   decided_at: string | null
   order_index: number
+  round_number: number
   prev_status: PartStatus | null
   prev_comment: string
 }
@@ -38,6 +39,7 @@ export interface DecisionLog {
   participant: AgParticipant
   status: PartStatus
   comment: string
+  round_number: number
   decided_at: string
 }
 
@@ -68,6 +70,7 @@ export interface Agreement {
   crm_link: string
   flow_type: FlowType
   status: AgreementStatus
+  current_round: number
   created_at: string
   documents: AgDocument[]
   documents_v: VersionedDoc[]

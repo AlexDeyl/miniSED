@@ -34,7 +34,8 @@ from django.views.decorators.csrf import csrf_exempt
 from django.urls import reverse
 from django.core.mail import send_mail
 from django.conf import settings
-from django.db.models import Q
+from django.db.models import F, Q
+from core.services import log_action
 from urllib.parse import urlencode
 
 
@@ -328,13 +329,18 @@ class AgreementViewSet(viewsets.ModelViewSet):
         ctx["current_b24_id"] = getattr(self, "b24_id", None)
         return ctx
 
+    def _round_qs(self, agreement: Agreement):
+        """Участники текущего круга (ТЗ п.7.4 — несколько кругов)."""
+        return agreement.participants.filter(round_number=agreement.current_round)
+
     def _get_next_waiting(self, agreement: Agreement):
         """
-        Первый по порядку (order_index) участник со статусом waiting.
+        Первый по порядку (order_index) участник текущего круга со статусом waiting.
         Нужен, чтобы понять, кому отправлять уведомление дальше.
         """
         return (
-            agreement.participants.filter(status=Participant.STATUS_WAITING)
+            self._round_qs(agreement)
+            .filter(status=Participant.STATUS_WAITING)
             .order_by("order_index")
             .first()
         )
@@ -346,7 +352,7 @@ class AgreementViewSet(viewsets.ModelViewSet):
         Сейчас ли очередь этого участника?
         Он может голосовать только если:
         - сам в статусе waiting
-        - перед ним (с меньшим order_index) НЕТ участников в статусе waiting
+        - перед ним (с меньшим order_index) в этом круге НЕТ участников waiting
         """
         if agreement.flow_type == Agreement.FLOW_PARALLEL:
             return participant.status == Participant.STATUS_WAITING
@@ -354,10 +360,21 @@ class AgreementViewSet(viewsets.ModelViewSet):
         if participant.status != Participant.STATUS_WAITING:
             return False
 
-        return not agreement.participants.filter(   # type: ignore
+        return not self._round_qs(agreement).filter(   # type: ignore
             order_index__lt=participant.order_index,
             status=Participant.STATUS_WAITING,
         ).exists()
+
+    def _recompute_status(self, agreement: Agreement):
+        """Пересчёт статуса по участникам ТЕКУЩЕГО круга."""
+        parts = self._round_qs(agreement)
+        if parts.filter(status=Participant.STATUS_REJECTED).exists():
+            agreement.status = Agreement.STATUS_REJECTED
+        elif parts.filter(status=Participant.STATUS_WAITING).exists():
+            agreement.status = Agreement.STATUS_IN_PROGRESS
+        else:
+            agreement.status = Agreement.STATUS_COMPLETED
+        agreement.save(update_fields=["status"])
 
     def _notify_participant(self, agreement: Agreement,
                             participant: Participant):
@@ -438,6 +455,7 @@ class AgreementViewSet(viewsets.ModelViewSet):
             participants__type=Participant.TYPE_INTERNAL,
             participants__b24_user_id=self.b24_id,
             participants__status=Participant.STATUS_WAITING,
+            participants__round_number=F("current_round"),
         )
 
         cond_external = Q()
@@ -446,6 +464,7 @@ class AgreementViewSet(viewsets.ModelViewSet):
                 participants__type=Participant.TYPE_EXTERNAL,
                 participants__email__in=emails,
                 participants__status=Participant.STATUS_WAITING,
+                participants__round_number=F("current_round"),
             )
 
         qs = (
@@ -548,17 +567,11 @@ class AgreementViewSet(viewsets.ModelViewSet):
             participant=participant,
             status=participant.status,
             comment=participant.comment,
+            round_number=agreement.current_round,
             decided_at=participant.decided_at,
         )
 
-        if agreement.participants.filter(status=Participant.STATUS_REJECTED).exists():
-            agreement.status = Agreement.STATUS_REJECTED
-        elif agreement.participants.filter(status=Participant.STATUS_WAITING).exists():
-            agreement.status = Agreement.STATUS_IN_PROGRESS
-        else:
-            agreement.status = Agreement.STATUS_COMPLETED
-
-        agreement.save(update_fields=["status"])
+        self._recompute_status(agreement)
 
         if (
             agreement.flow_type == AgreementModel.FLOW_SEQUENTIAL
@@ -596,7 +609,8 @@ class AgreementViewSet(viewsets.ModelViewSet):
         internal_to_notify: list[int] = []
 
         with transaction.atomic():
-            rejected_participants = agreement.participants.filter(
+            # только отклонившие участники ТЕКУЩЕГО круга
+            rejected_participants = self._round_qs(agreement).filter(
                 status=Participant.STATUS_REJECTED
             )
 
@@ -613,21 +627,125 @@ class AgreementViewSet(viewsets.ModelViewSet):
                 else:
                     self._notify_participant(agreement, p)
 
-            if agreement.participants.filter(
-                status=Participant.STATUS_REJECTED
-            ).exists():
-                agreement.status = Agreement.STATUS_REJECTED
-            elif agreement.participants.filter(
-                status=Participant.STATUS_WAITING
-            ).exists():
-                agreement.status = Agreement.STATUS_IN_PROGRESS
-            else:
-                agreement.status = Agreement.STATUS_COMPLETED
-            agreement.save()
+            self._recompute_status(agreement)
 
         data = self.get_serializer(agreement).data
         data["internal_to_notify"] = internal_to_notify
         return Response(data)
+
+    def _create_participants(self, agreement, specs, round_number):
+        created = []
+        for idx, s in enumerate(specs):
+            if not isinstance(s, dict):
+                continue
+            p = Participant.objects.create(
+                agreement=agreement,
+                type=s.get("type", Participant.TYPE_INTERNAL),
+                b24_user_id=s.get("b24_user_id"),
+                email=s.get("email", "") or "",
+                name=s.get("name", "") or "",
+                order_index=s.get("order_index", idx),
+                round_number=round_number,
+            )
+            created.append(p)
+        return created
+
+    def _route_snapshot(self, agreement, round_number):
+        return [
+            {"type": p.type, "b24_user_id": p.b24_user_id, "email": p.email, "order_index": p.order_index}
+            for p in agreement.participants.filter(round_number=round_number).order_by("order_index")
+        ]
+
+    @action(detail=True, methods=["post"])
+    def resubmit(self, request, pk=None):
+        """
+        Повторное согласование новым кругом (ТЗ п.7.4, 7.5).
+        Автор после доработки отправляет заново: создаётся новый круг с
+        (возможно изменённым) маршрутом; история прошлых кругов сохраняется.
+        Body (опц.): participants=[{type,b24_user_id,email,order_index}].
+        """
+        b24_id = get_current_b24_id(request)
+        agreement = self.get_object()
+        if agreement.author_b24_id != b24_id:
+            return Response({"detail": "Только автор может отправить на повторное согласование."}, status=403)
+        if agreement.status not in (Agreement.STATUS_REJECTED, Agreement.STATUS_IN_PROGRESS):
+            return Response({"detail": "Повторно отправить можно отклонённое или незавершённое согласование."}, status=400)
+
+        specs = request.data.get("participants")
+        if not isinstance(specs, list) or not specs:
+            # копируем маршрут предыдущего круга
+            specs = self._route_snapshot(agreement, agreement.current_round)
+        if not specs:
+            return Response({"detail": "Маршрут пуст — некого назначить."}, status=400)
+
+        internal_to_notify: list[int] = []
+        with transaction.atomic():
+            new_round = agreement.current_round + 1
+            new_parts = self._create_participants(agreement, specs, new_round)
+            agreement.current_round = new_round
+            agreement.status = Agreement.STATUS_IN_PROGRESS
+            agreement.save(update_fields=["current_round", "status"])
+
+            if agreement.flow_type == Agreement.FLOW_SEQUENTIAL:
+                first = self._get_next_waiting(agreement)
+                if first and first.type == Participant.TYPE_INTERNAL and first.b24_user_id:
+                    internal_to_notify.append(first.b24_user_id)
+                elif first:
+                    self._notify_participant(agreement, first)
+            else:
+                for p in new_parts:
+                    if p.type == Participant.TYPE_INTERNAL and p.b24_user_id:
+                        internal_to_notify.append(p.b24_user_id)
+                    else:
+                        self._notify_participant(agreement, p)
+
+        try:
+            log_action("agreement_resubmitted", target=agreement,
+                       new_value={"round": agreement.current_round}, request=request)
+        except Exception:
+            pass
+
+        data = self.get_serializer(agreement).data
+        data["internal_to_notify"] = internal_to_notify
+        return Response(data)
+
+    @action(detail=True, methods=["post"], url_path="set_route")
+    def set_route(self, request, pk=None):
+        """
+        Изменение согласующих текущего круга при направлении (ТЗ п.7.6).
+        Разрешено, пока в текущем круге никто ещё не проголосовал.
+        Body: participants=[{type,b24_user_id,email,order_index}].
+        """
+        b24_id = get_current_b24_id(request)
+        agreement = self.get_object()
+        if agreement.author_b24_id != b24_id:
+            return Response({"detail": "Только автор может менять маршрут."}, status=403)
+
+        cur = self._round_qs(agreement)
+        if cur.exclude(status=Participant.STATUS_WAITING).exists():
+            return Response(
+                {"detail": "Маршрут можно менять до первых решений. Для изменений после — используйте повторное согласование."},
+                status=400,
+            )
+
+        specs = request.data.get("participants")
+        if not isinstance(specs, list) or not specs:
+            return Response({"detail": "Передайте список участников."}, status=400)
+
+        old = self._route_snapshot(agreement, agreement.current_round)
+        with transaction.atomic():
+            cur.delete()
+            self._create_participants(agreement, specs, agreement.current_round)
+            self._recompute_status(agreement)
+
+        try:
+            log_action("agreement_route_changed", target=agreement,
+                       old_value=old, new_value=self._route_snapshot(agreement, agreement.current_round),
+                       request=request)
+        except Exception:
+            pass
+
+        return Response(self.get_serializer(agreement).data)
 
     @action(detail=True, methods=["post"])
     def cancel(self, request, pk=None):
@@ -1050,15 +1168,15 @@ def external_approve_view(request, token):
             participant=participant,
             status=participant.status,
             comment=participant.comment,
+            round_number=agreement.current_round,
             decided_at=participant.decided_at,
         )
 
-        # пересчитываем статус соглашения
-        if agreement.participants.filter(status=Participant.STATUS_REJECTED).exists():
+        # пересчитываем статус по участникам текущего круга
+        cur = agreement.participants.filter(round_number=agreement.current_round)
+        if cur.filter(status=Participant.STATUS_REJECTED).exists():
             agreement.status = Agreement.STATUS_REJECTED
-        elif not agreement.participants.filter(
-            status=Participant.STATUS_WAITING
-        ).exists():
+        elif not cur.filter(status=Participant.STATUS_WAITING).exists():
             agreement.status = Agreement.STATUS_COMPLETED
         else:
             agreement.status = Agreement.STATUS_IN_PROGRESS

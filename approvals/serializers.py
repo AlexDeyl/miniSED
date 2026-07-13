@@ -129,6 +129,7 @@ class ParticipantSerializer(serializers.ModelSerializer):
             "comment",
             "decided_at",
             "order_index",
+            "round_number",
             "prev_status",
             "prev_comment",
         ]
@@ -146,7 +147,7 @@ class DecisionLogSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = DecisionLog
-        fields = ["id", "participant", "status", "comment", "decided_at"]
+        fields = ["id", "participant", "status", "comment", "round_number", "decided_at"]
 
 
 class AgreementSerializer(serializers.ModelSerializer):
@@ -167,6 +168,7 @@ class AgreementSerializer(serializers.ModelSerializer):
             "crm_link",
             "flow_type",
             "status",
+            "current_round",
             "created_at",
             "documents",
             "documents_v",

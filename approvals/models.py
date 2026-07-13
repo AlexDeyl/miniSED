@@ -52,6 +52,7 @@ class Agreement(models.Model):
         choices=STATUS_CHOICES,
         default=STATUS_IN_PROGRESS,
     )
+    current_round = models.PositiveIntegerField("Текущий круг", default=1)
     created_at = models.DateTimeField("Создано", auto_now_add=True)
 
     class Meta:
@@ -175,6 +176,7 @@ class Participant(models.Model):
         "Порядок согласования",
         default=0,
     )
+    round_number = models.PositiveIntegerField("Круг", default=1)
 
     created_at = models.DateTimeField("Создано", auto_now_add=True)
 
@@ -213,6 +215,7 @@ class DecisionLog(models.Model):
         choices=Participant.STATUS_CHOICES,
     )
     comment = models.TextField(blank=True)
+    round_number = models.PositiveIntegerField("Круг", default=1)
     decided_at = models.DateTimeField()
     created_at = models.DateTimeField(auto_now_add=True)
 
