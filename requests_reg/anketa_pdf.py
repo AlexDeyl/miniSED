@@ -37,21 +37,16 @@ def _fmt_date(v) -> str:
     return s
 
 
-# ■/□ надёжно есть в системных шрифтах (в отличие от ☑, который в Arial нет).
 def _checks(choices, selected: list[str]) -> str:
-    """Список опций с отметкой выбранных (жирным)."""
+    """Только выбранные значения (для компактности — 1 лист)."""
     selected = set(selected or [])
-    parts = []
-    for code, name in choices:
-        if code in selected:
-            parts.append(f"■ <b>{name}</b>")
-        else:
-            parts.append(f"□ {name}")
-    return "<br/>".join(parts)
+    names = [name for code, name in choices if code in selected]
+    return "<br/>".join(names) if names else "—"
 
 
 def _one(choices, code: str) -> str:
-    return _checks(choices, [code] if code else [])
+    """Только выбранное значение."""
+    return C.label(choices, code) if code else "—"
 
 
 def _initiator_name(request) -> str:
