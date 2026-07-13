@@ -93,12 +93,28 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function init() {
+    // 0) токен, вложенный сервером при открытии из Битрикс24 (window.__MINISED_BOOT__)
+    const boot = (window as unknown as { __MINISED_BOOT__?: { token?: string } })
+      .__MINISED_BOOT__
+    if (boot?.token) {
+      try {
+        await applyToken(boot.token)
+      } catch {
+        /* не удалось — упадём в обычный поток ниже */
+      }
+      try {
+        delete (window as unknown as { __MINISED_BOOT__?: unknown }).__MINISED_BOOT__
+      } catch {
+        /* игнорируем */
+      }
+    }
+
     // 1) явное переключение через URL (дев/Битрикс)
     initB24FromUrl()
 
     // 2) токен из хранилища → подтягиваем профиль
     const savedToken = ls(TOKEN_KEY)
-    if (savedToken) {
+    if (!token.value && savedToken) {
       token.value = savedToken
       try {
         applyProfile(await authApi.me())

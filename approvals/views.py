@@ -1,8 +1,9 @@
 import io
 import os
+import json
 import requests
 from django.db import transaction
-from django.http import FileResponse
+from django.http import FileResponse, HttpResponse
 from django.shortcuts import render
 from datetime import datetime
 from rest_framework import viewsets, status
@@ -53,20 +54,28 @@ def _store_bitrix_portal_token(domain, member_id, token_data):
         print("[Bitrix] portal token store error:", e)
 
 
-def _serve_spa(request):
+def _serve_spa(request, boot_token=None):
     """Отдаёт собранный Vue SPA (frontend/dist/index.html).
 
-    Именно это открывается из Битрикс24 (обработчик /app). Внутри iframe
-    SPA сам берёт авторизацию через BX24 SDK. Если сборки ещё нет —
-    возвращаем старый шаблон как запасной вариант."""
+    Приложение открывается из Битрикс24 (обработчик /app). Если Битрикс
+    прислал токены (POST с AUTH_ID), пользователь уже авторизован на сервере,
+    и мы вкладываем токен MiniSED прямо в HTML (window.__MINISED_BOOT__) —
+    SPA входит сразу, без зависимости от BX24 SDK и тайминга в iframe.
+    Если сборки ещё нет — отдаём старый шаблон как запасной вариант."""
     dist_index = settings.BASE_DIR / "frontend" / "dist" / "index.html"
-    if dist_index.exists():
-        return FileResponse(open(dist_index, "rb"), content_type="text/html")
-    return render(
-        request,
-        "approvals/app.html",
-        {"session_b24_id": request.session.get("b24_user_id")},
-    )
+    if not dist_index.exists():
+        return render(
+            request,
+            "approvals/app.html",
+            {"session_b24_id": request.session.get("b24_user_id")},
+        )
+    html = dist_index.read_text(encoding="utf-8")
+    if boot_token:
+        boot = "<script>window.__MINISED_BOOT__=%s;</script>" % json.dumps(
+            {"token": boot_token}
+        )
+        html = html.replace("</head>", boot + "</head>", 1)
+    return HttpResponse(html, content_type="text/html; charset=utf-8")
 
 
 @csrf_exempt
@@ -77,16 +86,28 @@ def app_view(request):
     if request.method == "POST" and request.POST.get("AUTH_ID"):
         domain = request.POST.get("DOMAIN")
         member_id = request.POST.get("member_id")
+        access_token = request.POST.get("AUTH_ID")
         _store_bitrix_portal_token(
             domain,
             member_id,
             {
-                "access_token": request.POST.get("AUTH_ID"),
+                "access_token": access_token,
                 "refresh_token": request.POST.get("REFRESH_ID", ""),
                 "expires_in": request.POST.get("AUTH_EXPIRES"),
             },
         )
-        return _serve_spa(request)
+        # Авторизуем на сервере по токену портала и вкладываем токен MiniSED
+        # в HTML, чтобы SPA вошёл сразу (тот же аккаунт по bitrix_id/почте).
+        boot_token = None
+        try:
+            from core.auth_views import _issue_for_bitrix
+
+            _, token = _issue_for_bitrix(access_token, domain)
+            if token:
+                boot_token = token.key
+        except Exception as e:
+            print("[Bitrix] issue MiniSED token on /app POST error:", e)
+        return _serve_spa(request, boot_token)
 
     code = request.GET.get("code")
     domain = request.GET.get("domain")
