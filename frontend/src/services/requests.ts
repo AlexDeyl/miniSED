@@ -55,6 +55,10 @@ export const requests = {
       delivery_methods: { code: string; name: string }[]
     }>(`${BASE}/types/`),
 
+  powerTemplates: () =>
+    api.get<{ code: string; name: string; powers: string }[]>(`${BASE}/power_templates/`),
+  anketaPdfUrl: (id: number | string) => `/api${BASE}/${id}/anketa_pdf/`,
+
   organizations: () => api.get<Organization[]>('/core/organizations/'),
   facilities: (org?: number) => api.get<Facility[]>(`/core/facilities/${org ? `?organization=${org}` : ''}`),
   cfos: () => api.get<Cfo[]>('/core/cfos/'),

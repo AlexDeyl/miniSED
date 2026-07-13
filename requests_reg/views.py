@@ -3,6 +3,7 @@ API регламентных заявок: согласование (через 
 Личность — b24_user_id (заголовок X-B24-User).
 """
 
+from django.http import FileResponse
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework import viewsets
@@ -162,6 +163,20 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
             "statuses": [{"code": c, "name": n} for c, n in constants.STATUS_CHOICES],
             "delivery_methods": [{"code": c, "name": n} for c, n in constants.DELIVERY_CHOICES],
         })
+
+    @action(detail=True, methods=["get"], url_path="anketa_pdf")
+    def anketa_pdf(self, request, pk=None):
+        """Заполненное PDF-заявление (формируется на лету из анкеты)."""
+        from . import anketa_pdf as anketa
+
+        req = self.get_object()
+        import io
+
+        pdf = anketa.render_pdf(req)
+        return FileResponse(
+            io.BytesIO(pdf), content_type="application/pdf",
+            filename=f"anketa_{req.number}.pdf",
+        )
 
     @action(detail=False, methods=["get"], url_path="power_templates")
     def power_templates(self, request):

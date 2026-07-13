@@ -76,8 +76,30 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   return data as T
 }
 
+// Скачивание файла с заголовками авторизации (обычный <a href> их не шлёт).
+// path — полный путь от корня (например «/api/reg/requests/1/anketa_pdf/»).
+async function download(path: string, filename?: string): Promise<void> {
+  const auth = useAuthStore()
+  const headers: Record<string, string> = {}
+  if (auth.token) headers['Authorization'] = `Token ${auth.token}`
+  if (auth.b24UserId) headers['X-B24-User'] = String(auth.b24UserId)
+
+  const resp = await fetch(path, { headers })
+  if (!resp.ok) throw new ApiError('Не удалось скачать файл', resp.status)
+  const blob = await resp.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename || 'file'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
 export const api = {
   get: <T>(path: string) => request<T>(path),
+  download,
   post: <T>(path: string, body?: unknown) => request<T>(path, { method: 'POST', body }),
   postForm: <T>(path: string, form: FormData) =>
     request<T>(path, { method: 'POST', form }),

@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { approvalflow } from '@/services/approvalflow'
-import { ApiError } from '@/services/api'
+import { api, ApiError } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import type { ApprovalDetail, ApprovalParticipant } from '@/types/approval'
 
@@ -67,6 +67,10 @@ async function generateSheet() {
   } finally {
     busy.value = false
   }
+}
+
+function dl(url: string | null, name: string) {
+  if (url) api.download(url, name).catch((e) => (error.value = e.message))
 }
 
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -149,9 +153,7 @@ onMounted(load)
         <div class="detail-card-header">Документы</div>
         <ul v-if="approval.documents.length" class="item-tags" style="flex-direction:column;align-items:flex-start;gap:6px;margin-bottom:8px">
           <li v-for="d in approval.documents" :key="d.id">
-            <a v-if="d.download_url" :href="d.download_url" target="_blank" rel="noopener">
-              {{ d.title }} (в{{ d.current_version_number }})
-            </a>
+            <a href="#" @click.prevent="dl(d.download_url, d.title)">{{ d.title }} (в{{ d.current_version_number }})</a>
           </li>
         </ul>
         <p v-else class="muted" style="margin:0 0 8px">Файлов пока нет.</p>
@@ -164,7 +166,7 @@ onMounted(load)
         <div class="detail-card-header">Лист согласования</div>
         <ul v-if="approval.sheets.length" class="item-tags" style="flex-direction:column;align-items:flex-start;gap:6px;margin-bottom:8px">
           <li v-for="s in approval.sheets" :key="s.id">
-            <a :href="s.file_url" target="_blank" rel="noopener">
+            <a href="#" @click.prevent="dl(s.file_url, `Лист_${approval.id}.pdf`)">
               Лист от {{ new Date(s.generated_at).toLocaleString('ru') }} (PDF)
             </a>
           </li>

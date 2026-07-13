@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { requests } from '@/services/requests'
-import { ApiError } from '@/services/api'
+import { api, ApiError } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import type { RegulatoryRequestDetail, RouteSlot } from '@/types/request'
 import type { ApprovalParticipant, ParticipantInput } from '@/types/approval'
@@ -102,6 +102,15 @@ function decide(p: ApprovalParticipant, decision: 'approve' | 'reject') {
   run(() => requests.decide(props.id, p.id, decision, comment))
 }
 
+function dl(url: string | null, name: string) {
+  if (url) api.download(url, name).catch((e) => (error.value = e.message))
+}
+function downloadAnketa() {
+  if (req.value) api.download(requests.anketaPdfUrl(req.value.id), `Заявление_${req.value.number}.pdf`)
+    .catch((e) => (error.value = e.message))
+}
+const isAnketaType = computed(() => req.value && (req.value.request_type === 'poa' || req.value.request_type === 'mchd'))
+
 async function uploadFile(e: Event) {
   const input = e.target as HTMLInputElement
   const file = input.files?.[0]
@@ -196,16 +205,17 @@ async function uploadFile(e: Event) {
         <div class="detail-card-header">Документы</div>
         <ul v-if="req.documents.length" class="item-tags" style="flex-direction:column;align-items:flex-start;gap:6px;margin-bottom:8px">
           <li v-for="d in req.documents" :key="d.id">
-            <a v-if="d.download_url" :href="d.download_url" target="_blank" rel="noopener">
-              {{ d.title }} (в{{ d.current_version_number }})
-            </a>
+            <a href="#" @click.prevent="dl(d.download_url, d.title)">{{ d.title }} (в{{ d.current_version_number }})</a>
           </li>
         </ul>
         <p v-else class="muted" style="margin:0 0 8px">Файлов пока нет.</p>
-        <template v-if="isLegalStage">
-          <input ref="fileInput" type="file" style="display:none" @change="uploadFile" />
-          <button class="btn btn--ghost" :disabled="busy" @click="fileInput?.click()">Прикрепить файл</button>
-        </template>
+        <div class="row-actions">
+          <button v-if="isAnketaType" class="btn btn--ghost" @click="downloadAnketa">Скачать заявление (PDF)</button>
+          <template v-if="isLegalStage">
+            <input ref="fileInput" type="file" style="display:none" @change="uploadFile" />
+            <button class="btn btn--ghost" :disabled="busy" @click="fileInput?.click()">Прикрепить скан доверенности</button>
+          </template>
+        </div>
       </div>
 
       <!-- Раздел юристов: исполнение -->

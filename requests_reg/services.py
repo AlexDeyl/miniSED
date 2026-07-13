@@ -102,6 +102,15 @@ def submit(request: RegulatoryRequest, participants: list[dict], *, flow_type=No
                 new_value={"role": p.get("role"), "b24_user_id": p.get("b24_user_id")},
             )
 
+    # Заполненное PDF-заявление прикрепляем к заявке (его получат юристы).
+    if request.request_type in (constants.TYPE_POA, constants.TYPE_MCHD):
+        try:
+            from . import anketa_pdf
+
+            anketa_pdf.generate_and_attach(request)
+        except Exception as e:  # генерация PDF не должна блокировать отправку
+            print("[anketa] generate error:", e)
+
     approval = get_approval(request)
     if approval is None:
         approval = Approval.objects.create(
@@ -163,7 +172,10 @@ def execute(request: RegulatoryRequest, *, delivery_method: str, delivery_commen
         raise RequestError("Исполнить можно заявку в работе у юристов или на подписании.")
     if not delivery_method:
         raise RequestError("Укажите способ передачи документа.")
-    if not request.documents.filter(deleted_at__isnull=True).exists():
+    # нужен реальный скан доверенности, а не автосформированная анкета
+    if not request.documents.filter(deleted_at__isnull=True).exclude(
+        document_type="anketa"
+    ).exists():
         raise RequestError("Прикрепите файл/скан доверенности перед исполнением.")
     _set(
         request, constants.STATUS_EXECUTED,

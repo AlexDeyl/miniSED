@@ -188,6 +188,22 @@ class ApiTests(TestCase):
         self.assertIn("ФНС1", codes)
         self.assertEqual(len(data), 16)
 
+    def test_anketa_pdf_endpoint(self):
+        rid = self._create()
+        # заполним часть анкеты
+        api(1).patch(f"/api/reg/requests/{rid}/", {
+            "data": {
+                "poa_type": "single", "urgency": "standard",
+                "rep": {"last_name": "Иванов", "first_name": "Иван"},
+                "powers": ["contracts", "acts"],
+                "power_templates": ["УПР1"],
+            },
+        }, format="json")
+        resp = api(1).get(f"/api/reg/requests/{rid}/anketa_pdf/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp["Content-Type"], "application/pdf")
+        self.assertTrue(b"".join(resp.streaming_content).startswith(b"%PDF"))
+
     def test_legal_execute_via_api(self):
         rid = self._create()
         r = api(1).post(f"/api/reg/requests/{rid}/submit/", {
@@ -209,3 +225,30 @@ class ApiTests(TestCase):
 
         r = api(1).post(f"/api/reg/requests/{rid}/confirm_receipt/")
         self.assertEqual(r.json()["status"], "closed")
+
+
+class AnketaTests(TestCase):
+    def setUp(self):
+        self.org = Organization.objects.create(short_name="УК Норд")
+
+    def test_submit_attaches_anketa_pdf(self):
+        req = services.create_request(
+            request_type=C.TYPE_POA, organization=self.org, initiator_b24_id=1,
+            data={"poa_type": "general", "powers": ["court"], "power_templates": ["СУД1"]},
+        )
+        services.submit(req, [internal(10)])
+        docs = req.documents.filter(document_type="anketa")
+        self.assertEqual(docs.count(), 1)
+        cur = docs.first().current_version
+        cur.file.seek(0)
+        self.assertTrue(cur.file.read(4) == b"%PDF")
+
+    def test_render_pdf_bytes(self):
+        from requests_reg.anketa_pdf import render_pdf
+        req = services.create_request(
+            request_type=C.TYPE_MCHD, organization=self.org, initiator_b24_id=1,
+            data={"poa_type": "mchd", "rep": {"last_name": "Петров"}},
+        )
+        pdf = render_pdf(req)
+        self.assertTrue(pdf.startswith(b"%PDF"))
+        self.assertGreater(len(pdf), 800)
