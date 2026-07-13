@@ -2,6 +2,7 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
+from django.views.static import serve as static_serve
 from rest_framework.routers import DefaultRouter
 from core import auth_views
 from approvals.views import (
@@ -23,6 +24,14 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("app/", app_view, name="app"),
     path("app", app_view, name="app_no_slash"),
+    # Собранные ассеты SPA (frontend/dist/assets). В проде их отдаёт nginx,
+    # но при открытии из Битрикса через Django нужен и этот маршрут.
+    path(
+        "assets/<path:path>",
+        static_serve,
+        {"document_root": settings.BASE_DIR / "frontend" / "dist" / "assets"},
+        name="spa_assets",
+    ),
     path(
         "external/approve/<str:token>/", external_approve_view,
         name="external_approve"

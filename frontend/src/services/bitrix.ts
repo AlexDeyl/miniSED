@@ -27,6 +27,15 @@ interface ListResponse<T> {
 export const bitrix = {
   status: () => api.get<{ connected: boolean; domain: string | null }>('/bitrix/status/'),
 
+  // Сохранить токены портала (из BX24.getAuth внутри iframe) для серверного Connector.
+  storeAuth: (a: {
+    domain: string
+    member_id?: string
+    access_token: string
+    refresh_token?: string
+    expires_in?: number
+  }) => api.post<{ domain: string; connected: boolean }>('/bitrix/auth/', a),
+
   searchDeals: (q: string) =>
     api.get<ListResponse<BitrixDeal>>(`/bitrix/deals/?q=${encodeURIComponent(q)}`),
 

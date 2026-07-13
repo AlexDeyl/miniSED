@@ -79,6 +79,8 @@ const router = createRouter({
       props: true,
       meta: { title: 'Согласование' },
     },
+    // запуск из Битрикс24 приходит на /app — уводим в приложение
+    { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
 })
 

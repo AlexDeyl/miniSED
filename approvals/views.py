@@ -53,6 +53,22 @@ def _store_bitrix_portal_token(domain, member_id, token_data):
         print("[Bitrix] portal token store error:", e)
 
 
+def _serve_spa(request):
+    """Отдаёт собранный Vue SPA (frontend/dist/index.html).
+
+    Именно это открывается из Битрикс24 (обработчик /app). Внутри iframe
+    SPA сам берёт авторизацию через BX24 SDK. Если сборки ещё нет —
+    возвращаем старый шаблон как запасной вариант."""
+    dist_index = settings.BASE_DIR / "frontend" / "dist" / "index.html"
+    if dist_index.exists():
+        return FileResponse(open(dist_index, "rb"), content_type="text/html")
+    return render(
+        request,
+        "approvals/app.html",
+        {"session_b24_id": request.session.get("b24_user_id")},
+    )
+
+
 @csrf_exempt
 def app_view(request):
     # Установка/открытие приложения из Битрикс24: обработчик получает
@@ -70,11 +86,7 @@ def app_view(request):
                 "expires_in": request.POST.get("AUTH_EXPIRES"),
             },
         )
-        return render(
-            request,
-            "approvals/app.html",
-            {"session_b24_id": request.session.get("b24_user_id")},
-        )
+        return _serve_spa(request)
 
     code = request.GET.get("code")
     domain = request.GET.get("domain")
@@ -118,11 +130,7 @@ def app_view(request):
         except Exception as e:
             print(f"[Bitrix OAuth] token exchange error: {e}")
         return redirect("/app")
-    return render(
-        request,
-        "approvals/app.html",
-        {"session_b24_id": request.session.get("b24_user_id")},
-    )
+    return _serve_spa(request)
 
 
 def bitrix_auth_callback(request):

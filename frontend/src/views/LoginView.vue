@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { ApiError } from '@/services/api'
+import { bitrix } from '@/services/bitrix'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -12,10 +13,19 @@ const password = ref('')
 const busy = ref(false)
 const error = ref<string | null>(null)
 
-interface BX24Auth { access_token?: string; domain?: string }
+interface BX24Auth {
+  access_token?: string
+  refresh_token?: string
+  domain?: string
+  member_id?: string
+  expires_in?: number
+}
 interface BX24SDK {
   init(cb: () => void): void
   getAuth(): BX24Auth | false
+}
+function bx24(): BX24SDK | undefined {
+  return (window as unknown as { BX24?: BX24SDK }).BX24
 }
 
 async function submit() {
@@ -34,14 +44,27 @@ async function submit() {
 // Вход через Битрикс24: внутри портала — BX24.getAuth(); на домене — OAuth-редирект.
 function loginViaBitrix() {
   error.value = null
-  const BX24 = (window as unknown as { BX24?: BX24SDK }).BX24
+  const BX24 = bx24()
   if (BX24 && BX24.init) {
     busy.value = true
     BX24.init(async () => {
       try {
         const a = BX24.getAuth()
         if (a && a.access_token && a.domain) {
+          // 1) вход в МиниСЭД (тот же аккаунт по bitrix_id/почте)
           await auth.bitrixLogin(a.access_token, a.domain)
+          // 2) сохраняем токены портала для серверного Connector (поиск сделок и т.п.)
+          try {
+            await bitrix.storeAuth({
+              domain: a.domain,
+              member_id: a.member_id,
+              access_token: a.access_token,
+              refresh_token: a.refresh_token,
+              expires_in: a.expires_in,
+            })
+          } catch {
+            /* не критично для входа */
+          }
           router.push('/svetofor')
         } else {
           error.value = 'Не удалось получить авторизацию Битрикс24.'
@@ -76,6 +99,9 @@ onMounted(async () => {
     }
   } else if (params.get('bitrix_error')) {
     error.value = 'Вход через Битрикс24 не удался. Попробуйте ещё раз.'
+  } else if (bx24()) {
+    // Открыто из портала Битрикс24 (в iframe есть BX24 SDK) — входим автоматически.
+    loginViaBitrix()
   }
 })
 </script>
