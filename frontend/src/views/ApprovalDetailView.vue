@@ -69,6 +69,24 @@ async function generateSheet() {
   }
 }
 
+const fileInput = ref<HTMLInputElement | null>(null)
+async function uploadFile(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  busy.value = true
+  error.value = null
+  try {
+    await approvalflow.uploadDocument(approval.value!.id, file)
+    approval.value = await approvalflow.get(props.id)
+  } catch (err) {
+    error.value = err instanceof ApiError ? err.message : 'Не удалось загрузить файл'
+  } finally {
+    busy.value = false
+    input.value = ''
+  }
+}
+
 const isInitiator = computed(() => approval.value?.initiator_b24_id === auth.b24UserId)
 
 onMounted(load)
@@ -124,6 +142,21 @@ onMounted(load)
           </tbody>
         </table>
         <p v-if="rnd.comment" class="muted" style="margin:8px 0 0">Комментарий круга: {{ rnd.comment }}</p>
+      </div>
+
+      <!-- Документы (несколько) -->
+      <div class="detail-card">
+        <div class="detail-card-header">Документы</div>
+        <ul v-if="approval.documents.length" class="item-tags" style="flex-direction:column;align-items:flex-start;gap:6px;margin-bottom:8px">
+          <li v-for="d in approval.documents" :key="d.id">
+            <a v-if="d.download_url" :href="d.download_url" target="_blank" rel="noopener">
+              {{ d.title }} (в{{ d.current_version_number }})
+            </a>
+          </li>
+        </ul>
+        <p v-else class="muted" style="margin:0 0 8px">Файлов пока нет.</p>
+        <input ref="fileInput" type="file" style="display:none" @change="uploadFile" />
+        <button class="btn btn--ghost" :disabled="busy" @click="fileInput?.click()">Прикрепить документ</button>
       </div>
 
       <!-- Лист согласования -->

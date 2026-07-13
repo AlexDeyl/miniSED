@@ -13,6 +13,43 @@ from core.models import CFO, Facility, Organization
 from . import constants
 
 
+class RoleAssignment(models.Model):
+    """
+    Кто исполняет маршрутную роль в заданном контексте (организация/ЦФО/объект).
+
+    Используется движком построения маршрута: для каждой роли-слота ищем самое
+    специфичное назначение. Если не найдено — инициатору предлагается ручной
+    выбор (что фиксируется в истории заявки).
+    """
+
+    ROLE_CHOICES = [(code, name) for code, name in constants.ROLE_NAMES.items()]
+
+    role_code = models.CharField("Роль", max_length=32, choices=ROLE_CHOICES)
+    organization = models.ForeignKey(
+        Organization, on_delete=models.CASCADE, null=True, blank=True,
+        related_name="role_assignments", verbose_name="Организация",
+    )
+    cfo = models.ForeignKey(
+        CFO, on_delete=models.CASCADE, null=True, blank=True,
+        related_name="role_assignments", verbose_name="ЦФО",
+    )
+    facility = models.ForeignKey(
+        Facility, on_delete=models.CASCADE, null=True, blank=True,
+        related_name="role_assignments", verbose_name="Объект",
+    )
+    user_b24_id = models.IntegerField("Сотрудник (ID Б24)")
+    user_name = models.CharField("ФИО", max_length=255, blank=True)
+    is_active = models.BooleanField("Активно", default=True)
+
+    class Meta:
+        verbose_name = "Назначение роли"
+        verbose_name_plural = "Назначения ролей (маршрут)"
+        indexes = [models.Index(fields=["role_code"])]
+
+    def __str__(self):
+        return f"{self.get_role_code_display()} → USER#{self.user_b24_id}"
+
+
 class RegulatoryRequest(models.Model):
     number = models.CharField("Номер", max_length=32, blank=True, db_index=True)
     request_type = models.CharField(
@@ -50,7 +87,15 @@ class RegulatoryRequest(models.Model):
         default=constants.STATUS_DRAFT,
     )
 
-    # type-специфичные поля (тип ЭЦП, доверитель, полномочия, нотариат и т.д.)
+    # исполнение юридическим отделом
+    delivery_method = models.CharField(
+        "Способ передачи", max_length=20, choices=constants.DELIVERY_CHOICES, blank=True
+    )
+    delivery_comment = models.CharField("Комментарий к передаче", max_length=500, blank=True)
+    executed_at = models.DateTimeField("Исполнена", null=True, blank=True)
+    received_at = models.DateTimeField("Получено инициатором", null=True, blank=True)
+
+    # type-специфичные поля (доверитель, полномочия, нотариат, тип ЭЦП и т.д.)
     data = models.JSONField("Доп. поля", default=dict, blank=True)
 
     external_1c_id = models.CharField("Внешний ID в 1С", max_length=64, blank=True)
@@ -74,7 +119,4 @@ class RegulatoryRequest(models.Model):
         return f"{self.number or f'#{self.pk}'} {self.get_request_type_display()}"
 
     def status_label(self) -> str:
-        """Ярлык статуса с учётом типа (ЭЦП выпущена / МЧД оформлена…)."""
-        if self.status == constants.STATUS_ISSUED:
-            return constants.ISSUED_LABEL.get(self.request_type, "Выпущена / оформлена")
         return self.get_status_display()

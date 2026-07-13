@@ -41,4 +41,13 @@ export const approvalflow = {
 
   generateSheet: (id: number | string) =>
     api.post<{ id: number; file_url: string }>(`${BASE}/${id}/generate_sheet/`),
+
+  uploadDocument: (id: number | string, file: File) => {
+    const form = new FormData()
+    form.append('title', file.name)
+    form.append('linked_type', 'approvalflow.approval')
+    form.append('linked_id', String(id))
+    form.append('file', file)
+    return api.postForm('/documents/', form)
+  },
 }

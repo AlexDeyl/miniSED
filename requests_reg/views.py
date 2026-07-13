@@ -1,9 +1,8 @@
 """
-API регламентных заявок. Согласование проксируется в движок approvalflow.
-Личность — b24_user_id (заголовок X-B24-User), как в остальных модулях.
+API регламентных заявок: согласование (через движок) + исполнение юротделом.
+Личность — b24_user_id (заголовок X-B24-User).
 """
 
-from django.db.models import Q
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework import viewsets
@@ -56,7 +55,7 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
     def get_serializer_class(self):
         if self.action in ("create", "update", "partial_update"):
             return RegulatoryRequestWriteSerializer
-        if self.action == "list":
+        if self.action in ("list", "legal_queue"):
             return RegulatoryRequestListSerializer
         return RegulatoryRequestDetailSerializer
 
@@ -93,11 +92,20 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
             return Response({"detail": str(e)}, status=400)
         return None
 
+    # --- маршрут ---
+    @action(detail=True, methods=["get"], url_path="route_preview")
+    def route_preview(self, request, pk=None):
+        req = self.get_object()
+        return Response({"route": services.build_route(req)})
+
+    # --- согласование ---
     @action(detail=True, methods=["post"])
     def submit(self, request, pk=None):
         req = self.get_object()
         flow_type = request.data.get("flow_type")
-        err = self._run(lambda: services.submit(req, _participants(request.data), flow_type=flow_type))
+        err = self._run(lambda: services.submit(
+            req, _participants(request.data), flow_type=flow_type, actor_b24_id=self.b24_id,
+        ))
         return err or self._detail(req)
 
     @action(detail=True, methods=["post"])
@@ -117,27 +125,40 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
         ))
         return err or self._detail(req)
 
-    @action(detail=True, methods=["post"], url_path="in_work")
-    def in_work(self, request, pk=None):
+    # --- исполнение юротделом ---
+    @action(detail=False, methods=["get"], url_path="legal_queue")
+    def legal_queue(self, request):
+        qs = self.get_queryset().filter(status__in=constants.LEGAL_QUEUE_STATUSES)
+        return Response(RegulatoryRequestListSerializer(qs, many=True).data)
+
+    @action(detail=True, methods=["post"], url_path="take")
+    def take(self, request, pk=None):
         req = self.get_object()
-        return self._run(lambda: services.mark_in_work(req)) or self._detail(req)
+        return self._run(lambda: services.take_in_work(req)) or self._detail(req)
+
+    @action(detail=True, methods=["post"], url_path="to_signing")
+    def to_signing(self, request, pk=None):
+        req = self.get_object()
+        return self._run(lambda: services.to_signing(req)) or self._detail(req)
 
     @action(detail=True, methods=["post"])
-    def issue(self, request, pk=None):
+    def execute(self, request, pk=None):
         req = self.get_object()
-        return self._run(lambda: services.mark_issued(req)) or self._detail(req)
+        return self._run(lambda: services.execute(
+            req,
+            delivery_method=(request.data.get("delivery_method") or "").strip(),
+            delivery_comment=(request.data.get("delivery_comment") or "").strip(),
+        )) or self._detail(req)
 
-    @action(detail=True, methods=["post"])
-    def close(self, request, pk=None):
+    @action(detail=True, methods=["post"], url_path="confirm_receipt")
+    def confirm_receipt(self, request, pk=None):
         req = self.get_object()
-        return self._run(lambda: services.close(req)) or self._detail(req)
+        return self._run(lambda: services.confirm_receipt(req, by_b24_id=self.b24_id)) or self._detail(req)
 
     @action(detail=False, methods=["get"])
     def types(self, request):
-        """Справочник типов и статусов для фронта."""
-        return Response(
-            {
-                "types": [{"code": c, "name": n} for c, (n, _p) in constants.REQUEST_TYPES.items()],
-                "statuses": [{"code": c, "name": n} for c, n in constants.STATUS_CHOICES],
-            }
-        )
+        return Response({
+            "types": [{"code": c, "name": n} for c, (n, _p) in constants.REQUEST_TYPES.items()],
+            "statuses": [{"code": c, "name": n} for c, n in constants.STATUS_CHOICES],
+            "delivery_methods": [{"code": c, "name": n} for c, n in constants.DELIVERY_CHOICES],
+        })

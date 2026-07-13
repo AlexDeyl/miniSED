@@ -4,50 +4,58 @@ import type {
   RegulatoryRequestDetail,
   RegulatoryRequestListItem,
   RequestCreatePayload,
+  RouteSlot,
 } from '@/types/request'
 
 const BASE = '/reg/requests'
 
-export interface Organization {
-  id: number
-  short_name: string
-}
+export interface Organization { id: number; short_name: string }
+export interface Facility { id: number; name: string; organization: number }
+export interface Cfo { id: number; name: string; code: string; organization: number }
 
 export const requests = {
   list: (type?: string) =>
     api.get<RegulatoryRequestListItem[]>(`${BASE}/${type ? `?type=${type}` : ''}`),
-
   get: (id: number | string) => api.get<RegulatoryRequestDetail>(`${BASE}/${id}/`),
-
   create: (payload: RequestCreatePayload) =>
     api.post<RegulatoryRequestDetail>(`${BASE}/`, payload),
 
-  submit: (id: number | string, participants: ParticipantInput[], flowType = 'sequential') =>
-    api.post<RegulatoryRequestDetail>(`${BASE}/${id}/submit/`, {
-      participants,
-      flow_type: flowType,
-    }),
-
-  decide: (
-    id: number | string,
-    participantId: number,
-    decision: 'approve' | 'reject',
-    comment = '',
-  ) =>
+  routePreview: (id: number | string) =>
+    api.get<{ route: RouteSlot[] }>(`${BASE}/${id}/route_preview/`),
+  submit: (id: number | string, participants: ParticipantInput[]) =>
+    api.post<RegulatoryRequestDetail>(`${BASE}/${id}/submit/`, { participants }),
+  decide: (id: number | string, participantId: number, decision: 'approve' | 'reject', comment = '') =>
     api.post<RegulatoryRequestDetail>(`${BASE}/${id}/decide/`, {
-      participant_id: participantId,
-      decision,
-      comment,
+      participant_id: participantId, decision, comment,
     }),
 
-  inWork: (id: number | string) => api.post<RegulatoryRequestDetail>(`${BASE}/${id}/in_work/`),
-  issue: (id: number | string) => api.post<RegulatoryRequestDetail>(`${BASE}/${id}/issue/`),
-  close: (id: number | string) => api.post<RegulatoryRequestDetail>(`${BASE}/${id}/close/`),
+  legalQueue: () => api.get<RegulatoryRequestListItem[]>(`${BASE}/legal_queue/`),
+  take: (id: number | string) => api.post<RegulatoryRequestDetail>(`${BASE}/${id}/take/`),
+  toSigning: (id: number | string) => api.post<RegulatoryRequestDetail>(`${BASE}/${id}/to_signing/`),
+  execute: (id: number | string, deliveryMethod: string, deliveryComment = '') =>
+    api.post<RegulatoryRequestDetail>(`${BASE}/${id}/execute/`, {
+      delivery_method: deliveryMethod, delivery_comment: deliveryComment,
+    }),
+  confirmReceipt: (id: number | string) =>
+    api.post<RegulatoryRequestDetail>(`${BASE}/${id}/confirm_receipt/`),
+
+  uploadDocument: (id: number | string, file: File, title: string) => {
+    const form = new FormData()
+    form.append('title', title)
+    form.append('linked_type', 'requests_reg.regulatoryrequest')
+    form.append('linked_id', String(id))
+    form.append('file', file)
+    return api.postForm(`/documents/`, form)
+  },
 
   types: () =>
-    api.get<{ types: { code: string; name: string }[]; statuses: { code: string; name: string }[] }>(
-      `${BASE}/types/`,
-    ),
+    api.get<{
+      types: { code: string; name: string }[]
+      statuses: { code: string; name: string }[]
+      delivery_methods: { code: string; name: string }[]
+    }>(`${BASE}/types/`),
 
   organizations: () => api.get<Organization[]>('/core/organizations/'),
+  facilities: (org?: number) => api.get<Facility[]>(`/core/facilities/${org ? `?organization=${org}` : ''}`),
+  cfos: () => api.get<Cfo[]>('/core/cfos/'),
 }

@@ -1,36 +1,51 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
-import { requests, type Organization } from '@/services/requests'
+import { requests, type Cfo, type Facility, type Organization } from '@/services/requests'
 import { ApiError } from '@/services/api'
 import type { RequestType } from '@/types/request'
 
 const router = useRouter()
 
-const requestType = ref<RequestType>('ecp')
+const requestType = ref<RequestType>('poa')
 const organization = ref<number | null>(null)
+const facility = ref<number | null>(null)
+const cfo = ref<number | null>(null)
 const subjectName = ref('')
 const position = ref('')
 const department = ref('')
 const basis = ref('')
 
 const orgs = ref<Organization[]>([])
+const facilities = ref<Facility[]>([])
+const cfos = ref<Cfo[]>([])
 const saving = ref(false)
 const error = ref<string | null>(null)
+
+async function loadContext() {
+  const org = organization.value ?? undefined
+  facilities.value = await requests.facilities(org)
+  cfos.value = (await requests.cfos()).filter((c) => !org || c.organization === org)
+}
 
 onMounted(async () => {
   try {
     orgs.value = await requests.organizations()
     if (orgs.value.length) organization.value = orgs.value[0].id
-  } catch {
-    /* пусто — покажем ошибку при сохранении */
-  }
+    await loadContext()
+  } catch { /* покажем ошибку при сохранении */ }
+})
+
+watch(organization, () => {
+  facility.value = null
+  cfo.value = null
+  loadContext()
 })
 
 async function save() {
   error.value = null
   if (!organization.value) {
-    error.value = 'Выберите организацию (сначала заведите её в справочнике)'
+    error.value = 'Выберите организацию'
     return
   }
   saving.value = true
@@ -38,6 +53,8 @@ async function save() {
     const created = await requests.create({
       request_type: requestType.value,
       organization: organization.value,
+      facility: facility.value,
+      cfo: cfo.value,
       subject_name: subjectName.value.trim(),
       position: position.value.trim(),
       department: department.value.trim(),
@@ -61,15 +78,32 @@ async function save() {
         <label class="form-field">
           <span>Тип заявки</span>
           <select v-model="requestType">
-            <option value="ecp">Заявка на ЭЦП</option>
-            <option value="mchd">Заявка на МЧД</option>
             <option value="poa">Заявка на доверенность</option>
+            <option value="mchd">Заявка на МЧД</option>
+            <option value="ecp">Заявка на ЭЦП</option>
           </select>
         </label>
         <label class="form-field">
           <span>Организация</span>
           <select v-model="organization">
             <option v-for="o in orgs" :key="o.id" :value="o.id">{{ o.short_name }}</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="form-row">
+        <label class="form-field">
+          <span>Проект / объект</span>
+          <select v-model="facility">
+            <option :value="null">—</option>
+            <option v-for="f in facilities" :key="f.id" :value="f.id">{{ f.name }}</option>
+          </select>
+        </label>
+        <label class="form-field">
+          <span>ЦФО</span>
+          <select v-model="cfo">
+            <option :value="null">—</option>
+            <option v-for="c in cfos" :key="c.id" :value="c.id">{{ c.name }}</option>
           </select>
         </label>
       </div>

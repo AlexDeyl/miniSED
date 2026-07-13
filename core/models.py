@@ -118,8 +118,28 @@ class Position(models.Model):
 class CFO(models.Model):
     """Центр финансовой ответственности."""
 
+    CATEGORY_CHOICES = [
+        ("sales", "Отдел продаж"),
+        ("revenue", "Управление доходами"),
+        ("marketing", "Маркетинг"),
+        ("booking", "Бронирование"),
+        ("accounting", "Бухгалтерия"),
+        ("hr_kdp", "КДП"),
+        ("hr_recruit", "Подбор / адаптация"),
+        ("hr_training", "Обучение"),
+        ("its_it", "ИТС / ИТ"),
+        ("sgh", "СГХ"),
+        ("territory", "Содержание территории"),
+        ("warehouse", "Склад"),
+        ("restaurant", "Ресторанная служба"),
+        ("other", "Прочее"),
+    ]
+
     name = models.CharField("Название", max_length=255)
     code = models.CharField("Код", max_length=64, blank=True)
+    category = models.CharField(
+        "Категория", max_length=32, choices=CATEGORY_CHOICES, blank=True
+    )
     organization = models.ForeignKey(
         Organization,
         on_delete=models.PROTECT,

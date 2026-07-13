@@ -49,6 +49,12 @@ const router = createRouter({
       meta: { title: 'Заявка' },
     },
     {
+      path: '/legal',
+      name: 'legal',
+      component: () => import('@/views/LegalQueueView.vue'),
+      meta: { title: 'Заявки для юристов' },
+    },
+    {
       path: '/deals',
       name: 'deals',
       component: () => import('@/views/DealSearchView.vue'),

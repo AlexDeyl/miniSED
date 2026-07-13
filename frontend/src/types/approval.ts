@@ -58,6 +58,13 @@ export interface ApprovalListItem {
   created_at: string
 }
 
+export interface ApprovalDocument {
+  id: number
+  title: string
+  current_version_number: number | null
+  download_url: string | null
+}
+
 export interface ApprovalDetail extends ApprovalListItem {
   submitted_at: string | null
   completed_at: string | null
@@ -66,6 +73,7 @@ export interface ApprovalDetail extends ApprovalListItem {
   rounds: ApprovalRound[]
   sheets: ApprovalSheet[]
   route_changes: unknown[]
+  documents: ApprovalDocument[]
 }
 
 export interface ParticipantInput {

@@ -65,15 +65,38 @@ class ApprovalDetailSerializer(ApprovalListSerializer):
     sheets = SheetSerializer(many=True, read_only=True)
     route_changes = RouteChangeSerializer(many=True, read_only=True)
     linked_type = serializers.SerializerMethodField()
+    documents = serializers.SerializerMethodField()
 
     class Meta(ApprovalListSerializer.Meta):
         fields = ApprovalListSerializer.Meta.fields + [
             "submitted_at", "completed_at", "object_id",
-            "linked_type", "rounds", "sheets", "route_changes",
+            "linked_type", "rounds", "sheets", "route_changes", "documents",
         ]
 
     def get_linked_type(self, obj):
         return obj.content_type.model if obj.content_type_id else None
+
+    def get_documents(self, obj):
+        # несколько документов, привязанных к согласованию (ТЗ п.7.1)
+        from django.contrib.contenttypes.models import ContentType
+        from documents.models import Document
+
+        ct = ContentType.objects.get_for_model(obj.__class__)
+        docs = Document.objects.filter(
+            content_type=ct, object_id=obj.pk, deleted_at__isnull=True
+        ).select_related("current_version")
+        out = []
+        for d in docs:
+            cur = d.current_version
+            out.append({
+                "id": d.id,
+                "title": d.title,
+                "current_version_number": cur.version_number if cur else None,
+                "download_url": (
+                    f"/api/documents/{d.id}/versions/{cur.id}/download/" if cur else None
+                ),
+            })
+        return out
 
 
 class ApprovalCreateSerializer(serializers.ModelSerializer):

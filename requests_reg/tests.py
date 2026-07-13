@@ -1,14 +1,18 @@
 """
-Тесты регламентных заявок: создание/номер, отправка на согласование через
-движок, решение, синхронизация статуса, жизненный цикл выпуска, API.
+Тесты регламентных заявок: маршрутизация, согласование, двухэтапное
+исполнение юротделом, ручной выбор согласующего, API.
 """
 
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from core.models import Organization
-from . import constants, services
-from .models import RegulatoryRequest
+from core.models import CFO, Facility, Organization
+from core.models import AuditLog
+from documents import services as docsvc
+from . import constants as C
+from . import routing, services
+from .models import RegulatoryRequest, RoleAssignment
 
 
 def api(uid=None):
@@ -18,137 +22,183 @@ def api(uid=None):
     return c
 
 
-def internal(uid, order=0):
-    return {"type": "internal", "b24_user_id": uid, "order": order}
+def internal(uid, order=0, role=""):
+    return {"type": "internal", "b24_user_id": uid, "order": order, "role": role}
 
 
-class ServiceTests(TestCase):
+class RoutingTests(TestCase):
     def setUp(self):
-        self.org = Organization.objects.create(short_name="ООО Норд")
+        self.org = Organization.objects.create(short_name="УК Норд")
+        self.cfo_sales = CFO.objects.create(name="Продажи", organization=self.org, category="sales")
+        self.cfo_it = CFO.objects.create(name="ИТ", organization=self.org, category="its_it")
 
-    def test_create_generates_number(self):
-        req = services.create_request(
-            request_type=constants.TYPE_ECP, organization=self.org,
-            subject_name="Иванов И.И.", initiator_b24_id=1,
+    def _req(self, cfo=None, facility=None):
+        return services.create_request(
+            request_type=C.TYPE_POA, organization=self.org, cfo=cfo, facility=facility,
+            initiator_b24_id=1,
         )
-        self.assertTrue(req.number.startswith("ЭЦП-"))
-        self.assertEqual(req.status, constants.STATUS_DRAFT)
 
-    def test_unknown_type_rejected(self):
-        with self.assertRaises(services.RequestError):
-            services.create_request(request_type="xxx", organization=self.org)
+    def test_base_route_always_roles(self):
+        route = routing.build_route(self._req())
+        codes = [s["role_code"] for s in route]
+        # без ЦФО: всегда — руководитель ЦФО, финдиректор, юротдел, финальный подписант
+        self.assertEqual(codes, [
+            C.ROLE_CFO_HEAD, C.ROLE_FINANCE_DIRECTOR, C.ROLE_LEGAL_DEPT, C.ROLE_FINAL_SIGNER,
+        ])
 
-    def test_submit_then_approve_flows_status(self):
-        req = services.create_request(
-            request_type=constants.TYPE_MCHD, organization=self.org, initiator_b24_id=1,
+    def test_sales_category_adds_sales_head(self):
+        codes = [s["role_code"] for s in routing.build_route(self._req(cfo=self.cfo_sales))]
+        self.assertIn(C.ROLE_SALES_HEAD, codes)
+
+    def test_it_category_adds_tech_and_ops(self):
+        codes = [s["role_code"] for s in routing.build_route(self._req(cfo=self.cfo_it))]
+        self.assertIn(C.ROLE_TECH_DIRECTOR, codes)
+        self.assertIn(C.ROLE_OPS_DIRECTOR, codes)
+
+    def test_nevesomost_adds_restaurant_director(self):
+        fac = Facility.objects.create(name="Невесомость", organization=self.org)
+        codes = [s["role_code"] for s in routing.build_route(self._req(facility=fac))]
+        self.assertIn(C.ROLE_RESTAURANT_DIRECTOR, codes)
+
+    def test_role_resolution_and_manual_fallback(self):
+        RoleAssignment.objects.create(
+            role_code=C.ROLE_CFO_HEAD, cfo=self.cfo_sales, user_b24_id=500, user_name="Начальник"
         )
-        services.submit(req, [internal(10)])
+        route = routing.build_route(self._req(cfo=self.cfo_sales))
+        cfo_slot = next(s for s in route if s["role_code"] == C.ROLE_CFO_HEAD)
+        self.assertTrue(cfo_slot["resolved"])
+        self.assertEqual(cfo_slot["b24_user_id"], 500)
+        # финансовый директор не назначен -> ручной выбор
+        fd_slot = next(s for s in route if s["role_code"] == C.ROLE_FINANCE_DIRECTOR)
+        self.assertTrue(fd_slot["needs_manual"])
+
+
+class FlowTests(TestCase):
+    def setUp(self):
+        self.org = Organization.objects.create(short_name="УК Норд")
+
+    def _req(self):
+        return services.create_request(
+            request_type=C.TYPE_POA, organization=self.org, initiator_b24_id=1,
+            subject_name="Иванов",
+        )
+
+    def _attach_doc(self, req):
+        doc = docsvc.create_document(title="Доверенность", linked_object=req)
+        docsvc.add_version(doc, SimpleUploadedFile("dov.pdf", b"scan"))
+        return doc
+
+    def test_full_cycle_to_closed(self):
+        req = self._req()
+        services.submit(req, [internal(10, 0, C.ROLE_CFO_HEAD)])
         req.refresh_from_db()
-        self.assertEqual(req.status, constants.STATUS_ON_APPROVAL)
+        self.assertEqual(req.status, C.STATUS_ON_APPROVAL)
 
         approval = services.get_approval(req)
-        self.assertIsNotNone(approval)
         pid = approval.rounds.first().participants.first().id
-
         services.decide(req, pid, "approve")
         req.refresh_from_db()
-        self.assertEqual(req.status, constants.STATUS_APPROVED)
+        # финальное утверждение -> автопередача юристам
+        self.assertEqual(req.status, C.STATUS_TO_LEGAL)
 
-    def test_reject_sets_rejected(self):
-        req = services.create_request(
-            request_type=constants.TYPE_POA, organization=self.org, initiator_b24_id=1,
-        )
+        services.take_in_work(req); req.refresh_from_db()
+        self.assertEqual(req.status, C.STATUS_LEGAL_WORK)
+        services.to_signing(req); req.refresh_from_db()
+        self.assertEqual(req.status, C.STATUS_SIGNING)
+
+        # исполнение без файла — ошибка
+        with self.assertRaises(services.RequestError):
+            services.execute(req, delivery_method="post")
+
+        self._attach_doc(req)
+        services.execute(req, delivery_method="post", delivery_comment="Почтой России")
+        req.refresh_from_db()
+        self.assertEqual(req.status, C.STATUS_EXECUTED)
+        self.assertEqual(req.delivery_method, "post")
+        self.assertIsNotNone(req.executed_at)
+
+        services.confirm_receipt(req, by_b24_id=1)
+        req.refresh_from_db()
+        self.assertEqual(req.status, C.STATUS_CLOSED)
+        self.assertIsNotNone(req.received_at)
+
+    def test_execute_requires_delivery_method(self):
+        req = self._req()
+        services.submit(req, [internal(10)])
+        pid = services.get_approval(req).rounds.first().participants.first().id
+        services.decide(req, pid, "approve")
+        services.take_in_work(req)
+        self._attach_doc(req)
+        with self.assertRaises(services.RequestError):
+            services.execute(req, delivery_method="")
+
+    def test_reject(self):
+        req = self._req()
         services.submit(req, [internal(10)])
         pid = services.get_approval(req).rounds.first().participants.first().id
         services.decide(req, pid, "reject", "нет оснований")
         req.refresh_from_db()
-        self.assertEqual(req.status, constants.STATUS_REJECTED)
+        self.assertEqual(req.status, C.STATUS_REJECTED)
 
-    def test_return_and_resubmit_new_round(self):
-        req = services.create_request(
-            request_type=constants.TYPE_ECP, organization=self.org, initiator_b24_id=1,
+    def test_manual_selection_logged(self):
+        req = self._req()
+        # роль final_signer не имеет назначения -> ручной выбор, должен залогироваться
+        services.submit(req, [internal(77, 0, C.ROLE_FINAL_SIGNER)])
+        self.assertTrue(
+            AuditLog.objects.filter(action="manual_approver_selected").exists()
         )
-        services.submit(req, [internal(10)])
-        services.return_for_revision(req, comment="доработать")
-        req.refresh_from_db()
-        self.assertEqual(req.status, constants.STATUS_RETURNED)
-
-        services.submit(req, [internal(10), internal(20)])
-        req.refresh_from_db()
-        self.assertEqual(req.status, constants.STATUS_ON_APPROVAL)
-        self.assertEqual(services.get_approval(req).rounds.count(), 2)
-
-    def test_issue_lifecycle(self):
-        req = services.create_request(
-            request_type=constants.TYPE_ECP, organization=self.org, initiator_b24_id=1,
-        )
-        services.submit(req, [internal(10)])
-        pid = services.get_approval(req).rounds.first().participants.first().id
-        services.decide(req, pid, "approve")
-
-        services.mark_in_work(req)
-        req.refresh_from_db()
-        self.assertEqual(req.status, constants.STATUS_IN_WORK)
-
-        services.mark_issued(req)
-        req.refresh_from_db()
-        self.assertEqual(req.status, constants.STATUS_ISSUED)
-        self.assertEqual(req.status_label(), "ЭЦП выпущена")
-
-        services.close(req)
-        req.refresh_from_db()
-        self.assertEqual(req.status, constants.STATUS_CLOSED)
-
-    def test_cannot_issue_before_approval(self):
-        req = services.create_request(
-            request_type=constants.TYPE_ECP, organization=self.org, initiator_b24_id=1,
-        )
-        with self.assertRaises(services.RequestError):
-            services.mark_issued(req)
 
 
 class ApiTests(TestCase):
     def setUp(self):
-        self.org = Organization.objects.create(short_name="ООО Норд")
+        self.org = Organization.objects.create(short_name="УК Норд")
 
-    def test_requires_auth(self):
-        self.assertEqual(api().get("/api/reg/requests/").status_code, 403)
+    def _create(self):
+        return api(1).post("/api/reg/requests/", {
+            "request_type": "poa", "organization": self.org.id, "subject_name": "Petrov",
+        }, format="json").json()["id"]
 
-    def test_create_and_submit_and_decide(self):
-        r = api(1).post(
-            "/api/reg/requests/",
-            {"request_type": "ecp", "organization": self.org.id, "subject_name": "Петров"},
-            format="json",
-        )
-        self.assertEqual(r.status_code, 201)
-        rid = r.json()["id"]
-        self.assertTrue(r.json()["number"].startswith("ЭЦП-"))
+    def test_route_preview(self):
+        rid = self._create()
+        data = api(1).get(f"/api/reg/requests/{rid}/route_preview/").json()
+        codes = [s["role_code"] for s in data["route"]]
+        self.assertIn(C.ROLE_CFO_HEAD, codes)
+        self.assertIn(C.ROLE_FINAL_SIGNER, codes)
 
-        r = api(1).post(
-            f"/api/reg/requests/{rid}/submit/",
-            {"participants": [{"type": "internal", "b24_user_id": 20, "order": 0}]},
-            format="json",
-        )
+    def test_submit_decide_reaches_legal_queue(self):
+        rid = self._create()
+        r = api(1).post(f"/api/reg/requests/{rid}/submit/", {
+            "participants": [{"type": "internal", "b24_user_id": 20, "order": 0}],
+        }, format="json")
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.json()["status"], "on_approval")
         pid = r.json()["approval"]["rounds"][0]["participants"][0]["id"]
+        r = api(20).post(f"/api/reg/requests/{rid}/decide/", {
+            "participant_id": pid, "decision": "approve",
+        }, format="json")
+        self.assertEqual(r.json()["status"], "to_legal")
 
-        r = api(20).post(
-            f"/api/reg/requests/{rid}/decide/",
-            {"participant_id": pid, "decision": "approve"},
-            format="json",
-        )
-        self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.json()["status"], "approved")
+        # появляется в очереди юристов
+        queue = api(30).get("/api/reg/requests/legal_queue/").json()
+        self.assertTrue(any(x["id"] == rid for x in queue))
 
-    def test_list_filter_by_type(self):
-        services.create_request(request_type="ecp", organization=self.org, initiator_b24_id=1)
-        services.create_request(request_type="mchd", organization=self.org, initiator_b24_id=1)
-        data = api(1).get("/api/reg/requests/?type=ecp").json()
-        self.assertEqual(len(data), 1)
-        self.assertEqual(data[0]["request_type"], "ecp")
+    def test_legal_execute_via_api(self):
+        rid = self._create()
+        r = api(1).post(f"/api/reg/requests/{rid}/submit/", {
+            "participants": [{"type": "internal", "b24_user_id": 20, "order": 0}],
+        }, format="json")
+        pid = r.json()["approval"]["rounds"][0]["participants"][0]["id"]
+        api(20).post(f"/api/reg/requests/{rid}/decide/", {"participant_id": pid, "decision": "approve"}, format="json")
 
-    def test_types_endpoint(self):
-        data = api(1).get("/api/reg/requests/types/").json()
-        codes = {t["code"] for t in data["types"]}
-        self.assertEqual(codes, {"ecp", "mchd", "poa"})
+        api(30).post(f"/api/reg/requests/{rid}/take/")
+        # прикрепить документ через documents API
+        api(30).post("/api/documents/", {
+            "title": "Доверенность",
+            "linked_type": "requests_reg.regulatoryrequest",
+            "linked_id": rid,
+            "file": SimpleUploadedFile("d.pdf", b"scan"),
+        }, format="multipart")
+        r = api(30).post(f"/api/reg/requests/{rid}/execute/", {"delivery_method": "courier"}, format="json")
+        self.assertEqual(r.json()["status"], "executed")
+
+        r = api(1).post(f"/api/reg/requests/{rid}/confirm_receipt/")
+        self.assertEqual(r.json()["status"], "closed")

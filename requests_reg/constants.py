@@ -1,60 +1,104 @@
 """
-Каталог типов регламентных заявок и статусов (ТЗ п.9).
+Каталог типов, статусов и маршрутных ролей регламентных заявок (ТЗ п.9 + доработка).
 
-Модуль спроектирован расширяемым: чтобы добавить новый тип заявки,
-достаточно дописать запись в REQUEST_TYPES и (при необходимости) набор
-type-специфичных полей в TYPE_FIELDS — без переработки моделей/логики.
-Type-специфичные поля хранятся в JSON-поле RegulatoryRequest.data.
+Приоритет первой очереди — заявка на доверенность/МЧД (двухэтапный процесс:
+согласование → исполнение юридическим отделом). ЭЦП архитектурно предусмотрена,
+но не в приоритете.
 """
 
-TYPE_ECP = "ecp"
-TYPE_MCHD = "mchd"
 TYPE_POA = "poa"
+TYPE_MCHD = "mchd"
+TYPE_ECP = "ecp"
 
 # code -> (название, префикс номера)
 REQUEST_TYPES = {
-    TYPE_ECP: ("Заявка на ЭЦП", "ЭЦП"),
-    TYPE_MCHD: ("Заявка на МЧД", "МЧД"),
     TYPE_POA: ("Заявка на доверенность", "ДОВ"),
+    TYPE_MCHD: ("Заявка на МЧД", "МЧД"),
+    TYPE_ECP: ("Заявка на ЭЦП", "ЭЦП"),
 }
 
-TYPE_CHOICES = [(code, name) for code, (name, _prefix) in REQUEST_TYPES.items()]
+TYPE_CHOICES = [(code, name) for code, (name, _p) in REQUEST_TYPES.items()]
 
-
-# Общий набор статусов покрывает все три типа (ТЗ п.9.2-9.4).
-# Ярлык «выпущена/оформлена» различается по типу — задаётся в ISSUED_LABEL.
+# --- Статусы (ТЗ, доработка по доверенности) --------------------------------
 STATUS_DRAFT = "draft"
 STATUS_ON_APPROVAL = "on_approval"
 STATUS_RETURNED = "returned"
-STATUS_APPROVED = "approved"
-STATUS_IN_WORK = "in_work"
-STATUS_ISSUED = "issued"
 STATUS_REJECTED = "rejected"
+STATUS_APPROVED = "approved"
+STATUS_TO_LEGAL = "to_legal"
+STATUS_LEGAL_WORK = "legal_work"
+STATUS_SIGNING = "signing"
+STATUS_EXECUTED = "executed"
 STATUS_CLOSED = "closed"
 
 STATUS_CHOICES = [
     (STATUS_DRAFT, "Черновик"),
     (STATUS_ON_APPROVAL, "На согласовании"),
     (STATUS_RETURNED, "Возвращена на доработку"),
-    (STATUS_APPROVED, "Согласована"),
-    (STATUS_IN_WORK, "В работе"),
-    (STATUS_ISSUED, "Выпущена / оформлена"),
     (STATUS_REJECTED, "Отклонена"),
+    (STATUS_APPROVED, "Согласована"),
+    (STATUS_TO_LEGAL, "Передана юристам"),
+    (STATUS_LEGAL_WORK, "В работе у юристов"),
+    (STATUS_SIGNING, "На подписании"),
+    (STATUS_EXECUTED, "Исполнена"),
     (STATUS_CLOSED, "Закрыта"),
 ]
 
-# Ярлык статуса «выпущена» по типу — для отображения.
-ISSUED_LABEL = {
-    TYPE_ECP: "ЭЦП выпущена",
-    TYPE_MCHD: "МЧД оформлена",
-    TYPE_POA: "Доверенность оформлена",
-}
+# статусы, попадающие в раздел «Заявки для юристов»
+LEGAL_QUEUE_STATUSES = [STATUS_TO_LEGAL, STATUS_LEGAL_WORK, STATUS_SIGNING]
 
-# Рекомендованные type-специфичные поля (для форм/подсказок; в JSON data).
-TYPE_FIELDS = {
-    TYPE_ECP: ["ecp_type", "target_organization", "systems", "responsible", "issued_at", "expires_at"],
-    TYPE_MCHD: ["principal", "representative", "powers", "operators", "issued_at", "expires_at"],
-    TYPE_POA: ["principal", "representative", "powers", "poa_type", "notarization", "issued_at", "expires_at"],
+# --- Способ передачи готового документа -------------------------------------
+DELIVERY_CHOICES = [
+    ("personally", "Лично"),
+    ("courier", "Курьером"),
+    ("post", "Почтой"),
+    ("edo", "ЭДО / электронно"),
+    ("other", "Другое"),
+]
+
+# --- Категории ЦФО (для условий маршрута) -----------------------------------
+CFO_CATEGORY_CHOICES = [
+    ("sales", "Отдел продаж"),
+    ("revenue", "Управление доходами"),
+    ("marketing", "Маркетинг"),
+    ("booking", "Бронирование"),
+    ("accounting", "Бухгалтерия"),
+    ("hr_kdp", "КДП"),
+    ("hr_recruit", "Подбор / адаптация"),
+    ("hr_training", "Обучение"),
+    ("its_it", "ИТС / ИТ"),
+    ("sgh", "СГХ"),
+    ("territory", "Содержание территории"),
+    ("warehouse", "Склад"),
+    ("restaurant", "Ресторанная служба"),
+    ("other", "Прочее"),
+]
+
+# --- Маршрутные роли --------------------------------------------------------
+ROLE_CFO_HEAD = "cfo_head"
+ROLE_SALES_HEAD = "sales_head"
+ROLE_COMMERCIAL_DIRECTOR = "commercial_director"
+ROLE_CHIEF_ACCOUNTANT = "chief_accountant"
+ROLE_HR_HEAD = "hr_head"
+ROLE_TECH_DIRECTOR = "tech_director"
+ROLE_OPS_DIRECTOR = "ops_director"
+ROLE_RESTAURANT_DIRECTOR = "restaurant_director"
+ROLE_FINANCE_DIRECTOR = "finance_director"
+ROLE_LEGAL_DEPT = "legal_dept"
+ROLE_FINAL_SIGNER = "final_signer"
+
+ROLE_NAMES = {
+    ROLE_CFO_HEAD: "Руководитель ЦФО",
+    ROLE_SALES_HEAD: "Руководитель отдела продаж",
+    ROLE_COMMERCIAL_DIRECTOR: "Коммерческий директор",
+    ROLE_CHIEF_ACCOUNTANT: "Главный бухгалтер УК",
+    ROLE_HR_HEAD: "Руководитель отдела по работе с персоналом",
+    ROLE_TECH_DIRECTOR: "Технический директор",
+    ROLE_OPS_DIRECTOR: "Операционный директор",
+    ROLE_RESTAURANT_DIRECTOR: "Директор ресторанной службы",
+    ROLE_FINANCE_DIRECTOR: "Финансовый директор УК",
+    ROLE_LEGAL_DEPT: "Юридический отдел",
+    ROLE_FINAL_SIGNER: "Финальный подписант / генеральный директор",
 }
 
 

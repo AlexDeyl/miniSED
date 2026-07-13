@@ -118,8 +118,10 @@ a { color: var(--green-main); text-decoration: none; }
 /* статусы регламентных заявок */
 .status-pill.on_approval { background: var(--orange-main); }
 .status-pill.approved { background: #4caf50; }
-.status-pill.in_work { background: #1976d2; }
-.status-pill.issued { background: var(--green-main); }
+.status-pill.to_legal { background: #7b1fa2; }
+.status-pill.legal_work { background: #1976d2; }
+.status-pill.signing { background: #0288d1; }
+.status-pill.executed { background: var(--green-main); }
 .status-pill.closed { background: #9e9e9e; }
 
 /* фильтр-табы (пилюли) */

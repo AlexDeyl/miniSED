@@ -1,18 +1,27 @@
 """
-Логика регламентных заявок. Согласование делегируется движку approvalflow,
-поэтому здесь только специфика заявок: создание, номер, синхронизация статуса
-и жизненный цикл выпуска (в работе → выпущена/оформлена → закрыта).
+Логика регламентных заявок.
+
+Двухэтапный процесс (доверенность/МЧД):
+  1) Согласование — через движок approvalflow (последовательный маршрут).
+  2) Исполнение юридическим отделом — взять в работу → на подписании →
+     исполнена (файл + способ передачи) → инициатор подтверждает получение →
+     закрыта.
+
+Маршрут строится по правилам (routing.build_route); ручной выбор согласующего
+фиксируется в аудите (core.log_action).
 """
 
 from __future__ import annotations
 
 from django.contrib.contenttypes.models import ContentType
 from django.db import transaction
+from django.utils import timezone
 
 from approvalflow import services as flow
-from approvalflow.models import Approval
+from approvalflow.models import Approval, ApprovalParticipant
+from core.services import log_action
 
-from . import constants
+from . import constants, routing
 from .models import RegulatoryRequest
 
 
@@ -26,7 +35,6 @@ def create_request(*, request_type: str, organization, **fields) -> RegulatoryRe
     req = RegulatoryRequest.objects.create(
         request_type=request_type, organization=organization, **fields
     )
-    # номер вида ЭЦП-000123
     req.number = f"{constants.number_prefix(request_type)}-{req.pk:06d}"
     req.save(update_fields=["number"])
     return req
@@ -41,28 +49,58 @@ def get_approval(request: RegulatoryRequest) -> Approval | None:
     )
 
 
+def build_route(request: RegulatoryRequest) -> list[dict]:
+    """Предпросмотр маршрута (для инициатора до отправки)."""
+    return routing.build_route(request)
+
+
+def _set(request, status, **extra):
+    request.status = status
+    fields = ["status", "updated_at", *extra.keys()]
+    for k, v in extra.items():
+        setattr(request, k, v)
+    request.save(update_fields=fields)
+
+
 def _sync_status(request: RegulatoryRequest) -> None:
-    """Отражает статус связанного согласования в статусе заявки."""
     approval = get_approval(request)
     if approval is None:
         return
-    mapping = {
-        Approval.STATUS_IN_PROGRESS: constants.STATUS_ON_APPROVAL,
-        Approval.STATUS_COMPLETED: constants.STATUS_APPROVED,
-        Approval.STATUS_REJECTED: constants.STATUS_REJECTED,
-        Approval.STATUS_RETURNED: constants.STATUS_RETURNED,
-    }
-    new_status = mapping.get(approval.status)
-    if new_status and request.status != new_status:
-        request.status = new_status
-        request.save(update_fields=["status", "updated_at"])
+    if approval.status == Approval.STATUS_IN_PROGRESS:
+        _set(request, constants.STATUS_ON_APPROVAL)
+    elif approval.status == Approval.STATUS_REJECTED:
+        _set(request, constants.STATUS_REJECTED)
+    elif approval.status == Approval.STATUS_RETURNED:
+        _set(request, constants.STATUS_RETURNED)
+    elif approval.status == Approval.STATUS_COMPLETED:
+        if request.status in (
+            constants.STATUS_ON_APPROVAL,
+            constants.STATUS_DRAFT,
+            constants.STATUS_RETURNED,
+        ):
+            # финальное утверждение → согласована → автопередача юристам
+            _set(request, constants.STATUS_APPROVED)
+            _set(request, constants.STATUS_TO_LEGAL)
+            log_action("request_approved_to_legal", target=request)
 
 
 @transaction.atomic
-def submit(request: RegulatoryRequest, participants: list[dict], *, flow_type=None):
-    """Отправляет заявку на согласование: создаёт Approval и открывает круг №1."""
+def submit(request: RegulatoryRequest, participants: list[dict], *, flow_type=None,
+           actor_b24_id=None):
+    """Отправляет заявку на согласование (последовательный маршрут по умолчанию)."""
     if request.status not in (constants.STATUS_DRAFT, constants.STATUS_RETURNED):
         raise RequestError("Отправить можно только черновик или возвращённую заявку.")
+    if not participants:
+        raise RequestError("Маршрут пуст — добавьте согласующих.")
+
+    # зафиксировать ручной выбор согласующих (слоты, которые система не разрешила)
+    manual_roles = {s["role_code"] for s in routing.build_route(request) if s["needs_manual"]}
+    for p in participants:
+        if p.get("role") in manual_roles:
+            log_action(
+                "manual_approver_selected", target=request,
+                new_value={"role": p.get("role"), "b24_user_id": p.get("b24_user_id")},
+            )
 
     approval = get_approval(request)
     if approval is None:
@@ -86,8 +124,6 @@ def decide(request: RegulatoryRequest, participant_id, decision, comment=""):
     approval = get_approval(request)
     if approval is None:
         raise RequestError("Заявка не отправлена на согласование.")
-    from approvalflow.models import ApprovalParticipant
-
     try:
         participant = ApprovalParticipant.objects.get(
             id=participant_id, round__approval=approval
@@ -108,25 +144,40 @@ def return_for_revision(request: RegulatoryRequest, *, by_b24_id=None, comment="
     _sync_status(request)
 
 
-# --- жизненный цикл выпуска (после согласования) ---
-def _set_status(request, status):
-    request.status = status
-    request.save(update_fields=["status", "updated_at"])
+# --- Исполнение юридическим отделом -----------------------------------------
+def take_in_work(request: RegulatoryRequest):
+    if request.status != constants.STATUS_TO_LEGAL:
+        raise RequestError("Взять в работу можно только заявку, переданную юристам.")
+    _set(request, constants.STATUS_LEGAL_WORK)
 
 
-def mark_in_work(request: RegulatoryRequest):
-    if request.status != constants.STATUS_APPROVED:
-        raise RequestError("В работу можно взять только согласованную заявку.")
-    _set_status(request, constants.STATUS_IN_WORK)
+def to_signing(request: RegulatoryRequest):
+    if request.status != constants.STATUS_LEGAL_WORK:
+        raise RequestError("На подписание можно отправить заявку в работе у юристов.")
+    _set(request, constants.STATUS_SIGNING)
 
 
-def mark_issued(request: RegulatoryRequest):
-    if request.status not in (constants.STATUS_APPROVED, constants.STATUS_IN_WORK):
-        raise RequestError("Выпустить можно согласованную заявку или заявку в работе.")
-    _set_status(request, constants.STATUS_ISSUED)
+def execute(request: RegulatoryRequest, *, delivery_method: str, delivery_comment: str = ""):
+    """Отметить исполненной: обязателен прикреплённый файл и способ передачи."""
+    if request.status not in (constants.STATUS_LEGAL_WORK, constants.STATUS_SIGNING):
+        raise RequestError("Исполнить можно заявку в работе у юристов или на подписании.")
+    if not delivery_method:
+        raise RequestError("Укажите способ передачи документа.")
+    if not request.documents.filter(deleted_at__isnull=True).exists():
+        raise RequestError("Прикрепите файл/скан доверенности перед исполнением.")
+    _set(
+        request, constants.STATUS_EXECUTED,
+        delivery_method=delivery_method,
+        delivery_comment=delivery_comment,
+        executed_at=timezone.now(),
+    )
+    log_action("request_executed", target=request,
+               new_value={"delivery_method": delivery_method})
 
 
-def close(request: RegulatoryRequest):
-    if request.status == constants.STATUS_CLOSED:
-        raise RequestError("Заявка уже закрыта.")
-    _set_status(request, constants.STATUS_CLOSED)
+def confirm_receipt(request: RegulatoryRequest, *, by_b24_id=None):
+    """Инициатор подтверждает получение → заявка закрывается."""
+    if request.status != constants.STATUS_EXECUTED:
+        raise RequestError("Подтвердить получение можно только исполненную заявку.")
+    _set(request, constants.STATUS_CLOSED, received_at=timezone.now())
+    log_action("request_received", target=request)
