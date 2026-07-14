@@ -359,6 +359,17 @@ class ApiTests(TestCase):
         # юрист видит заявку, но отменить может только инициатор
         self.assertEqual(api(30).post(f"/api/reg/requests/{rid}/cancel/").status_code, 403)
 
+    def test_confirm_receipt_only_initiator(self):
+        r = RegulatoryRequest.objects.create(
+            request_type="poa", organization=self.org, initiator_b24_id=1, status="executed",
+        )
+        # юрист не закрывает заявку за инициатора
+        self.assertEqual(api(30).post(f"/api/reg/requests/{r.id}/confirm_receipt/").status_code, 403)
+        # инициатор — может
+        resp = api(1).post(f"/api/reg/requests/{r.id}/confirm_receipt/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["status"], "closed")
+
     # --- перезапуск после отклонения ---
     def test_restart_after_reject(self):
         rid = self._create()

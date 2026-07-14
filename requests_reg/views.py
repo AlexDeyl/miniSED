@@ -239,6 +239,9 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="confirm_receipt")
     def confirm_receipt(self, request, pk=None):
         req = self.get_object()
+        # Закрыть заявку («получил/ознакомился») может только инициатор —
+        # юрист не закрывает заявку за него.
+        self._require_initiator(req)
         return self._run(lambda: services.confirm_receipt(req, by_b24_id=self.b24_id)) or self._detail(req)
 
     @action(detail=False, methods=["get"])
