@@ -41,7 +41,12 @@ async function submit() {
   }
 }
 
-// Вход через Битрикс24: внутри портала — BX24.getAuth(); на домене — OAuth-редирект.
+// OAuth-редирект: Битрикс вернёт код на обработчик /app (там выпустится токен).
+function oauthRedirect() {
+  window.location.href = `/api/auth/bitrix/start/?next=${encodeURIComponent(window.location.origin + '/login')}`
+}
+
+// Вход через Битрикс24: внутри портала — BX24.getAuth(); иначе — OAuth-редирект.
 function loginViaBitrix() {
   error.value = null
   const BX24 = bx24()
@@ -67,19 +72,16 @@ function loginViaBitrix() {
           }
           router.push('/svetofor')
         } else {
-          error.value = 'Не удалось получить авторизацию Битрикс24.'
+          // SDK есть, но контекст портала недоступен — уходим на OAuth
+          oauthRedirect()
         }
-      } catch (e) {
-        error.value = e instanceof ApiError ? e.message : 'Ошибка входа через Битрикс24'
-      } finally {
-        busy.value = false
+      } catch {
+        oauthRedirect()
       }
     })
     return
   }
-  // домен: OAuth-редирект (Django обменяет код и вернёт с ?bitrix_token=)
-  const next = `${window.location.origin}/login`
-  window.location.href = `/api/auth/bitrix/start/?next=${encodeURIComponent(next)}`
+  oauthRedirect()
 }
 
 onMounted(async () => {

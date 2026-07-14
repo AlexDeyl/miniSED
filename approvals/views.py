@@ -118,6 +118,11 @@ def app_view(request):
     server_domain = request.GET.get("server_domain")
 
     if code and domain and server_domain:
+        # OAuth-код вернулся на обработчик /app. Обмениваем на токен, СРАЗУ
+        # выпускаем токен MiniSED и отдаём SPA с вложенным токеном — без
+        # редиректа и без опоры на cookie сессии (в iframe она третьесторонняя
+        # и часто не доходит, из-за чего был цикл на /login).
+        boot_token = None
         try:
             token_resp = requests.get(
                 f"https://{server_domain}/oauth/token/",
@@ -132,29 +137,18 @@ def app_view(request):
             )
             token_data = token_resp.json()
             access_token = token_data.get("access_token")
-            b24_id = token_data.get("user_id")
 
             _store_bitrix_portal_token(domain, token_data.get("member_id"), token_data)
 
-            if b24_id:
-                request.session["b24_user_id"] = int(b24_id)
-            try:
-                if access_token:
-                    user_resp = requests.get(
-                        f"https://{domain}/rest/user.current",
-                        params={"auth": access_token},
-                        timeout=5,
-                    )
-                    user_data = user_resp.json().get("result", {})
-                    email = user_data.get("EMAIL") or user_data.get("WORK_EMAIL")
-                    if email:
-                        request.session["b24_email"] = email
-            except Exception as e:
-                print(f"[Bitrix OAuth] user.current failed: {e}")
+            if access_token:
+                from core.auth_views import _issue_for_bitrix
 
+                _, token = _issue_for_bitrix(access_token, domain)
+                if token:
+                    boot_token = token.key
         except Exception as e:
             print(f"[Bitrix OAuth] token exchange error: {e}")
-        return redirect("/app")
+        return _serve_spa(request, boot_token)
     return _serve_spa(request)
 
 
