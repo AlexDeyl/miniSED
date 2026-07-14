@@ -74,10 +74,11 @@ a { color: var(--green-main); text-decoration: none; }
 .sidebar-tab:hover { background: rgba(0, 0, 0, 0.15); }
 .sidebar-tab.active { background: #fff; color: var(--green-main); font-weight: 600; }
 
-.sidebar-footer { margin-top: auto; }
-.sidebar-user { font-size: 12px; line-height: 1.5; opacity: 0.95; margin-bottom: 10px; }
-.sidebar-user-name { font-weight: 600; }
-.sidebar-user-id { opacity: 0.9; }
+.sidebar-user-name { font-weight: 600; font-size: 13px; }
+.sidebar-user-id { font-size: 12px; opacity: 0.9; margin-top: 2px; }
+
+/* Копирайт/версия — в самом низу сайдбара */
+.sidebar-footer { margin-top: auto; font-size: 11px; opacity: 0.8; padding-top: 12px; }
 .sidebar-logout {
   background: rgba(0, 0, 0, 0.15); color: #fff; border: none;
   border-radius: 6px; padding: 6px 10px; font: inherit; font-size: 12px; cursor: pointer;

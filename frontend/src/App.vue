@@ -29,7 +29,7 @@ async function doLogout() {
   <div v-else class="app-shell">
     <aside class="sidebar">
       <div class="sidebar-logo">
-        МиниСЭД 2.0
+        Мини-СЭД
         <small>Электронный документооборот</small>
       </div>
       <nav class="sidebar-nav">
@@ -51,12 +51,16 @@ async function doLogout() {
         </div>
       </div>
 
+      <!-- Текущий пользователь — под разделами (как в старом app.html) -->
+      <div class="sidebar-block">
+        <div class="sidebar-block-label">Текущий пользователь</div>
+        <div v-if="auth.profile?.fio" class="sidebar-user-name">{{ auth.profile.fio }}</div>
+        <div class="sidebar-user-id">ID Б24: <strong>{{ auth.b24UserId ?? '—' }}</strong></div>
+        <button v-if="!inBitrix" class="sidebar-logout" style="margin-top:8px" @click="doLogout">Выйти</button>
+      </div>
+
       <div class="sidebar-footer">
-        <div class="sidebar-user">
-          <div v-if="auth.profile?.fio" class="sidebar-user-name">{{ auth.profile.fio }}</div>
-          <div class="sidebar-user-id">ID Б24: <strong>{{ auth.b24UserId ?? '—' }}</strong></div>
-        </div>
-        <button v-if="!inBitrix" class="sidebar-logout" @click="doLogout">Выйти</button>
+        ©Mini-SED by Alexander Rodionov, v. 2.0, 2026
       </div>
     </aside>
 
