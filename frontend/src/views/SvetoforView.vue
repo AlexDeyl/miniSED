@@ -415,7 +415,18 @@ function openForm() {
   loadFormTemplates()
 }
 function onFormFiles(e: Event) {
-  formFiles.value = Array.from((e.target as HTMLInputElement).files || [])
+  const input = e.target as HTMLInputElement
+  const picked = Array.from(input.files || [])
+  // добавляем к уже выбранным (можно по одному, в несколько заходов), без дублей
+  for (const f of picked) {
+    if (!formFiles.value.some((x) => x.name === f.name && x.size === f.size)) {
+      formFiles.value.push(f)
+    }
+  }
+  input.value = '' // сброс, чтобы можно было выбрать тот же файл снова
+}
+function removeFormFile(i: number) {
+  formFiles.value.splice(i, 1)
 }
 async function createApproval() {
   if (!form.value.title.trim()) { error.value = 'Укажите название'; return }
@@ -811,7 +822,13 @@ onMounted(() => { loadUserDir(); loadList() })
           <div class="fr">
             <label class="fr-label">Файлы</label>
             <input type="file" multiple @change="onFormFiles" />
-            <div class="fr-hint">Прикрепите документы, которые нужно согласовать.</div>
+            <ul v-if="formFiles.length" class="file-list">
+              <li v-for="(f, i) in formFiles" :key="i" class="file-row">
+                <span class="file-name">{{ f.name }}</span>
+                <button type="button" class="chip-x" title="Убрать" @click="removeFormFile(i)">×</button>
+              </li>
+            </ul>
+            <div class="fr-hint">Можно добавлять по одному в несколько заходов; лишние — убрать до отправки.</div>
           </div>
         </div>
         <div class="slideover-foot">
@@ -910,6 +927,9 @@ textarea.fr-input { resize: vertical; min-height: 60px; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 999px; background: #f1f3f4; font-size: 12px; }
 .chip--ext { background: #fff3e0; }
+.file-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.file-row { display: flex; align-items: center; gap: 8px; background: #f5f6f8; border-radius: 6px; padding: 5px 8px; font-size: 12.5px; }
+.file-name { flex: 1; overflow-wrap: anywhere; }
 .chip--user { background: var(--green-light); color: #0a6e52; padding-left: 3px; }
 .chip-ava { width: 20px; height: 20px; border-radius: 999px; background: #fff; color: var(--green-main); font-size: 10px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; flex: none; }
 .chip-x { border: none; background: transparent; cursor: pointer; font-size: 14px; line-height: 1; color: var(--text-muted); padding: 0; }
