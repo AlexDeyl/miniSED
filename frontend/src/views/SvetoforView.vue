@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { RouterLink } from 'vue-router'
 import { agreements } from '@/services/agreements'
+import { requests } from '@/services/requests'
 import { api, ApiError } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import { useSvetoforStore, type SvetoforMode as Mode } from '@/stores/svetofor'
@@ -8,6 +10,7 @@ import {
   type Agreement, type AgParticipant, type AgreementTemplate, type DecisionLog,
   AG_STATUS_LABEL,
 } from '@/types/agreement'
+import type { RegulatoryRequestListItem } from '@/types/request'
 
 const auth = useAuthStore()
 
@@ -16,6 +19,8 @@ const svet = useSvetoforStore()
 const mode = computed(() => svet.mode)
 
 const items = ref<Agreement[]>([])
+// Регламентные заявки, ждущие моего решения (показываем во вкладке «Требует действия»).
+const requestTodo = ref<RegulatoryRequestListItem[]>([])
 const templates = ref<AgreementTemplate[]>([])
 const selected = ref<Agreement | null>(null)
 const loading = ref(false)
@@ -39,6 +44,8 @@ async function loadList() {
       templates.value = await agreements.templates()
     } else {
       items.value = await fetchByMode(mode.value)
+      // заявки-согласования показываем только во вкладке «Требует действия»
+      requestTodo.value = mode.value === 'todo' ? await requests.todo().catch(() => []) : []
     }
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Ошибка загрузки'
@@ -391,7 +398,18 @@ onMounted(loadList)
         </template>
 
         <template v-else>
-          <p v-if="items.length === 0" class="state">Пусто.</p>
+          <!-- Заявки, ждущие моего решения (вкладка «Требует действия») -->
+          <RouterLink
+            v-for="r in (mode === 'todo' ? requestTodo : [])" :key="'req' + r.id"
+            :to="`/requests/${r.id}`" class="svet-card svet-card--req">
+            <div class="svet-card-row">
+              <span class="svet-card-title">{{ r.number }} · {{ r.type_display }}</span>
+              <span class="req-badge">Заявка</span>
+            </div>
+            <div class="item-sub">{{ r.subject_name || 'Без темы' }} · {{ r.status_display }}</div>
+          </RouterLink>
+
+          <p v-if="items.length === 0 && !(mode === 'todo' && requestTodo.length)" class="state">Пусто.</p>
           <div v-for="a in items" :key="a.id" class="svet-card" :class="{ active: selected?.id === a.id }" @click="open(a.id)">
             <div class="svet-card-row">
               <span class="svet-card-title">#{{ a.id }} {{ a.title }}</span>
@@ -722,6 +740,8 @@ onMounted(loadList)
 .svet-detail { flex: 1; overflow-y: auto; background: var(--gray-bg); border-radius: 10px; padding: 4px 4px 20px; }
 .placeholder { color: var(--text-muted); text-align: center; padding: 40px; }
 .svet-card { background: #fff; border: 1px solid #f1f1f1; border-radius: 8px; padding: 10px 12px; box-shadow: var(--shadow-soft); cursor: pointer; }
+.svet-card--req { display: block; text-decoration: none; color: inherit; border-left: 3px solid var(--green-main); }
+.req-badge { font-size: 11px; font-weight: 600; color: var(--green-main); background: var(--green-light); border-radius: 999px; padding: 2px 8px; white-space: nowrap; }
 .svet-card:hover { background: #fafafa; }
 .svet-card.active { border-color: var(--green-main); }
 .svet-card-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }

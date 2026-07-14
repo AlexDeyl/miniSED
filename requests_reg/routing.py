@@ -70,6 +70,26 @@ def build_route(request: RegulatoryRequest) -> list[dict]:
     for role_code, condition in ROUTE_RULES:
         if not condition(request):
             continue
+
+        # Юротдел — групповой слот: согласовать может ЛЮБОЙ юрист, конкретного
+        # исполнителя не назначаем и ручной выбор не требуется.
+        if role_code == C.ROLE_LEGAL_DEPT:
+            route.append(
+                {
+                    "order": order,
+                    "role_code": role_code,
+                    "role_name": C.ROLE_NAMES[role_code],
+                    "required": True,
+                    "group": True,
+                    "resolved": True,
+                    "b24_user_id": None,
+                    "user_name": "Любой юрист",
+                    "needs_manual": False,
+                }
+            )
+            order += 1
+            continue
+
         assignment = resolve_role(role_code, request)
         route.append(
             {
@@ -77,6 +97,7 @@ def build_route(request: RegulatoryRequest) -> list[dict]:
                 "role_code": role_code,
                 "role_name": C.ROLE_NAMES[role_code],
                 "required": True,
+                "group": False,
                 "resolved": assignment is not None,
                 "b24_user_id": assignment.user_b24_id if assignment else None,
                 "user_name": assignment.user_name if assignment else "",

@@ -35,7 +35,7 @@ async function doLogout() {
       <nav class="sidebar-nav">
         <RouterLink to="/svetofor"><span>Согласования</span></RouterLink>
         <RouterLink to="/requests"><span>Регламентные заявки</span></RouterLink>
-        <RouterLink to="/legal"><span>Заявки для юристов</span></RouterLink>
+        <RouterLink v-if="auth.isLawyer" to="/legal"><span>Заявки для юристов</span></RouterLink>
         <RouterLink to="/deals"><span>Поиск сделок</span></RouterLink>
       </nav>
 

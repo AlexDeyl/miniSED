@@ -12,7 +12,10 @@ from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from core.auth import get_current_b24_id
+from rest_framework.exceptions import NotFound, PermissionDenied
+
+from approvalflow.models import ApprovalParticipant
+from core.auth import get_current_b24_id, is_lawyer
 
 from . import constants, services
 from .models import PowerTemplate, RegulatoryRequest
@@ -62,6 +65,9 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = RegulatoryRequest.objects.select_related("organization")
+        # Раздел «Регламентные заявки» = только СВОИ (созданные мной).
+        if self.action == "list":
+            qs = qs.filter(initiator_b24_id=self.b24_id)
         rtype = self.request.query_params.get("type")
         if rtype:
             qs = qs.filter(request_type=rtype)
@@ -69,6 +75,28 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
         if status_f:
             qs = qs.filter(status=status_f)
         return qs
+
+    def _is_participant(self, req) -> bool:
+        approval = services.get_approval(req)
+        if approval is None:
+            return False
+        return ApprovalParticipant.objects.filter(
+            round__approval=approval, b24_user_id=self.b24_id
+        ).exists()
+
+    def _can_view(self, req) -> bool:
+        """Кто видит карточку заявки: инициатор, любой её согласующий, юрист."""
+        return (
+            req.initiator_b24_id == self.b24_id
+            or self._is_participant(req)
+            or is_lawyer(self.b24_id)
+        )
+
+    def get_object(self):
+        obj = super().get_object()
+        if not self._can_view(obj):
+            raise NotFound()
+        return obj
 
     def create(self, request, *args, **kwargs):
         ser = RegulatoryRequestWriteSerializer(data=request.data)
@@ -99,10 +127,39 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
         req = self.get_object()
         return Response({"route": services.build_route(req)})
 
+    def _require_initiator(self, req):
+        if req.initiator_b24_id != self.b24_id:
+            raise PermissionDenied("Действие доступно только инициатору заявки.")
+
+    def _require_lawyer(self):
+        if not is_lawyer(self.b24_id):
+            raise PermissionDenied("Раздел доступен только сотрудникам юридического отдела.")
+
+    # --- инбокс: заявки, ждущие моего решения (для общего «Требует действия») ---
+    @action(detail=False, methods=["get"])
+    def todo(self, request):
+        out = []
+        qs = RegulatoryRequest.objects.select_related("organization").filter(
+            status=constants.STATUS_ON_APPROVAL
+        )
+        lawyer = is_lawyer(self.b24_id)
+        for req in qs:
+            pending = services.current_pending_participant(services.get_approval(req))
+            if pending is None:
+                continue
+            mine = (
+                (services.is_group_legal(pending) and lawyer)
+                or pending.b24_user_id == self.b24_id
+            )
+            if mine:
+                out.append(req)
+        return Response(RegulatoryRequestListSerializer(out, many=True).data)
+
     # --- согласование ---
     @action(detail=True, methods=["post"])
     def submit(self, request, pk=None):
         req = self.get_object()
+        self._require_initiator(req)
         flow_type = request.data.get("flow_type")
         err = self._run(lambda: services.submit(
             req, _participants(request.data), flow_type=flow_type, actor_b24_id=self.b24_id,
@@ -115,36 +172,44 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
         err = self._run(lambda: services.decide(
             req, request.data.get("participant_id"),
             request.data.get("decision"), (request.data.get("comment") or "").strip(),
+            actor_b24_id=self.b24_id,
         ))
         return err or self._detail(req)
 
     @action(detail=True, methods=["post"], url_path="return")
     def return_for_revision(self, request, pk=None):
         req = self.get_object()
+        self._require_initiator(req)
         err = self._run(lambda: services.return_for_revision(
             req, by_b24_id=self.b24_id, comment=(request.data.get("comment") or "").strip(),
         ))
         return err or self._detail(req)
 
-    # --- исполнение юротделом ---
+    # --- исполнение юротделом (только юристы) ---
     @action(detail=False, methods=["get"], url_path="legal_queue")
     def legal_queue(self, request):
-        qs = self.get_queryset().filter(status__in=constants.LEGAL_QUEUE_STATUSES)
+        self._require_lawyer()
+        qs = RegulatoryRequest.objects.select_related("organization").filter(
+            status__in=constants.LEGAL_QUEUE_STATUSES
+        )
         return Response(RegulatoryRequestListSerializer(qs, many=True).data)
 
     @action(detail=True, methods=["post"], url_path="take")
     def take(self, request, pk=None):
         req = self.get_object()
+        self._require_lawyer()
         return self._run(lambda: services.take_in_work(req)) or self._detail(req)
 
     @action(detail=True, methods=["post"], url_path="to_signing")
     def to_signing(self, request, pk=None):
         req = self.get_object()
+        self._require_lawyer()
         return self._run(lambda: services.to_signing(req)) or self._detail(req)
 
     @action(detail=True, methods=["post"])
     def execute(self, request, pk=None):
         req = self.get_object()
+        self._require_lawyer()
         return self._run(lambda: services.execute(
             req,
             delivery_method=(request.data.get("delivery_method") or "").strip(),

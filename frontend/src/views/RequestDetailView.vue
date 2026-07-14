@@ -95,13 +95,15 @@ function submit() {
   })
 }
 
+function isGroupLegal(p: ApprovalParticipant): boolean {
+  return p.role === 'legal_dept' && !p.b24_user_id
+}
 function canDecide(p: ApprovalParticipant): boolean {
-  return (
-    req.value?.status === 'on_approval' &&
-    p.decision === 'waiting' &&
-    p.type === 'internal' &&
-    p.b24_user_id === auth.b24UserId
-  )
+  if (req.value?.status !== 'on_approval' || p.decision !== 'waiting' || p.type !== 'internal')
+    return false
+  // Групповой юрэтап — согласовать может любой юрист.
+  if (isGroupLegal(p)) return auth.isLawyer
+  return p.b24_user_id === auth.b24UserId
 }
 
 function decide(p: ApprovalParticipant, decision: 'approve' | 'reject') {
@@ -202,7 +204,11 @@ onMounted(load)
           <tbody>
             <tr v-for="p in rnd.participants" :key="p.id">
               <td>{{ p.role || '—' }}</td>
-              <td>{{ p.type === 'external' ? p.email : (nameByBid(p.b24_user_id) || `USER #${p.b24_user_id}`) }}</td>
+              <td>
+                <template v-if="isGroupLegal(p)">Юридический отдел (любой юрист)</template>
+                <template v-else-if="p.type === 'external'">{{ p.email }}</template>
+                <template v-else>{{ nameByBid(p.b24_user_id) || `USER #${p.b24_user_id}` }}</template>
+              </td>
               <td>
                 <span class="participant-pill" :class="p.decision">{{ p.decision }}</span>
                 <em v-if="p.decision_comment"> — {{ p.decision_comment }}</em>

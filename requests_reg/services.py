@@ -19,6 +19,7 @@ from django.utils import timezone
 
 from approvalflow import services as flow
 from approvalflow.models import Approval, ApprovalParticipant
+from core.auth import is_lawyer
 from core.services import log_action
 
 from . import constants, routing
@@ -87,9 +88,15 @@ def _sync_status(request: RegulatoryRequest) -> None:
 @transaction.atomic
 def submit(request: RegulatoryRequest, participants: list[dict], *, flow_type=None,
            actor_b24_id=None):
-    """Отправляет заявку на согласование (последовательный маршрут по умолчанию)."""
-    if request.status not in (constants.STATUS_DRAFT, constants.STATUS_RETURNED):
-        raise RequestError("Отправить можно только черновик или возвращённую заявку.")
+    """Отправляет заявку на согласование (последовательный маршрут по умолчанию).
+
+    Допускается и перезапуск после отклонения (новый круг)."""
+    if request.status not in (
+        constants.STATUS_DRAFT,
+        constants.STATUS_RETURNED,
+        constants.STATUS_REJECTED,
+    ):
+        raise RequestError("Отправить можно черновик, возвращённую или отклонённую заявку.")
     if not participants:
         raise RequestError("Маршрут пуст — добавьте согласующих.")
 
@@ -128,8 +135,30 @@ def submit(request: RegulatoryRequest, participants: list[dict], *, flow_type=No
     return approval
 
 
+def current_pending_participant(approval: Approval | None) -> ApprovalParticipant | None:
+    """Первый ожидающий участник текущего круга (по order) — чья очередь сейчас.
+
+    Маршрут заявок последовательный, поэтому «чья очередь» = минимальный order
+    среди ещё не принявших решение."""
+    if approval is None or approval.status != Approval.STATUS_IN_PROGRESS:
+        return None
+    round = flow.get_current_round(approval)
+    if round is None:
+        return None
+    return (
+        round.participants.filter(decision=ApprovalParticipant.DECISION_WAITING)
+        .order_by("order")
+        .first()
+    )
+
+
+def is_group_legal(participant: ApprovalParticipant) -> bool:
+    return participant.role == constants.ROLE_LEGAL_DEPT and participant.b24_user_id is None
+
+
 @transaction.atomic
-def decide(request: RegulatoryRequest, participant_id, decision, comment=""):
+def decide(request: RegulatoryRequest, participant_id, decision, comment="", *,
+           actor_b24_id=None):
     approval = get_approval(request)
     if approval is None:
         raise RequestError("Заявка не отправлена на согласование.")
@@ -139,6 +168,23 @@ def decide(request: RegulatoryRequest, participant_id, decision, comment=""):
         )
     except ApprovalParticipant.DoesNotExist:
         raise RequestError("Участник не найден.")
+
+    # Авторизация решающего. actor_b24_id из API всегда задан; при прямом
+    # сервисном вызове (None) проверку личности обычного слота не навязываем.
+    if is_group_legal(participant):
+        # Групповой юрэтап: согласовать может любой юрист; фиксируем, кто именно.
+        if not is_lawyer(actor_b24_id):
+            raise RequestError("Согласовать этап юротдела может только сотрудник юридического отдела.")
+        participant.b24_user_id = actor_b24_id
+        participant.save(update_fields=["b24_user_id"])
+    elif (
+        actor_b24_id is not None
+        and participant.type == ApprovalParticipant.TYPE_INTERNAL
+        and participant.b24_user_id
+        and actor_b24_id != participant.b24_user_id
+    ):
+        raise RequestError("Вы не являетесь этим согласующим.")
+
     flow.decide(participant, decision, comment)
     _sync_status(request)
     return participant

@@ -64,7 +64,7 @@ const router = createRouter({
       path: '/legal',
       name: 'legal',
       component: () => import('@/views/LegalQueueView.vue'),
-      meta: { title: 'Заявки для юристов' },
+      meta: { title: 'Заявки для юристов', lawyerOnly: true },
     },
     {
       path: '/deals',

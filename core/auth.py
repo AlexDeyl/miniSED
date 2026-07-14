@@ -40,3 +40,16 @@ def get_current_b24_id(request) -> int | None:
             pass
 
     return None
+
+
+def is_lawyer(b24_id) -> bool:
+    """Есть ли у сотрудника (по bitrix_id) право юриста (legal_manage).
+
+    Так определяется член юротдела: для гейтинга раздела «Заявки для юристов»
+    и группового согласования юрэтапа (любой юрист может согласовать)."""
+    if not b24_id:
+        return False
+    from .models import UserProfile
+
+    profile = UserProfile.objects.filter(bitrix_id=b24_id, is_active=True).first()
+    return bool(profile and profile.has_perm("legal_manage"))

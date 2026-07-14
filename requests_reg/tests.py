@@ -8,7 +8,7 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from core.models import CFO, Facility, Organization
-from core.models import AuditLog
+from core.models import AuditLog, Role, UserProfile
 from documents import services as docsvc
 from . import constants as C
 from . import routing, services
@@ -152,6 +152,10 @@ class FlowTests(TestCase):
 class ApiTests(TestCase):
     def setUp(self):
         self.org = Organization.objects.create(short_name="УК Норд")
+        # b24=30 — юрист (роль lawyer c правом legal_manage): для юр-очереди/исполнения
+        lawyer_role = Role.objects.get(code="lawyer")
+        p = UserProfile.objects.create(fio="Юрист Юрьев", bitrix_id=30, is_active=True)
+        p.roles.add(lawyer_role)
 
     def _create(self):
         return api(1).post("/api/reg/requests/", {
@@ -241,6 +245,82 @@ class ApiTests(TestCase):
 
         r = api(1).post(f"/api/reg/requests/{rid}/confirm_receipt/")
         self.assertEqual(r.json()["status"], "closed")
+
+    # --- видимость ---
+    def test_list_shows_only_my_requests(self):
+        mine = self._create()  # api(1)
+        api(2).post("/api/reg/requests/", {
+            "request_type": "poa", "organization": self.org.id, "subject_name": "Чужой",
+        }, format="json")
+        data = api(1).get("/api/reg/requests/").json()
+        ids = {r["id"] for r in data}
+        self.assertIn(mine, ids)
+        self.assertEqual(len(ids), 1)  # чужую не видно
+
+    def test_retrieve_forbidden_for_stranger(self):
+        rid = self._create()
+        self.assertEqual(api(99).get(f"/api/reg/requests/{rid}/").status_code, 404)
+        self.assertEqual(api(1).get(f"/api/reg/requests/{rid}/").status_code, 200)
+
+    # --- инбокс «Требует действия» ---
+    def test_todo_shows_for_current_approver_only(self):
+        rid = self._create()
+        api(1).post(f"/api/reg/requests/{rid}/submit/", {
+            "participants": [{"type": "internal", "b24_user_id": 20, "order": 0}],
+        }, format="json")
+        self.assertIn(rid, {r["id"] for r in api(20).get("/api/reg/requests/todo/").json()})
+        self.assertNotIn(rid, {r["id"] for r in api(21).get("/api/reg/requests/todo/").json()})
+
+    # --- групповой юрэтап ---
+    def _submit_legal_group(self):
+        rid = self._create()
+        r = api(1).post(f"/api/reg/requests/{rid}/submit/", {
+            "participants": [{"type": "internal", "b24_user_id": None,
+                              "role": C.ROLE_LEGAL_DEPT, "order": 0}],
+        }, format="json")
+        pid = r.json()["approval"]["rounds"][0]["participants"][0]["id"]
+        return rid, pid
+
+    def test_legal_group_visible_to_all_lawyers(self):
+        rid, _ = self._submit_legal_group()
+        self.assertIn(rid, {r["id"] for r in api(30).get("/api/reg/requests/todo/").json()})
+        self.assertNotIn(rid, {r["id"] for r in api(21).get("/api/reg/requests/todo/").json()})
+
+    def test_legal_group_any_lawyer_approves(self):
+        rid, pid = self._submit_legal_group()
+        # посторонний вообще не видит заявку
+        self.assertEqual(api(21).post(f"/api/reg/requests/{rid}/decide/",
+                         {"participant_id": pid, "decision": "approve"}, format="json").status_code, 404)
+        # инициатор видит, но не юрист — согласовать юрэтап не может
+        bad = api(1).post(f"/api/reg/requests/{rid}/decide/",
+                          {"participant_id": pid, "decision": "approve"}, format="json")
+        self.assertEqual(bad.status_code, 400)
+        # юрист может; фиксируется его b24_id
+        ok = api(30).post(f"/api/reg/requests/{rid}/decide/",
+                          {"participant_id": pid, "decision": "approve"}, format="json")
+        self.assertEqual(ok.status_code, 200)
+        from approvalflow.models import ApprovalParticipant
+        self.assertEqual(ApprovalParticipant.objects.get(id=pid).b24_user_id, 30)
+
+    # --- права юр-очереди ---
+    def test_legal_queue_requires_lawyer(self):
+        self.assertEqual(api(21).get("/api/reg/requests/legal_queue/").status_code, 403)
+        self.assertEqual(api(30).get("/api/reg/requests/legal_queue/").status_code, 200)
+
+    # --- перезапуск после отклонения ---
+    def test_restart_after_reject(self):
+        rid = self._create()
+        r = api(1).post(f"/api/reg/requests/{rid}/submit/", {
+            "participants": [{"type": "internal", "b24_user_id": 20, "order": 0}],
+        }, format="json")
+        pid = r.json()["approval"]["rounds"][0]["participants"][0]["id"]
+        api(20).post(f"/api/reg/requests/{rid}/decide/",
+                     {"participant_id": pid, "decision": "reject", "comment": "нет"}, format="json")
+        self.assertEqual(api(1).get(f"/api/reg/requests/{rid}/").json()["status"], "rejected")
+        again = api(1).post(f"/api/reg/requests/{rid}/submit/", {
+            "participants": [{"type": "internal", "b24_user_id": 22, "order": 0}],
+        }, format="json")
+        self.assertEqual(again.status_code, 200)
 
 
 class AnketaTests(TestCase):

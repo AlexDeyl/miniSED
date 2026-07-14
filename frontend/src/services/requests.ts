@@ -17,6 +17,8 @@ export interface UserOption { id: number; fio: string; bitrix_id: number; positi
 export const requests = {
   list: (type?: string) =>
     api.get<RegulatoryRequestListItem[]>(`${BASE}/${type ? `?type=${type}` : ''}`),
+  // Заявки, ждущие моего решения — для общего списка «Требует действия».
+  todo: () => api.get<RegulatoryRequestListItem[]>(`${BASE}/todo/`),
   get: (id: number | string) => api.get<RegulatoryRequestDetail>(`${BASE}/${id}/`),
   create: (payload: RequestCreatePayload) =>
     api.post<RegulatoryRequestDetail>(`${BASE}/`, payload),
