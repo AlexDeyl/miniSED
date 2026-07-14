@@ -333,6 +333,38 @@ class RoundsTests(TestCase):
         r = api(APPROVER_A).post(f"/api/agreements/{a.id}/resubmit/")
         self.assertEqual(r.status_code, 403)
 
+    def test_resubmit_blocked_when_completed(self):
+        # Завершённое согласование закрыто — повторно запустить нельзя.
+        a = Factory.agreement(author=AUTHOR)
+        p1 = Factory.internal(a, APPROVER_A)
+        self._decide(APPROVER_A, a, p1, "approve")
+        a.refresh_from_db()
+        self.assertEqual(a.status, Agreement.STATUS_COMPLETED)
+        r = api(AUTHOR).post(f"/api/agreements/{a.id}/resubmit/")
+        self.assertEqual(r.status_code, 400)
+
+    def test_resubmit_allowed_when_canceled(self):
+        a = Factory.agreement(author=AUTHOR)
+        Factory.internal(a, APPROVER_A)
+        api(AUTHOR).post(f"/api/agreements/{a.id}/cancel/")
+        a.refresh_from_db()
+        self.assertEqual(a.status, Agreement.STATUS_CANCELED)
+        r = api(AUTHOR).post(f"/api/agreements/{a.id}/resubmit/")
+        self.assertEqual(r.status_code, 200)
+        a.refresh_from_db()
+        self.assertEqual(a.status, Agreement.STATUS_IN_PROGRESS)
+
+    def test_set_route_blocked_when_completed(self):
+        a = Factory.agreement(author=AUTHOR)
+        p1 = Factory.internal(a, APPROVER_A)
+        self._decide(APPROVER_A, a, p1, "approve")
+        r = api(AUTHOR).post(
+            f"/api/agreements/{a.id}/set_route/",
+            {"participants": [{"type": "internal", "b24_user_id": 555, "order_index": 0}]},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 400)
+
     def test_set_route_before_decisions(self):
         a = Factory.agreement(author=AUTHOR)
         Factory.internal(a, APPROVER_A, order=0)

@@ -700,8 +700,9 @@ class AgreementViewSet(viewsets.ModelViewSet):
         agreement = self.get_object()
         if agreement.author_b24_id != b24_id:
             return Response({"detail": "Только автор может отправить на повторное согласование."}, status=403)
-        if agreement.status not in (Agreement.STATUS_REJECTED, Agreement.STATUS_IN_PROGRESS):
-            return Response({"detail": "Повторно отправить можно отклонённое или незавершённое согласование."}, status=400)
+        # Завершённое согласование закрыто; повторно — только отклонённое или отменённое.
+        if agreement.status not in (Agreement.STATUS_REJECTED, Agreement.STATUS_CANCELED):
+            return Response({"detail": "Повторно отправить можно отклонённое или отменённое согласование."}, status=400)
 
         specs = request.data.get("participants")
         if not isinstance(specs, list) or not specs:
@@ -752,6 +753,11 @@ class AgreementViewSet(viewsets.ModelViewSet):
         agreement = self.get_object()
         if agreement.author_b24_id != b24_id:
             return Response({"detail": "Только автор может менять маршрут."}, status=403)
+        if agreement.status != Agreement.STATUS_IN_PROGRESS:
+            return Response(
+                {"detail": "Менять маршрут текущего круга можно только у активного согласования."},
+                status=400,
+            )
 
         cur = self._round_qs(agreement)
         if cur.exclude(status=Participant.STATUS_WAITING).exists():

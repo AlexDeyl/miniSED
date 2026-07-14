@@ -120,7 +120,6 @@ async function run(fn: () => Promise<unknown>) {
   }
 }
 
-function restart() { run(() => agreements.restart(selected.value!.id)) }
 
 // --- маршрут: смена согласующих (#6) и повторное согласование (#5) ---
 const routeEdit = ref(false)
@@ -562,10 +561,11 @@ onMounted(loadList)
                   </div>
                 </div>
 
-                <!-- Смена согласующих / повторное согласование -->
-                <template v-if="isAuthor">
+                <!-- Смена согласующих / повторное согласование.
+                     Завершённое согласование закрыто — редактирование недоступно. -->
+                <template v-if="isAuthor && selected.status !== 'completed'">
                   <button v-if="!routeEdit" class="ag-btn ag-btn--soft ag-btn--wide" style="margin-top:6px" @click="openRouteEditor">
-                    Изменить маршрут / повторный круг
+                    {{ selected.status === 'in_progress' ? 'Изменить маршрут текущего круга' : 'Перезапустить согласование (новый круг)' }}
                   </button>
                   <div v-else class="inner-box" style="margin-top:8px">
                     <div class="ag-muted" style="margin-bottom:4px">Согласующие (ID Б24, через запятую)</div>
@@ -582,17 +582,17 @@ onMounted(loadList)
                       <span v-for="(em, i) in routeExternal" :key="i" class="chip chip--ext">{{ em }} <button class="chip-x" @click="routeExternal.splice(i, 1)">×</button></span>
                     </div>
                     <div style="display:grid;gap:6px;margin-top:10px">
-                      <button v-if="noneDecided" class="ag-btn ag-btn--soft" :disabled="busy" @click="saveRoute">
+                      <button v-if="noneDecided && selected.status === 'in_progress'" class="ag-btn ag-btn--soft" :disabled="busy" @click="saveRoute">
                         Сохранить маршрут (текущий круг)
                       </button>
-                      <button class="ag-btn ag-btn--orange" :disabled="busy" @click="resubmit(true)">
+                      <button v-if="selected.status === 'rejected' || selected.status === 'canceled'" class="ag-btn ag-btn--orange" :disabled="busy" @click="resubmit(true)">
                         Отправить повторно новым кругом
                       </button>
                       <button class="ag-btn" style="background:transparent" @click="routeEdit = false">Отмена</button>
                     </div>
                     <div class="ag-muted" style="font-size:11px;margin-top:6px">
-                      «Сохранить маршрут» — меняет согласующих текущего круга (до первых решений).
-                      «Повторно новым кругом» — создаёт новый круг, история прошлых сохраняется.
+                      <template v-if="selected.status === 'in_progress'">Меняет согласующих текущего круга (до первых решений).</template>
+                      <template v-else>Создаёт новый круг с этими согласующими; история прошлых кругов сохраняется.</template>
                     </div>
                   </div>
                 </template>
@@ -616,19 +616,14 @@ onMounted(loadList)
                   <div v-else>Не привязано</div>
                 </div>
 
-                <div v-if="isAuthor && (selected.status === 'rejected' || selected.status === 'in_progress')" class="sum-block">
-                  <div class="sum-label">Управление</div>
-                  <button class="ag-btn ag-btn--orange ag-btn--wide" :disabled="busy" @click="restart">Перезапустить согласование</button>
-                  <div class="sum-hint">Сбрасывает только отклонивших участников. Остальные решения сохраняются.</div>
-                </div>
-
                 <div v-if="isAuthor && selected.status === 'in_progress'" class="sum-block">
                   <div class="sum-label">Отмена</div>
                   <button class="ag-btn ag-btn--soft ag-btn--wide" :disabled="busy" @click="cancel">Отменить согласование</button>
                   <div class="sum-hint">Статус станет «Отменено», участники больше не смогут голосовать.</div>
                 </div>
 
-                <div v-if="isAuthor" class="sum-block">
+                <!-- Удаление — только у отменённого согласования. -->
+                <div v-if="isAuthor && selected.status === 'canceled'" class="sum-block">
                   <div class="sum-label">Удаление</div>
                   <button class="ag-btn ag-btn--red ag-btn--wide" :disabled="busy" @click="remove">Удалить согласование</button>
                   <div class="sum-hint">Будут удалены все данные по этому согласованию.</div>
