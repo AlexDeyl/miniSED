@@ -103,6 +103,14 @@ const maxTermTo = computed(() => {
   return d.toISOString().slice(0, 10)
 })
 
+// Даты в формате ISO (yyyy-mm-dd) сравниваются как строки — этого достаточно.
+const todayStr = new Date().toISOString().slice(0, 10)
+function isoMinusYears(years: number): string {
+  const d = new Date()
+  d.setFullYear(d.getFullYear() - years)
+  return d.toISOString().slice(0, 10)
+}
+
 async function loadContext() {
   const org = organization.value ?? undefined
   facilities.value = await requests.facilities(org)
@@ -129,10 +137,27 @@ function validate(): string | null {
     if (!rep.last_name.trim()) return 'Раздел 1: укажите фамилию представителя.'
     if (!rep.first_name.trim()) return 'Раздел 1: укажите имя представителя.'
     if (!rep.birth_date) return 'Раздел 1: укажите дату рождения представителя.'
+    if (rep.birth_date > todayStr) return 'Раздел 1: дата рождения не может быть в будущем.'
+    if (rep.birth_date > isoMinusYears(18)) return 'Раздел 1: представитель должен быть старше 18 лет.'
     if (!rep.position.trim()) return 'Раздел 1: укажите должность представителя.'
+
+    if (rep.phone.trim()) {
+      const digits = rep.phone.replace(/\D/g, '')
+      if (digits.length < 10 || digits.length > 11) return 'Раздел 1: проверьте номер телефона.'
+    }
+    if (rep.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rep.email.trim()))
+      return 'Раздел 1: некорректный email.'
+
     if (!rep.passport.trim()) return 'Раздел 1: укажите паспорт представителя (серия, №).'
+    if (!/^[0-9 ]+$/.test(rep.passport.trim()))
+      return 'Раздел 1: серия и номер паспорта — только цифры.'
+    if (rep.passport.replace(/\s/g, '').length !== 10)
+      return 'Раздел 1: серия и номер паспорта — 10 цифр (серия 4 + номер 6).'
     if (!rep.passport_issued_by.trim()) return 'Раздел 1: укажите, кем выдан паспорт.'
     if (!rep.passport_issue_date) return 'Раздел 1: укажите дату выдачи паспорта.'
+    if (rep.passport_issue_date > todayStr) return 'Раздел 1: дата выдачи паспорта не может быть в будущем.'
+    if (rep.passport_issue_date <= rep.birth_date)
+      return 'Раздел 1: дата выдачи паспорта должна быть позже даты рождения.'
     if (!rep.reg_address.trim()) return 'Раздел 1: укажите адрес регистрации представителя.'
 
     // Раздел 2 — полномочия
@@ -272,7 +297,7 @@ async function save() {
             <label class="form-field"><span>Отчество</span><input v-model="rep.middle_name" /></label>
           </div>
           <div class="form-row">
-            <label class="form-field"><span>Дата рождения *</span><input v-model="rep.birth_date" type="date" /></label>
+            <label class="form-field"><span>Дата рождения *</span><input v-model="rep.birth_date" type="date" :max="todayStr" /></label>
             <label class="form-field">
               <span>Статус</span>
               <select v-model="rep.status">
@@ -286,9 +311,9 @@ async function save() {
             <label class="form-field"><span>Email</span><input v-model="rep.email" type="email" /></label>
           </div>
           <div class="form-row">
-            <label class="form-field"><span>Паспорт (серия, №) *</span><input v-model="rep.passport" /></label>
+            <label class="form-field"><span>Паспорт (серия, №) *</span><input v-model="rep.passport" inputmode="numeric" maxlength="11" placeholder="1234 567890" /></label>
             <label class="form-field"><span>Кем выдан *</span><input v-model="rep.passport_issued_by" /></label>
-            <label class="form-field"><span>Дата выдачи *</span><input v-model="rep.passport_issue_date" type="date" /></label>
+            <label class="form-field"><span>Дата выдачи *</span><input v-model="rep.passport_issue_date" type="date" :max="todayStr" /></label>
           </div>
           <label class="form-field"><span>Адрес регистрации *</span><input v-model="rep.reg_address" /></label>
         </div>
