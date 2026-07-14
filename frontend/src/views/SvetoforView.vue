@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { agreements } from '@/services/agreements'
 import { api, ApiError } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
+import { useSvetoforStore, type SvetoforMode as Mode } from '@/stores/svetofor'
 import {
   type Agreement, type AgParticipant, type AgreementTemplate, type DecisionLog,
   AG_STATUS_LABEL,
@@ -10,15 +11,10 @@ import {
 
 const auth = useAuthStore()
 
-type Mode = 'todo' | 'my' | 'all' | 'templates'
-const TABS: { code: Mode; label: string }[] = [
-  { code: 'todo', label: 'Требуется действие' },
-  { code: 'my', label: 'Созданные мной' },
-  { code: 'all', label: 'Все' },
-  { code: 'templates', label: 'Шаблоны' },
-]
+// Режим вкладок живёт в сторе — кнопки перенесены в сайдбар (App.vue).
+const svet = useSvetoforStore()
+const mode = computed(() => svet.mode)
 
-const mode = ref<Mode>('todo')
 const items = ref<Agreement[]>([])
 const templates = ref<AgreementTemplate[]>([])
 const selected = ref<Agreement | null>(null)
@@ -52,9 +48,10 @@ async function loadList() {
 }
 
 function setMode(m: Mode) {
-  mode.value = m
-  loadList()
+  svet.mode = m
 }
+// Смена вкладки (в т.ч. из сайдбара) перезагружает список.
+watch(() => svet.mode, loadList)
 
 const decisionComment = ref('')
 async function open(id: number) {
@@ -375,11 +372,6 @@ onMounted(loadList)
 <template>
   <div class="svet">
     <div class="svet-head">
-      <div class="svet-tabs">
-        <button v-for="t in TABS" :key="t.code" class="svet-tab" :class="{ active: mode === t.code }" @click="setMode(t.code)">
-          {{ t.label }}
-        </button>
-      </div>
       <button class="btn btn--primary" @click="openForm">+ Новое согласование</button>
     </div>
 
@@ -724,10 +716,7 @@ onMounted(loadList)
 
 <style scoped>
 .svet { display: flex; flex-direction: column; height: calc(100vh - 120px); }
-.svet-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
-.svet-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
-.svet-tab { border: 1px solid var(--gray-border); background: #fff; color: var(--text-muted); border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer; }
-.svet-tab.active { background: var(--green-light); color: var(--green-main); border-color: var(--green-main); font-weight: 500; }
+.svet-head { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-bottom: 10px; }
 .svet-body { display: flex; gap: 14px; flex: 1; overflow: hidden; }
 .svet-list { width: 360px; flex: none; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
 .svet-detail { flex: 1; overflow-y: auto; background: var(--gray-bg); border-radius: 10px; padding: 4px 4px 20px; }
