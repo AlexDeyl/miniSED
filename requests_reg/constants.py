@@ -49,8 +49,19 @@ STATUS_CHOICES = [
 # из каких статусов инициатор может отменить заявку (до передачи юристам)
 CANCELABLE_STATUSES = [STATUS_DRAFT, STATUS_ON_APPROVAL, STATUS_RETURNED, STATUS_REJECTED]
 
-# статусы, попадающие в раздел «Заявки для юристов»
+# статусы, попадающие в раздел юристов (активные)
 LEGAL_QUEUE_STATUSES = [STATUS_TO_LEGAL, STATUS_LEGAL_WORK, STATUS_SIGNING]
+
+# разбивка раздела юристов: Новые / В работе / Архив
+LEGAL_NEW_STATUSES = [STATUS_TO_LEGAL]
+LEGAL_WORK_STATUSES = [STATUS_LEGAL_WORK, STATUS_SIGNING, STATUS_EXECUTED]
+LEGAL_ARCHIVE_STATUSES = [STATUS_CLOSED]
+
+LEGAL_SCOPES = {
+    "new": LEGAL_NEW_STATUSES,
+    "work": LEGAL_WORK_STATUSES,
+    "archive": LEGAL_ARCHIVE_STATUSES,
+}
 
 # --- Способ передачи готового документа -------------------------------------
 DELIVERY_CHOICES = [

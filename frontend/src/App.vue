@@ -4,18 +4,21 @@ import { RouterView, RouterLink, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useSvetoforStore, SVETOFOR_TABS } from '@/stores/svetofor'
 import { useRequestsUiStore, REQUEST_TYPE_TABS } from '@/stores/requestsUi'
+import { useLegalUiStore, LEGAL_TABS } from '@/stores/legalUi'
 
 const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 const svet = useSvetoforStore()
 const reqUi = useRequestsUiStore()
+const legalUi = useLegalUiStore()
 
 const pageTitle = computed(() => (route.meta.title as string) || 'MiniSED')
 const bare = computed(() => route.meta.noShell === true)
 // Под-вкладки показываем вложенно под своим пунктом меню.
 const onSvetofor = computed(() => route.name === 'svetofor')
 const onRequests = computed(() => route.name === 'requests')
+const onLegal = computed(() => route.name === 'legal')
 // Открыто из Битрикса (в iframe) — тогда «Выйти» не нужен (авто-вход портала).
 const inBitrix = window.self !== window.top
 
@@ -56,7 +59,16 @@ async function doLogout() {
           >{{ t.label }}</button>
         </div>
 
-        <RouterLink v-if="auth.isLawyer" to="/legal"><span>Заявки для юристов</span></RouterLink>
+        <RouterLink v-if="auth.isLawyer" to="/legal"><span>Работа юристов</span></RouterLink>
+        <!-- под-вкладки работы юристов -->
+        <div v-if="onLegal" class="sidebar-subtabs">
+          <button
+            v-for="t in LEGAL_TABS" :key="t.code"
+            class="sidebar-subtab" :class="{ active: legalUi.scope === t.code }"
+            @click="legalUi.scope = t.code"
+          >{{ t.label }}</button>
+        </div>
+
         <RouterLink to="/deals"><span>Поиск сделок</span></RouterLink>
       </nav>
 

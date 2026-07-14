@@ -204,8 +204,13 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["get"], url_path="legal_queue")
     def legal_queue(self, request):
         self._require_lawyer()
-        qs = RegulatoryRequest.objects.select_related("organization").filter(
-            status__in=constants.LEGAL_QUEUE_STATUSES
+        # scope: new (новые) / work (в работе) / archive (закрытые); по умолчанию — активные
+        scope = (request.query_params.get("scope") or "").strip()
+        statuses = constants.LEGAL_SCOPES.get(scope, constants.LEGAL_QUEUE_STATUSES)
+        qs = (
+            RegulatoryRequest.objects.select_related("organization")
+            .filter(status__in=statuses)
+            .order_by("-id")
         )
         return Response(RegulatoryRequestListSerializer(qs, many=True).data)
 

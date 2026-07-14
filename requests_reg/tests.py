@@ -323,6 +323,23 @@ class ApiTests(TestCase):
         self.assertEqual(api(21).get("/api/reg/requests/legal_queue/").status_code, 403)
         self.assertEqual(api(30).get("/api/reg/requests/legal_queue/").status_code, 200)
 
+    def test_legal_queue_scopes(self):
+        def mk(status):
+            return RegulatoryRequest.objects.create(
+                request_type="poa", organization=self.org, initiator_b24_id=1, status=status,
+            ).id
+        new_id, work_id, exec_id, closed_id = (
+            mk("to_legal"), mk("legal_work"), mk("executed"), mk("closed"),
+        )
+
+        def ids(scope):
+            return {r["id"] for r in api(30).get(
+                f"/api/reg/requests/legal_queue/?scope={scope}").json()}
+
+        self.assertEqual(ids("new"), {new_id})
+        self.assertEqual(ids("work"), {work_id, exec_id})
+        self.assertEqual(ids("archive"), {closed_id})
+
     # --- отмена и удаление ---
     def test_cancel_then_delete(self):
         rid = self._create()

@@ -34,7 +34,8 @@ export const requests = {
       participant_id: participantId, decision, comment,
     }),
 
-  legalQueue: () => api.get<RegulatoryRequestListItem[]>(`${BASE}/legal_queue/`),
+  legalQueue: (scope?: string) =>
+    api.get<RegulatoryRequestListItem[]>(`${BASE}/legal_queue/${scope ? `?scope=${scope}` : ''}`),
   take: (id: number | string) => api.post<RegulatoryRequestDetail>(`${BASE}/${id}/take/`),
   toSigning: (id: number | string) => api.post<RegulatoryRequestDetail>(`${BASE}/${id}/to_signing/`),
   execute: (id: number | string, deliveryMethod: string, deliveryComment = '') =>
