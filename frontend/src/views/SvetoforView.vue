@@ -3,7 +3,8 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { agreements } from '@/services/agreements'
 import { requests } from '@/services/requests'
-import { bitrix } from '@/services/bitrix'
+import { bitrix, type BitrixUser, type BitrixDeal } from '@/services/bitrix'
+import BitrixSearchModal from '@/components/BitrixSearchModal.vue'
 import { api, ApiError } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import { useSvetoforStore, type SvetoforMode as Mode } from '@/stores/svetofor'
@@ -33,12 +34,15 @@ const uid = computed(() => auth.b24UserId)
 // Справочник b24_id → ФИО/должность (как в старом миниседе показываем имена).
 // Наполняется из /api/core/users/ и из данных BX24 при выборе сотрудников.
 const userDir = ref<Record<number, { fio: string; position?: string }>>({})
+// домен портала — для сборки полной ссылки на сделку при выборе через коннектор
+const portalDomain = ref('')
 async function loadUserDir() {
   try {
     for (const u of await requests.users()) {
       userDir.value[u.bitrix_id] = { fio: u.fio, position: u.position_name || '' }
     }
   } catch { /* не критично */ }
+  try { portalDomain.value = (await bitrix.status()).domain || '' } catch { /* не критично */ }
 }
 function udName(id: number | null | undefined): string {
   return (id != null && userDir.value[id]?.fio) || (id != null ? `USER #${id}` : '')
@@ -353,12 +357,6 @@ function bx24(): BX24SDK | undefined {
   return (window as unknown as { BX24?: BX24SDK }).BX24
 }
 
-function crmDialogHint() {
-  alert('Выбор из CRM доступен внутри Битрикс24. Вставьте ссылку на сделку вручную.')
-}
-function b24DialogHint() {
-  alert('Выбор сотрудников через диалог доступен внутри Битрикс24. Укажите ID через запятую.')
-}
 
 // Слить выбранные id с уже введёнными (строка «1, 2, 3») без дублей.
 function mergeIds(current: string, picked: number[]): string {
@@ -366,23 +364,31 @@ function mergeIds(current: string, picked: number[]): string {
   return Array.from(new Set([...existing, ...picked])).join(', ')
 }
 
-// Выбор сотрудников через нативный диалог Битрикса; вне портала — подсказка.
+// Модалка поиска через серверный коннектор (для выбора вне iframe портала).
+const pickerKind = ref<'users' | 'deals' | null>(null)
+const pickApply = ref<(ids: number[]) => void>(() => {})
+
+// Выбор сотрудников: внутри портала — нативный диалог BX24; вне — коннектор.
 // apply получает выбранные id; заодно запоминаем ФИО/должность в справочник.
 function pickUsersInto(apply: (ids: number[]) => void) {
   const BX24 = bx24()
-  if (!BX24 || !BX24.selectUsers) { b24DialogHint(); return }
-  BX24.init(() => {
-    BX24.selectUsers!((users) => {
-      const ids: number[] = []
-      for (const u of users) {
-        const id = Number(u.id)
-        if (Number.isNaN(id)) continue
-        ids.push(id)
-        userDir.value[id] = { fio: u.name || `USER #${id}`, position: u.position || '' }
-      }
-      apply(ids)
+  if (BX24 && BX24.selectUsers) {
+    BX24.init(() => {
+      BX24.selectUsers!((users) => {
+        const ids: number[] = []
+        for (const u of users) {
+          const id = Number(u.id)
+          if (Number.isNaN(id)) continue
+          ids.push(id)
+          userDir.value[id] = { fio: u.name || `USER #${id}`, position: u.position || '' }
+        }
+        apply(ids)
+      })
     })
-  })
+    return
+  }
+  pickApply.value = apply
+  pickerKind.value = 'users'
 }
 function pickBitrixUsers() {
   pickUsersInto((ids) => { form.value.internal_users = mergeIds(form.value.internal_users, ids) })
@@ -391,10 +397,26 @@ function pickRouteUsers() {
   pickUsersInto((ids) => { routeInternal.value = mergeIds(routeInternal.value, ids) })
 }
 
-// Выбор сделки через нативный диалог CRM; вне портала — подсказка.
+// Выбор из модалки коннектора
+function onPickUser(u: BitrixUser) {
+  const id = Number(u.ID)
+  if (Number.isNaN(id)) return
+  userDir.value[id] = {
+    fio: [u.LAST_NAME, u.NAME, u.SECOND_NAME].filter(Boolean).join(' ') || `USER #${id}`,
+    position: u.WORK_POSITION || '',
+  }
+  pickApply.value([id])
+}
+function onPickDeal(d: BitrixDeal) {
+  const dom = portalDomain.value
+  form.value.crm_link = dom ? `https://${dom}/crm/deal/details/${d.ID}/` : String(d.ID)
+  pickerKind.value = null
+}
+
+// Выбор сделки: внутри портала — нативный диалог CRM; вне — коннектор.
 function pickBitrixDeal() {
   const BX24 = bx24()
-  if (!BX24 || !BX24.selectCRM) { crmDialogHint(); return }
+  if (!BX24 || !BX24.selectCRM) { pickerKind.value = 'deals'; return }
   BX24.init(() => {
     BX24.selectCRM!({ entityType: ['deal'], multiple: false }, (res) => {
       const deal = res?.deal?.[0]
@@ -476,6 +498,15 @@ onMounted(() => { loadUserDir(); loadList() })
     <Teleport to="#header-actions">
       <button class="btn btn--primary" @click="openForm">+ Новое согласование</button>
     </Teleport>
+
+    <!-- Поиск сотрудников/сделок через коннектор (вне iframe портала) -->
+    <BitrixSearchModal
+      v-if="pickerKind"
+      :kind="pickerKind"
+      @pick-user="onPickUser"
+      @pick-deal="onPickDeal"
+      @close="pickerKind = null"
+    />
 
     <p v-if="error" class="state state--error" style="margin:8px 0">{{ error }}</p>
 
