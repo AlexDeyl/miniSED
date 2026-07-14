@@ -12,6 +12,7 @@ export type RequestStatus =
   | 'signing'
   | 'executed'
   | 'closed'
+  | 'canceled'
 
 export interface RouteSlot {
   order: number

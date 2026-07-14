@@ -199,6 +199,21 @@ def return_for_revision(request: RegulatoryRequest, *, by_b24_id=None, comment="
     _sync_status(request)
 
 
+@transaction.atomic
+def cancel(request: RegulatoryRequest, *, by_b24_id=None):
+    """Отмена заявки инициатором (до передачи юристам)."""
+    if request.status not in constants.CANCELABLE_STATUSES:
+        raise RequestError("Эту заявку уже нельзя отменить.")
+    approval = get_approval(request)
+    if approval is not None and approval.status == Approval.STATUS_IN_PROGRESS:
+        try:
+            flow.cancel(approval)
+        except Exception:
+            pass
+    _set(request, constants.STATUS_CANCELED)
+    log_action("request_canceled", target=request)
+
+
 # --- Исполнение юридическим отделом -----------------------------------------
 def take_in_work(request: RegulatoryRequest):
     if request.status != constants.STATUS_TO_LEGAL:

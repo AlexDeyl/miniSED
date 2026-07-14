@@ -27,6 +27,8 @@ export const requests = {
     api.get<{ route: RouteSlot[] }>(`${BASE}/${id}/route_preview/`),
   submit: (id: number | string, participants: ParticipantInput[]) =>
     api.post<RegulatoryRequestDetail>(`${BASE}/${id}/submit/`, { participants }),
+  cancel: (id: number | string) => api.post<RegulatoryRequestDetail>(`${BASE}/${id}/cancel/`),
+  remove: (id: number | string) => api.delete<void>(`${BASE}/${id}/`),
   decide: (id: number | string, participantId: number, decision: 'approve' | 'reject', comment = '') =>
     api.post<RegulatoryRequestDetail>(`${BASE}/${id}/decide/`, {
       participant_id: participantId, decision, comment,

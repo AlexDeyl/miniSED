@@ -30,6 +30,7 @@ STATUS_LEGAL_WORK = "legal_work"
 STATUS_SIGNING = "signing"
 STATUS_EXECUTED = "executed"
 STATUS_CLOSED = "closed"
+STATUS_CANCELED = "canceled"
 
 STATUS_CHOICES = [
     (STATUS_DRAFT, "Черновик"),
@@ -42,7 +43,11 @@ STATUS_CHOICES = [
     (STATUS_SIGNING, "На подписании"),
     (STATUS_EXECUTED, "Исполнена"),
     (STATUS_CLOSED, "Закрыта"),
+    (STATUS_CANCELED, "Отменена"),
 ]
+
+# из каких статусов инициатор может отменить заявку (до передачи юристам)
+CANCELABLE_STATUSES = [STATUS_DRAFT, STATUS_ON_APPROVAL, STATUS_RETURNED, STATUS_REJECTED]
 
 # статусы, попадающие в раздел «Заявки для юристов»
 LEGAL_QUEUE_STATUSES = [STATUS_TO_LEGAL, STATUS_LEGAL_WORK, STATUS_SIGNING]

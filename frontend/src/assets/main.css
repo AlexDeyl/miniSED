@@ -214,6 +214,10 @@ a { color: var(--green-main); text-decoration: none; }
 .btn--primary { background: var(--green-main); color: #fff; border-color: var(--green-main); }
 .btn--primary:hover { background: #0a6e52; }
 .btn--ghost { background: transparent; }
+.btn--soft { background: #f1f3f4; border-color: #e2e5e8; }
+.btn--soft:hover { background: #e8ebed; }
+.btn--danger { background: #e5484d; color: #fff; border-color: #e5484d; }
+.btn--danger:hover { background: #cf3a3f; }
 .btn--ok { color: #fff; background: #4caf50; border-color: #4caf50; padding: 4px 10px; }
 .btn--no { color: #fff; background: var(--red-main); border-color: var(--red-main); padding: 4px 10px; }
 

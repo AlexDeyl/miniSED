@@ -185,6 +185,21 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
         ))
         return err or self._detail(req)
 
+    @action(detail=True, methods=["post"])
+    def cancel(self, request, pk=None):
+        req = self.get_object()
+        self._require_initiator(req)
+        err = self._run(lambda: services.cancel(req, by_b24_id=self.b24_id))
+        return err or self._detail(req)
+
+    def destroy(self, request, *args, **kwargs):
+        # Удалять можно только отменённую заявку и только инициатору.
+        req = self.get_object()
+        self._require_initiator(req)
+        if req.status != constants.STATUS_CANCELED:
+            raise PermissionDenied("Удалить можно только отменённую заявку.")
+        return super().destroy(request, *args, **kwargs)
+
     # --- исполнение юротделом (только юристы) ---
     @action(detail=False, methods=["get"], url_path="legal_queue")
     def legal_queue(self, request):

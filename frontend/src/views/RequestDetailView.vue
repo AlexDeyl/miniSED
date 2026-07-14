@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
 import { requests, type UserOption } from '@/services/requests'
 import { api, ApiError } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
@@ -9,6 +9,7 @@ import type { ApprovalParticipant, ParticipantInput } from '@/types/approval'
 
 const props = defineProps<{ id: string }>()
 const auth = useAuthStore()
+const router = useRouter()
 
 const DELIVERY = [
   { code: 'personally', name: 'Лично' },
@@ -61,10 +62,35 @@ function nameByBid(bid: number | null | undefined): string {
 }
 
 const isInitiator = computed(() => req.value?.initiator_b24_id === auth.b24UserId)
+// Отправка/перезапуск: черновик, возвращённая или ОТКЛОНЁННАЯ (2-й круг).
 const canSubmit = computed(
-  () => isInitiator.value && (req.value?.status === 'draft' || req.value?.status === 'returned'),
+  () => isInitiator.value &&
+    ['draft', 'returned', 'rejected'].includes(req.value?.status || ''),
 )
 const isLegalStage = computed(() => req.value && LEGAL_STATUSES.includes(req.value.status))
+// Отмена доступна до передачи юристам; удаление — только у отменённой.
+const canCancel = computed(
+  () => isInitiator.value &&
+    ['draft', 'on_approval', 'returned', 'rejected'].includes(req.value?.status || ''),
+)
+const canDelete = computed(() => isInitiator.value && req.value?.status === 'canceled')
+
+function cancelRequest() {
+  if (!confirm('Отменить заявку?')) return
+  run(() => requests.cancel(props.id))
+}
+async function removeRequest() {
+  if (!confirm('Удалить отменённую заявку безвозвратно?')) return
+  busy.value = true
+  error.value = null
+  try {
+    await requests.remove(props.id)
+    router.push('/requests')
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.message : 'Не удалось удалить'
+    busy.value = false
+  }
+}
 
 async function run(fn: () => Promise<RegulatoryRequestDetail>) {
   busy.value = true
@@ -190,7 +216,22 @@ onMounted(load)
           </tbody>
         </table>
         <div style="margin-top:10px">
-          <button class="btn btn--primary" :disabled="busy" @click="submit">Отправить на согласование</button>
+          <button class="btn btn--primary" :disabled="busy" @click="submit">
+            {{ req.status === 'rejected' ? 'Перезапустить согласование (новый круг)' : 'Отправить на согласование' }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Управление: отмена / удаление -->
+      <div v-if="canCancel || canDelete" class="detail-card">
+        <div class="detail-card-header">Управление</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button v-if="canCancel" class="btn btn--soft" :disabled="busy" @click="cancelRequest">Отменить заявку</button>
+          <button v-if="canDelete" class="btn btn--danger" :disabled="busy" @click="removeRequest">Удалить заявку</button>
+        </div>
+        <div class="detail-meta" style="margin-top:6px">
+          <template v-if="canDelete">Заявка отменена — её можно удалить безвозвратно.</template>
+          <template v-else>Отменить можно до передачи юристам. Отменённую заявку затем можно удалить.</template>
         </div>
       </div>
 

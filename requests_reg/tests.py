@@ -307,6 +307,25 @@ class ApiTests(TestCase):
         self.assertEqual(api(21).get("/api/reg/requests/legal_queue/").status_code, 403)
         self.assertEqual(api(30).get("/api/reg/requests/legal_queue/").status_code, 200)
 
+    # --- отмена и удаление ---
+    def test_cancel_then_delete(self):
+        rid = self._create()
+        r = api(1).post(f"/api/reg/requests/{rid}/cancel/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["status"], "canceled")
+        # удалить отменённую можно
+        self.assertEqual(api(1).delete(f"/api/reg/requests/{rid}/").status_code, 204)
+        self.assertEqual(api(1).get(f"/api/reg/requests/{rid}/").status_code, 404)
+
+    def test_delete_only_when_canceled(self):
+        rid = self._create()  # draft
+        self.assertEqual(api(1).delete(f"/api/reg/requests/{rid}/").status_code, 403)
+
+    def test_cancel_only_initiator(self):
+        rid = self._create()
+        # юрист видит заявку, но отменить может только инициатор
+        self.assertEqual(api(30).post(f"/api/reg/requests/{rid}/cancel/").status_code, 403)
+
     # --- перезапуск после отклонения ---
     def test_restart_after_reject(self):
         rid = self._create()
