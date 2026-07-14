@@ -37,6 +37,7 @@ from django.core.mail import send_mail
 from django.conf import settings
 from django.db.models import F, Q
 from core.services import log_action
+from core.auth import get_current_profile
 from urllib.parse import urlencode
 
 
@@ -549,13 +550,24 @@ class AgreementViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if participant.type == Participant.TYPE_INTERNAL and str(
-            participant.b24_user_id
-        ) != str(b24_id):
-            return Response(
-                {"detail": "Недостаточно прав"},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        if participant.type == Participant.TYPE_INTERNAL:
+            if str(participant.b24_user_id) != str(b24_id):
+                return Response(
+                    {"detail": "Недостаточно прав"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        else:
+            # Внешний участник (по email): решать может только владелец этой
+            # почты — из B24UserEmail или email профиля MiniSED.
+            my_emails = {e.lower() for e in getattr(self, "b24_emails", [])}
+            profile = get_current_profile(request)
+            if profile and profile.email:
+                my_emails.add(profile.email.lower())
+            if (participant.email or "").lower() not in my_emails:
+                return Response(
+                    {"detail": "Недостаточно прав"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
         if participant.status != Participant.STATUS_WAITING:
             return Response(
                 {"detail": "Вы уже приняли решение по этому документу."},

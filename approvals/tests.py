@@ -227,6 +227,26 @@ class RegistryTests(TestCase):
         data = api(AUTHOR).get("/api/agreements/todo/").json()
         self.assertEqual(len(data), 1)
 
+    def test_decide_external_participant_by_own_email(self):
+        """Отправил себе на email (внешний участник) → решаю в приложении."""
+        a = Factory.agreement(author=APPROVER_B)
+        p = Factory.external(a, "manager@nordhotels.ru")
+        B24UserEmail.objects.create(b24_user_id=AUTHOR, email="manager@nordhotels.ru")
+        ok = api(AUTHOR).post(f"/api/agreements/{a.id}/decide/",
+                              {"participant_id": p.id, "decision": "approve"}, format="json")
+        self.assertEqual(ok.status_code, 200)
+        p.refresh_from_db()
+        self.assertEqual(p.status, Participant.STATUS_APPROVED)
+
+    def test_decide_external_forbidden_for_non_owner(self):
+        """Кто видит согласование, но не владелец этой почты — решить не может."""
+        a = Factory.agreement(author=APPROVER_B)
+        p = Factory.external(a, "manager@nordhotels.ru")
+        # автор видит согласование, но почта не его → 403
+        bad = api(APPROVER_B).post(f"/api/agreements/{a.id}/decide/",
+                                   {"participant_id": p.id, "decision": "approve"}, format="json")
+        self.assertEqual(bad.status_code, 403)
+
 
 class ExternalApproveTests(TestCase):
     def test_external_token_approve(self):

@@ -90,10 +90,17 @@ async function decide(p: AgParticipant, decision: 'approve' | 'reject') {
 const currentParts = computed(() =>
   selected.value ? selected.value.participants.filter((p) => p.round_number === selected.value!.current_round) : [],
 )
-// решение текущего пользователя (для блока «Ваше решение»)
-const myPart = computed(() =>
-  currentParts.value.find((p) => p.type === 'internal' && p.b24_user_id === uid.value) ?? null,
-)
+// решение текущего пользователя (для блока «Ваше решение»).
+// Матчим и внутреннего (по b24_id), и внешнего участника (по почте профиля) —
+// иначе при отправке себе на email действие было недоступно.
+const myPart = computed(() => {
+  const myEmail = auth.profile?.email?.toLowerCase()
+  return currentParts.value.find(
+    (p) =>
+      (p.type === 'internal' && p.b24_user_id === uid.value) ||
+      (p.type === 'external' && !!myEmail && p.email?.toLowerCase() === myEmail),
+  ) ?? null
+})
 // история по кругам (ТЗ п.7.4)
 const roundsHistory = computed(() => {
   if (!selected.value) return []
