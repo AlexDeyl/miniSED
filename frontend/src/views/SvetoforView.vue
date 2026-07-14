@@ -273,11 +273,57 @@ async function saveTemplate() {
   }
 }
 
+// Нативные виджеты Битрикс24 (работают внутри iframe портала).
+interface BX24User { id: string | number; name?: string }
+interface BX24CrmItem { id: string | number; title?: string; url?: string }
+interface BX24SDK {
+  init(cb: () => void): void
+  getAuth(): { domain?: string } | false
+  selectUsers?(cb: (users: BX24User[]) => void): void
+  selectCRM?(
+    params: { entityType?: string[]; multiple?: boolean },
+    cb: (res: Record<string, BX24CrmItem[]>) => void,
+  ): void
+}
+function bx24(): BX24SDK | undefined {
+  return (window as unknown as { BX24?: BX24SDK }).BX24
+}
+
 function crmDialogHint() {
   alert('Выбор из CRM доступен внутри Битрикс24. Вставьте ссылку на сделку вручную.')
 }
 function b24DialogHint() {
   alert('Выбор сотрудников через диалог доступен внутри Битрикс24. Укажите ID через запятую.')
+}
+
+// Выбор сотрудников через нативный диалог Битрикса; вне портала — подсказка.
+function pickBitrixUsers() {
+  const BX24 = bx24()
+  if (!BX24 || !BX24.selectUsers) { b24DialogHint(); return }
+  BX24.init(() => {
+    BX24.selectUsers!((users) => {
+      const picked = users.map((u) => Number(u.id)).filter((n) => !Number.isNaN(n))
+      const existing = form.value.internal_users
+        .split(',').map((s) => s.trim()).filter(Boolean).map(Number)
+      form.value.internal_users = Array.from(new Set([...existing, ...picked])).join(', ')
+    })
+  })
+}
+
+// Выбор сделки через нативный диалог CRM; вне портала — подсказка.
+function pickBitrixDeal() {
+  const BX24 = bx24()
+  if (!BX24 || !BX24.selectCRM) { crmDialogHint(); return }
+  BX24.init(() => {
+    BX24.selectCRM!({ entityType: ['deal'], multiple: false }, (res) => {
+      const deal = res?.deal?.[0]
+      if (!deal) return
+      const auth = BX24.getAuth()
+      const domain = (auth && auth.domain) || ''
+      form.value.crm_link =
+        deal.url || (domain ? `https://${domain}/crm/deal/details/${deal.id}/` : String(deal.id))
+    })
+  })
 }
 
 function openForm() {
@@ -610,7 +656,7 @@ onMounted(loadList)
             <label class="fr-label">Привязка к CRM</label>
             <div class="fr-inline">
               <input class="fr-input" v-model="form.crm_link" placeholder="Вставьте ссылку или выберите" />
-              <button type="button" class="ag-btn ag-btn--blue" @click="crmDialogHint">Выбрать из CRM</button>
+              <button type="button" class="ag-btn ag-btn--blue" @click="pickBitrixDeal">Выбрать из CRM</button>
             </div>
             <div class="fr-hint">Можно вставить ссылку на сделку/счёт/контакт вручную или выбрать элемент CRM через диалог Битрикс24.</div>
           </div>
@@ -619,7 +665,7 @@ onMounted(loadList)
             <label class="fr-label">Участники из Б24</label>
             <div class="fr-inline">
               <input class="fr-input" v-model="form.internal_users" placeholder="Например: 1, 25, 37" />
-              <button type="button" class="ag-btn ag-btn--blue" @click="b24DialogHint">+ Выбрать в Б24</button>
+              <button type="button" class="ag-btn ag-btn--blue" @click="pickBitrixUsers">+ Выбрать в Б24</button>
             </div>
             <div class="fr-hint">Можно указать через запятую или выбрать через диалог Bitrix24.</div>
           </div>

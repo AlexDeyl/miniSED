@@ -75,7 +75,10 @@ def _serve_spa(request, boot_token=None):
             {"token": boot_token}
         )
         html = html.replace("</head>", boot + "</head>", 1)
-    return HttpResponse(html, content_type="text/html; charset=utf-8")
+    resp = HttpResponse(html, content_type="text/html; charset=utf-8")
+    # Не кэшировать оболочку SPA, иначе iframe Битрикса держит старый билд.
+    resp["Cache-Control"] = "no-store, must-revalidate"
+    return resp
 
 
 @csrf_exempt
