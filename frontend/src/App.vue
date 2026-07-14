@@ -3,16 +3,19 @@ import { computed } from 'vue'
 import { RouterView, RouterLink, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useSvetoforStore, SVETOFOR_TABS } from '@/stores/svetofor'
+import { useRequestsUiStore, REQUEST_TYPE_TABS } from '@/stores/requestsUi'
 
 const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 const svet = useSvetoforStore()
+const reqUi = useRequestsUiStore()
 
 const pageTitle = computed(() => (route.meta.title as string) || 'MiniSED')
 const bare = computed(() => route.meta.noShell === true)
-// Вкладки согласований показываем в сайдбаре только на странице «Согласования».
+// Под-вкладки показываем вложенно под своим пунктом меню.
 const onSvetofor = computed(() => route.name === 'svetofor')
+const onRequests = computed(() => route.name === 'requests')
 // Открыто из Битрикса (в iframe) — тогда «Выйти» не нужен (авто-вход портала).
 const inBitrix = window.self !== window.top
 
@@ -34,24 +37,30 @@ async function doLogout() {
       </div>
       <nav class="sidebar-nav">
         <RouterLink to="/svetofor"><span>Согласования</span></RouterLink>
+        <!-- под-вкладки согласований — вложенно под своим пунктом -->
+        <div v-if="onSvetofor" class="sidebar-subtabs">
+          <button
+            v-for="t in SVETOFOR_TABS" :key="t.code"
+            class="sidebar-subtab" :class="{ active: svet.mode === t.code }"
+            @click="svet.mode = t.code"
+          >{{ t.label }}</button>
+        </div>
+
         <RouterLink to="/requests"><span>Регламентные заявки</span></RouterLink>
+        <!-- под-вкладки (фильтры типов) заявок — под своим пунктом -->
+        <div v-if="onRequests" class="sidebar-subtabs">
+          <button
+            v-for="t in REQUEST_TYPE_TABS" :key="t.code || 'all'"
+            class="sidebar-subtab" :class="{ active: reqUi.typeFilter === t.code }"
+            @click="reqUi.typeFilter = t.code"
+          >{{ t.label }}</button>
+        </div>
+
         <RouterLink v-if="auth.isLawyer" to="/legal"><span>Заявки для юристов</span></RouterLink>
         <RouterLink to="/deals"><span>Поиск сделок</span></RouterLink>
       </nav>
 
-      <!-- Фильтры согласований (как в старом app.html), только на странице «Согласования» -->
-      <div v-if="onSvetofor" class="sidebar-block">
-        <div class="sidebar-block-label">Разделы</div>
-        <div class="sidebar-tabs">
-          <button
-            v-for="t in SVETOFOR_TABS" :key="t.code"
-            class="sidebar-tab" :class="{ active: svet.mode === t.code }"
-            @click="svet.mode = t.code"
-          >{{ t.label }}</button>
-        </div>
-      </div>
-
-      <!-- Текущий пользователь — под разделами (как в старом app.html) -->
+      <!-- Текущий пользователь -->
       <div class="sidebar-block">
         <div class="sidebar-block-label">Текущий пользователь</div>
         <div v-if="auth.profile?.fio" class="sidebar-user-name">{{ auth.profile.fio }}</div>
@@ -70,6 +79,8 @@ async function doLogout() {
           <div class="main-header-title">{{ pageTitle }}</div>
           <div class="main-header-subtitle">Согласования, заявки, документы</div>
         </div>
+        <!-- сюда вью телепортируют свою основную кнопку (Создать / Новое согласование) -->
+        <div id="header-actions" class="main-header-actions"></div>
       </header>
 
       <div class="main-body" :class="{ 'main-body--wide': route.meta.wide }">

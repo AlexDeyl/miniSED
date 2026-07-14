@@ -394,9 +394,10 @@ onMounted(loadList)
 
 <template>
   <div class="svet">
-    <div class="svet-head">
+    <!-- Основная кнопка — в фиксированной шапке приложения -->
+    <Teleport to="#header-actions">
       <button class="btn btn--primary" @click="openForm">+ Новое согласование</button>
-    </div>
+    </Teleport>
 
     <p v-if="error" class="state state--error" style="margin:8px 0">{{ error }}</p>
 
@@ -750,7 +751,6 @@ onMounted(loadList)
 
 <style scoped>
 .svet { display: flex; flex-direction: column; height: calc(100vh - 120px); }
-.svet-head { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-bottom: 10px; }
 .svet-body { display: flex; gap: 14px; flex: 1; overflow: hidden; }
 .svet-list { width: 360px; flex: none; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
 .svet-detail { flex: 1; overflow-y: auto; background: var(--gray-bg); border-radius: 10px; padding: 4px 4px 20px; }

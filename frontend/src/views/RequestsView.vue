@@ -1,27 +1,23 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { requests } from '@/services/requests'
 import { ApiError } from '@/services/api'
-import type { RegulatoryRequestListItem, RequestType } from '@/types/request'
+import { useRequestsUiStore } from '@/stores/requestsUi'
+import type { RegulatoryRequestListItem } from '@/types/request'
 
 const items = ref<RegulatoryRequestListItem[]>([])
 const loading = ref(true)
 const error = ref<string | null>(null)
-const filter = ref<'' | RequestType>('')
 
-const TYPE_TABS: { code: '' | RequestType; label: string }[] = [
-  { code: '', label: 'Все' },
-  { code: 'ecp', label: 'ЭЦП' },
-  { code: 'mchd', label: 'МЧД' },
-  { code: 'poa', label: 'Доверенности' },
-]
+// Фильтр типа — в сторе, кнопки живут в сайдбаре (App.vue).
+const reqUi = useRequestsUiStore()
 
 async function load() {
   loading.value = true
   error.value = null
   try {
-    items.value = await requests.list(filter.value || undefined)
+    items.value = await requests.list(reqUi.typeFilter || undefined)
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Не удалось загрузить'
   } finally {
@@ -29,32 +25,16 @@ async function load() {
   }
 }
 
-function setFilter(code: '' | RequestType) {
-  filter.value = code
-  load()
-}
-
+watch(() => reqUi.typeFilter, load)
 onMounted(load)
 </script>
 
 <template>
   <section>
-    <div class="page-head">
-      <h1 class="page-title">Регламентные заявки</h1>
+    <!-- Основная кнопка — в фиксированной шапке приложения -->
+    <Teleport to="#header-actions">
       <RouterLink to="/requests/new" class="btn btn--primary">Создать</RouterLink>
-    </div>
-
-    <div class="filter-tabs">
-      <button
-        v-for="t in TYPE_TABS"
-        :key="t.code"
-        class="filter-tab"
-        :class="{ active: filter === t.code }"
-        @click="setFilter(t.code)"
-      >
-        {{ t.label }}
-      </button>
-    </div>
+    </Teleport>
 
     <p v-if="loading" class="state">Загрузка…</p>
     <p v-else-if="error" class="state state--error">{{ error }}</p>
