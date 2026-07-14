@@ -497,7 +497,8 @@ onMounted(loadList)
                 </div>
               </div>
 
-              <div class="ag-card">
+              <!-- Лист согласования нужен только у завершённых (согласовано/отклонено). -->
+              <div v-if="selected.status === 'completed' || selected.status === 'rejected'" class="ag-card">
                 <div class="ag-card-header">Лист согласования</div>
                 <button class="ag-btn ag-btn--soft ag-btn--wide" :disabled="busy" @click="downloadSheet">Скачать лист согласования (PDF)</button>
               </div>
