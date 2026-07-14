@@ -3,6 +3,8 @@
 исполнение юротделом, ручной выбор согласующего, API.
 """
 
+from unittest import mock
+
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from rest_framework.test import APIClient
@@ -369,6 +371,42 @@ class ApiTests(TestCase):
         resp = api(1).post(f"/api/reg/requests/{r.id}/confirm_receipt/")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["status"], "closed")
+
+    # --- уведомления ---
+    def test_notify_legal_queue_targets_lawyers(self):
+        from requests_reg import notifications
+        r = RegulatoryRequest.objects.create(
+            request_type="poa", organization=self.org, initiator_b24_id=1, status="to_legal",
+        )
+        with mock.patch.object(notifications, "_dispatch") as disp:
+            notifications.notify_legal_queue(r)
+        disp.assert_called_once()
+        self.assertIn(30, disp.call_args.args[0])  # юрист из setUp
+
+    def test_notify_initiator_executed(self):
+        from requests_reg import notifications
+        r = RegulatoryRequest.objects.create(
+            request_type="poa", organization=self.org, initiator_b24_id=1, status="executed",
+        )
+        with mock.patch.object(notifications, "_dispatch") as disp:
+            notifications.notify_initiator_executed(r)
+        disp.assert_called_once()
+        self.assertIn(1, disp.call_args.args[0])  # инициатор
+
+    def test_flow_fires_notifications_on_commit(self):
+        from requests_reg import notifications
+        rid = self._create()
+        with mock.patch.object(notifications, "_dispatch") as disp, \
+                self.captureOnCommitCallbacks(execute=True):
+            r = api(1).post(f"/api/reg/requests/{rid}/submit/", {
+                "participants": [{"type": "internal", "b24_user_id": 20, "order": 0}],
+            }, format="json")
+            pid = r.json()["approval"]["rounds"][0]["participants"][0]["id"]
+            api(20).post(f"/api/reg/requests/{rid}/decide/", {
+                "participant_id": pid, "decision": "approve",
+            }, format="json")
+        # submit → уведомление согласующему; decide→to_legal → уведомление юристам
+        self.assertTrue(disp.called)
 
     # --- перезапуск после отклонения ---
     def test_restart_after_reject(self):

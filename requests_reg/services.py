@@ -30,6 +30,19 @@ class RequestError(Exception):
     pass
 
 
+def _notify(event: str, request: RegulatoryRequest) -> None:
+    """Уведомление после commit (best-effort, не ломает флоу)."""
+    def run():
+        try:
+            from . import notifications
+
+            getattr(notifications, event)(request)
+        except Exception as e:  # pragma: no cover
+            print("[notify] error:", e)
+
+    transaction.on_commit(run)
+
+
 def create_request(*, request_type: str, organization, **fields) -> RegulatoryRequest:
     if request_type not in constants.REQUEST_TYPES:
         raise RequestError(f"Неизвестный тип заявки: {request_type}")
@@ -83,6 +96,7 @@ def _sync_status(request: RegulatoryRequest) -> None:
             _set(request, constants.STATUS_APPROVED)
             _set(request, constants.STATUS_TO_LEGAL)
             log_action("request_approved_to_legal", target=request)
+            _notify("notify_legal_queue", request)  # юристам — новая на исполнение
 
 
 @transaction.atomic
@@ -132,6 +146,7 @@ def submit(request: RegulatoryRequest, participants: list[dict], *, flow_type=No
         flow.start_new_round(approval, participants)
 
     _sync_status(request)
+    _notify("notify_current_approver", request)  # тому, чья очередь
     return approval
 
 
@@ -187,6 +202,8 @@ def decide(request: RegulatoryRequest, participant_id, decision, comment="", *,
 
     flow.decide(participant, decision, comment)
     _sync_status(request)
+    # если ещё на согласовании — уведомить следующего согласующего
+    _notify("notify_current_approver", request)
     return participant
 
 
@@ -246,6 +263,7 @@ def execute(request: RegulatoryRequest, *, delivery_method: str, delivery_commen
     )
     log_action("request_executed", target=request,
                new_value={"delivery_method": delivery_method})
+    _notify("notify_initiator_executed", request)  # инициатору — подтвердите получение
 
 
 def confirm_receipt(request: RegulatoryRequest, *, by_b24_id=None):
@@ -254,3 +272,4 @@ def confirm_receipt(request: RegulatoryRequest, *, by_b24_id=None):
         raise RequestError("Подтвердить получение можно только исполненную заявку.")
     _set(request, constants.STATUS_CLOSED, received_at=timezone.now())
     log_action("request_received", target=request)
+    _notify("notify_legal_closed", request)  # юристам — инициатор ознакомился

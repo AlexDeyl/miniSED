@@ -234,6 +234,13 @@ def get_users_by_ids(client: BitrixClient, ids: list[int]) -> list[dict]:
     return out
 
 
+def notify_user(client: BitrixClient, user_id, message: str) -> None:
+    """Системное уведомление пользователю портала (колокольчик Битрикс24).
+    Требует scope `im` у приложения; при отсутствии — вызов бросит ошибку,
+    которую вызывающая сторона гасит (уведомления best-effort)."""
+    client.call("im.notify.system.add", {"USER_ID": user_id, "MESSAGE": message})
+
+
 def add_timeline_comment(client: BitrixClient, deal_id: int, comment: str) -> dict:
     """Добавляет комментарий в таймлайн сделки (статус согласования)."""
     return client.call(
