@@ -13,6 +13,8 @@ const pageTitle = computed(() => (route.meta.title as string) || 'MiniSED')
 const bare = computed(() => route.meta.noShell === true)
 // Вкладки согласований показываем в сайдбаре только на странице «Согласования».
 const onSvetofor = computed(() => route.name === 'svetofor')
+// Открыто из Битрикса (в iframe) — тогда «Выйти» не нужен (авто-вход портала).
+const inBitrix = window.self !== window.top
 
 async function doLogout() {
   await auth.logout()
@@ -37,7 +39,7 @@ async function doLogout() {
         <RouterLink to="/deals"><span>Поиск сделок</span></RouterLink>
       </nav>
 
-      <!-- Фильтры согласований + текущий пользователь (как в старом app.html) -->
+      <!-- Фильтры согласований (как в старом app.html), только на странице «Согласования» -->
       <div v-if="onSvetofor" class="sidebar-block">
         <div class="sidebar-block-label">Разделы</div>
         <div class="sidebar-tabs">
@@ -47,12 +49,14 @@ async function doLogout() {
             @click="svet.mode = t.code"
           >{{ t.label }}</button>
         </div>
-        <div class="sidebar-b24">ID Б24: <strong>{{ auth.b24UserId ?? '—' }}</strong></div>
       </div>
 
       <div class="sidebar-footer">
-        <div v-if="auth.displayName" style="margin-bottom:6px">{{ auth.displayName }}</div>
-        <button class="sidebar-logout" @click="doLogout">Выйти</button>
+        <div class="sidebar-user">
+          <div v-if="auth.profile?.fio" class="sidebar-user-name">{{ auth.profile.fio }}</div>
+          <div class="sidebar-user-id">ID Б24: <strong>{{ auth.b24UserId ?? '—' }}</strong></div>
+        </div>
+        <button v-if="!inBitrix" class="sidebar-logout" @click="doLogout">Выйти</button>
       </div>
     </aside>
 
