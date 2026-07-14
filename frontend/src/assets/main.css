@@ -32,7 +32,9 @@ body {
 a { color: var(--green-main); text-decoration: none; }
 
 /* --- Shell: зелёный сайдбар + main --- */
-.app-shell { display: flex; min-height: 100vh; width: 100%; }
+/* Оболочка ровно в высоту окна: контент скроллится внутри .main-body,
+   сайдбар остаётся зафиксированным (не уезжает вместе со страницей). */
+.app-shell { display: flex; height: 100vh; overflow: hidden; width: 100%; }
 
 .sidebar {
   width: 230px;
@@ -42,6 +44,7 @@ a { color: var(--green-main); text-decoration: none; }
   padding: 16px 12px;
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
 }
 .sidebar-logo { font-size: 18px; font-weight: 600; margin-bottom: 20px; }
 .sidebar-logo small { display: block; font-size: 11px; opacity: 0.9; font-weight: 400; }
