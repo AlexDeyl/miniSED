@@ -401,8 +401,11 @@ function pickBitrixDeal() {
       if (!deal) return
       const auth = BX24.getAuth()
       const domain = (auth && auth.domain) || ''
-      form.value.crm_link =
-        deal.url || (domain ? `https://${domain}/crm/deal/details/${deal.id}/` : String(deal.id))
+      // deal.url приходит относительным (/crm/deal/show/ID/) — дополняем доменом
+      // портала до полной ссылки, как в старом миниседе.
+      let link = deal.url || (domain ? `/crm/deal/show/${deal.id}/` : String(deal.id))
+      if (link.startsWith('/') && domain) link = `https://${domain}${link}`
+      form.value.crm_link = link
     })
   })
 }
