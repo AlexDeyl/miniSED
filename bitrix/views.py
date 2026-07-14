@@ -24,6 +24,7 @@ from .client import (
     add_timeline_comment,
     get_active_portal,
     get_deal,
+    get_users_by_ids,
     search_deals,
     search_users,
     store_token,
@@ -142,9 +143,14 @@ def deal_detail(request, deal_id: int):
 @permission_classes([AllowAny])
 def users_search(request):
     query = (request.GET.get("q") or "").strip()
+    ids_raw = (request.GET.get("ids") or "").strip()
     try:
         client = _resolve_client(request)
-        users = search_users(client, query)
+        if ids_raw:
+            ids = [int(x) for x in ids_raw.split(",") if x.strip().isdigit()]
+            users = get_users_by_ids(client, ids)
+        else:
+            users = search_users(client, query)
     except (BitrixError, BitrixAuthError) as exc:
         return Response({"detail": str(exc)}, status=_err_status(exc))
     return Response({"results": users})

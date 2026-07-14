@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { agreements } from '@/services/agreements'
 import { requests } from '@/services/requests'
+import { bitrix } from '@/services/bitrix'
 import { api, ApiError } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import { useSvetoforStore, type SvetoforMode as Mode } from '@/stores/svetofor'
@@ -29,6 +30,45 @@ const busy = ref(false)
 
 const uid = computed(() => auth.b24UserId)
 
+// Справочник b24_id → ФИО/должность (как в старом миниседе показываем имена).
+// Наполняется из /api/core/users/ и из данных BX24 при выборе сотрудников.
+const userDir = ref<Record<number, { fio: string; position?: string }>>({})
+async function loadUserDir() {
+  try {
+    for (const u of await requests.users()) {
+      userDir.value[u.bitrix_id] = { fio: u.fio, position: u.position_name || '' }
+    }
+  } catch { /* не критично */ }
+}
+function udName(id: number | null | undefined): string {
+  return (id != null && userDir.value[id]?.fio) || (id != null ? `USER #${id}` : '')
+}
+function udPos(id: number | null | undefined): string {
+  return (id != null && userDir.value[id]?.position) || ''
+}
+function udInitials(id: number | null | undefined): string {
+  const known = id != null && userDir.value[id]?.fio
+  if (!known) return 'U#'
+  const parts = known.trim().split(/\s+/).filter(Boolean)
+  const s = parts.length >= 2 ? parts[0][0] + parts[1][0] : known.trim().slice(0, 2)
+  return s.toUpperCase()
+}
+// Дозагрузка ФИО/должности из Битрикса для id, которых нет в справочнике
+// (реальные сотрудники портала, не заведённые в профилях). Вне Битрикса — no-op.
+async function enrichUsers(ids: (number | null | undefined)[]) {
+  const need = [...new Set(ids.filter((x): x is number => x != null && userDir.value[x] === undefined))]
+  if (!need.length) return
+  try {
+    const { results } = await bitrix.usersByIds(need)
+    for (const u of results) {
+      const id = Number(u.ID)
+      if (Number.isNaN(id)) continue
+      const fio = [u.LAST_NAME, u.NAME, u.SECOND_NAME].filter(Boolean).join(' ') || `USER #${id}`
+      userDir.value[id] = { fio, position: u.WORK_POSITION || '' }
+    }
+  } catch { /* вне Битрикса недоступно */ }
+}
+
 async function fetchByMode(m: Mode): Promise<Agreement[]> {
   if (m === 'todo') return agreements.todo()
   if (m === 'my') return agreements.my()
@@ -44,6 +84,8 @@ async function loadList() {
       templates.value = await agreements.templates()
     } else {
       items.value = await fetchByMode(mode.value)
+      // подтянуть имена авторов/участников списка
+      enrichUsers(items.value.flatMap((a) => [a.author_b24_id, ...a.participants.map((p) => p.b24_user_id)]))
       // заявки-согласования показываем только во вкладке «Требует действия»
       requestTodo.value = mode.value === 'todo' ? await requests.todo().catch(() => []) : []
     }
@@ -64,7 +106,9 @@ const decisionComment = ref('')
 async function open(id: number) {
   decisionComment.value = ''
   try {
-    selected.value = await agreements.get(id)
+    const ag = await agreements.get(id)
+    selected.value = ag
+    enrichUsers([ag.author_b24_id, ...ag.participants.map((p) => p.b24_user_id)])
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Не удалось открыть'
   }
@@ -236,6 +280,16 @@ function addExternal() {
 }
 function removeExternal(i: number) { externalList.value.splice(i, 1) }
 
+// Внутренние участники формы как чипы (id → аватар+ФИО, как в старом миниседе)
+const internalChips = computed(() =>
+  form.value.internal_users
+    .split(',').map((s) => s.trim()).filter(Boolean)
+    .map(Number).filter((n) => !Number.isNaN(n)),
+)
+function removeInternal(id: number) {
+  form.value.internal_users = internalChips.value.filter((x) => x !== id).join(', ')
+}
+
 // шаблоны маршрута
 const formTemplates = ref<AgreementTemplate[]>([])
 const selectedTemplate = ref<number | ''>('')
@@ -284,7 +338,7 @@ async function saveTemplate() {
 }
 
 // Нативные виджеты Битрикс24 (работают внутри iframe портала).
-interface BX24User { id: string | number; name?: string }
+interface BX24User { id: string | number; name?: string; position?: string }
 interface BX24CrmItem { id: string | number; title?: string; url?: string }
 interface BX24SDK {
   init(cb: () => void): void
@@ -313,13 +367,20 @@ function mergeIds(current: string, picked: number[]): string {
 }
 
 // Выбор сотрудников через нативный диалог Битрикса; вне портала — подсказка.
-// apply получает выбранные id (переиспользуется формой создания и редактором маршрута).
+// apply получает выбранные id; заодно запоминаем ФИО/должность в справочник.
 function pickUsersInto(apply: (ids: number[]) => void) {
   const BX24 = bx24()
   if (!BX24 || !BX24.selectUsers) { b24DialogHint(); return }
   BX24.init(() => {
     BX24.selectUsers!((users) => {
-      apply(users.map((u) => Number(u.id)).filter((n) => !Number.isNaN(n)))
+      const ids: number[] = []
+      for (const u of users) {
+        const id = Number(u.id)
+        if (Number.isNaN(id)) continue
+        ids.push(id)
+        userDir.value[id] = { fio: u.name || `USER #${id}`, position: u.position || '' }
+      }
+      apply(ids)
     })
   })
 }
@@ -378,18 +439,21 @@ async function createApproval() {
 }
 
 function partLabel(p: AgParticipant): string {
-  if (p.type === 'internal') return `USER #${p.b24_user_id}`
+  if (p.type === 'internal') return udName(p.b24_user_id)
   return p.email || p.name || 'Внешний участник'
 }
+function partPosition(p: AgParticipant): string {
+  return p.type === 'internal' ? udPos(p.b24_user_id) : ''
+}
 function avatarText(p: AgParticipant): string {
-  if (p.type === 'internal') return 'U#'
+  if (p.type === 'internal') return udInitials(p.b24_user_id)
   return (p.email || '?').charAt(0).toUpperCase()
 }
 const PART_STATUS_LABEL: Record<string, string> = {
   waiting: 'Ожидаем', approved: 'Согласовано', rejected: 'Отклонено',
 }
 
-onMounted(loadList)
+onMounted(() => { loadUserDir(); loadList() })
 </script>
 
 <template>
@@ -432,12 +496,12 @@ onMounted(loadList)
               <span class="svet-card-title">#{{ a.id }} {{ a.title }}</span>
               <span class="status-pill" :class="a.status">{{ AG_STATUS_LABEL[a.status] }}</span>
             </div>
-            <div class="item-sub">Автор: {{ a.author_b24_id }} · {{ new Date(a.created_at).toLocaleDateString('ru') }}
+            <div class="item-sub">Автор: {{ udName(a.author_b24_id) }} · {{ new Date(a.created_at).toLocaleDateString('ru') }}
               <template v-if="a.deadline"> · Дедлайн: {{ new Date(a.deadline).toLocaleDateString('ru') }}</template>
             </div>
             <div class="item-tags">
               <span v-for="p in a.participants" :key="p.id" class="tag-chip">
-                {{ p.type === 'internal' ? `#${p.b24_user_id}` : p.email }}
+                {{ p.type === 'internal' ? udName(p.b24_user_id) : p.email }}
               </span>
             </div>
           </div>
@@ -453,7 +517,7 @@ onMounted(loadList)
           <div class="ag-head">
             <h1 class="ag-title">#{{ selected.id }} {{ selected.title }}</h1>
             <div class="ag-meta">
-              Автор: {{ selected.author_b24_id }} · Создано: {{ new Date(selected.created_at).toLocaleString('ru') }}
+              Автор: {{ udName(selected.author_b24_id) }} · Создано: {{ new Date(selected.created_at).toLocaleString('ru') }}
               <template v-if="selected.deadline"> · Дедлайн: {{ new Date(selected.deadline).toLocaleDateString('ru') }}</template>
             </div>
             <span class="ag-status" :class="selected.status">{{ AG_STATUS_LABEL[selected.status] }}</span>
@@ -565,6 +629,7 @@ onMounted(loadList)
                     <div class="pc-avatar">{{ avatarText(p) }}</div>
                     <div class="pc-main">
                       <div class="pc-name">{{ partLabel(p) }}</div>
+                      <div v-if="partPosition(p)" class="pc-pos">{{ partPosition(p) }}</div>
                       <span class="ag-badge" :class="p.status">{{ PART_STATUS_LABEL[p.status] }}</span>
                     </div>
                   </div>
@@ -613,7 +678,7 @@ onMounted(loadList)
 
                 <div class="sum-block">
                   <div class="sum-label">Инициатор</div>
-                  <div>#{{ selected.author_b24_id }}</div>
+                  <div>{{ udName(selected.author_b24_id) }}</div>
                 </div>
                 <div class="sum-block">
                   <div class="sum-label">Сумма</div>
@@ -693,6 +758,13 @@ onMounted(loadList)
             <div class="fr-inline">
               <input class="fr-input" v-model="form.internal_users" placeholder="Например: 1, 25, 37" />
               <button type="button" class="ag-btn ag-btn--blue" @click="pickBitrixUsers">+ Выбрать в Б24</button>
+            </div>
+            <div v-if="internalChips.length" class="chips" style="margin-top:8px">
+              <span v-for="id in internalChips" :key="id" class="chip chip--user">
+                <span class="chip-ava">{{ udInitials(id) }}</span>
+                {{ udName(id) }}
+                <button type="button" class="chip-x" @click="removeInternal(id)">×</button>
+              </span>
             </div>
             <div class="fr-hint">Можно указать через запятую или выбрать через диалог Bitrix24.</div>
           </div>
@@ -800,6 +872,7 @@ onMounted(loadList)
 .pc-avatar { width: 28px; height: 28px; flex: 0 0 28px; border-radius: 999px; background: #e0f2f1; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 500; color: var(--green-main); }
 .pc-main { display: flex; flex-direction: column; min-width: 0; gap: 3px; }
 .pc-name { font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+.pc-pos { font-size: 11.5px; color: var(--text-muted); overflow-wrap: anywhere; }
 
 .ag-badge { display: inline-block; width: fit-content; padding: 2px 8px; border-radius: 999px; font-size: 10px; background: #e0e0e0; }
 .ag-badge.waiting { background: #ffe0b2; }
@@ -834,6 +907,8 @@ textarea.fr-input { resize: vertical; min-height: 60px; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 999px; background: #f1f3f4; font-size: 12px; }
 .chip--ext { background: #fff3e0; }
+.chip--user { background: var(--green-light); color: #0a6e52; padding-left: 3px; }
+.chip-ava { width: 20px; height: 20px; border-radius: 999px; background: #fff; color: var(--green-main); font-size: 10px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; flex: none; }
 .chip-x { border: none; background: transparent; cursor: pointer; font-size: 14px; line-height: 1; color: var(--text-muted); padding: 0; }
 
 .slideover-back { position: fixed; inset: 0; background: rgba(0,0,0,0.25); display: flex; justify-content: flex-end; z-index: 50; }

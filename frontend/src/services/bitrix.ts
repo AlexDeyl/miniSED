@@ -16,6 +16,7 @@ export interface BitrixUser {
   ID: string
   NAME?: string
   LAST_NAME?: string
+  SECOND_NAME?: string
   WORK_POSITION?: string
   EMAIL?: string
 }
@@ -43,6 +44,10 @@ export const bitrix = {
 
   searchUsers: (q: string) =>
     api.get<ListResponse<BitrixUser>>(`/bitrix/users/?q=${encodeURIComponent(q)}`),
+
+  // Сотрудники по списку b24-id (ФИО/должность) — для показа имён в согласованиях.
+  usersByIds: (ids: number[]) =>
+    api.get<ListResponse<BitrixUser>>(`/bitrix/users/?ids=${ids.join(',')}`),
 
   addTimelineComment: (dealId: number | string, comment: string) =>
     api.post<{ id: unknown }>('/bitrix/timeline/', { deal_id: dealId, comment }),

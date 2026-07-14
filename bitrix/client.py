@@ -220,6 +220,20 @@ def search_users(client: BitrixClient, query: str, limit: int = 20) -> list[dict
     return users[:limit]
 
 
+def get_users_by_ids(client: BitrixClient, ids: list[int]) -> list[dict]:
+    """Сотрудники по списку ID (ФИО/должность) — чтобы показывать имена,
+    как в старом миниседе, а не «USER #id»."""
+    out = []
+    for uid in ids[:50]:
+        try:
+            res = client.call("user.get", {"ID": uid})
+            if isinstance(res, list) and res:
+                out.append(res[0])
+        except Exception:
+            continue
+    return out
+
+
 def add_timeline_comment(client: BitrixClient, deal_id: int, comment: str) -> dict:
     """Добавляет комментарий в таймлайн сделки (статус согласования)."""
     return client.call(
