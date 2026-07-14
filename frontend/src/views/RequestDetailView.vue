@@ -173,6 +173,10 @@ function downloadSheet() {
 }
 // лист согласования доступен, когда есть хотя бы один круг
 const hasApproval = computed(() => (req.value?.approval?.rounds?.length || 0) > 0)
+// доверенность — приложенные документы (скан), кроме автозаявления-анкеты
+const doverennostDocs = computed(
+  () => (req.value?.documents || []).filter((d) => d.document_type !== 'anketa' && d.download_url),
+)
 const isAnketaType = computed(() => req.value && (req.value.request_type === 'poa' || req.value.request_type === 'mchd'))
 
 async function uploadFile(e: Event) {
@@ -345,9 +349,16 @@ onMounted(load)
         <p class="muted" style="margin:0 0 10px">
           Способ передачи: {{ req.delivery_method_display }}<template v-if="req.delivery_comment"> — {{ req.delivery_comment }}</template>
         </p>
-        <button v-if="isInitiator" class="btn btn--primary" :disabled="busy" @click="run(() => requests.confirmReceipt(req!.id))">
-          Получил / ознакомился
-        </button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button
+            v-for="d in doverennostDocs" :key="d.id"
+            class="btn btn--soft" :disabled="busy"
+            @click="dl(d.download_url, d.title)"
+          >Скачать доверенность{{ doverennostDocs.length > 1 ? ` (${d.title})` : '' }}</button>
+          <button v-if="isInitiator" class="btn btn--primary" :disabled="busy" @click="run(() => requests.confirmReceipt(req!.id))">
+            Получил / ознакомился
+          </button>
+        </div>
       </div>
     </template>
   </section>

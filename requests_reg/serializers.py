@@ -25,6 +25,7 @@ def _documents(obj):
         out.append({
             "id": d.id,
             "title": d.title,
+            "document_type": d.document_type,
             "current_version_number": cur.version_number if cur else None,
             "download_url": (
                 f"/api/documents/{d.id}/versions/{cur.id}/download/" if cur else None

@@ -28,6 +28,7 @@ export interface RouteSlot {
 export interface RequestDocument {
   id: number
   title: string
+  document_type?: string
   current_version_number: number | null
   download_url: string | null
 }
