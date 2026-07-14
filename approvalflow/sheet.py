@@ -72,6 +72,40 @@ def _fmt(dt) -> str:
     return timezone.localtime(dt).strftime("%d.%m.%Y %H:%M")
 
 
+def _name_maps(approval: Approval):
+    """Карты b24_id→ФИО и email→ФИО из профилей (чтобы в листе были имена)."""
+    from core.models import UserProfile
+
+    bids, emails = set(), set()
+    for rnd in approval.rounds.all():
+        for p in rnd.participants.all():
+            if p.b24_user_id:
+                bids.add(p.b24_user_id)
+            if p.email:
+                emails.add(p.email.strip().lower())
+    if approval.initiator_b24_id:
+        bids.add(approval.initiator_b24_id)
+    by_bid = {u.bitrix_id: u.fio for u in UserProfile.objects.filter(bitrix_id__in=bids) if u.fio}
+    by_email = {
+        u.email.strip().lower(): u.fio
+        for u in UserProfile.objects.filter(email__in=emails) if u.fio
+    }
+    return by_bid, by_email
+
+
+def _who(p: ApprovalParticipant, by_bid: dict, by_email: dict) -> str:
+    """Кто согласующий. Групповой юрэтап без решения — «Юридический отдел»;
+    после решения показываем конкретного юриста (в participant.b24_user_id
+    записан тот, кто согласовал)."""
+    if p.type == ApprovalParticipant.TYPE_INTERNAL:
+        if p.role == "legal_dept" and not p.b24_user_id:
+            return "Юридический отдел"
+        if p.b24_user_id:
+            return by_bid.get(p.b24_user_id) or f"USER #{p.b24_user_id}"
+        return "—"
+    return by_email.get((p.email or "").strip().lower()) or p.email or p.name or "участник"
+
+
 def render_pdf(approval: Approval) -> bytes:
     font = _ensure_font()
     buffer = io.BytesIO()
@@ -87,6 +121,8 @@ def render_pdf(approval: Approval) -> bytes:
     h1 = ParagraphStyle("h1", parent=base, fontSize=15, spaceAfter=6)
     label = ParagraphStyle("label", parent=base, textColor=colors.HexColor("#5a6675"))
 
+    by_bid, by_email = _name_maps(approval)
+
     story = []
     story.append(Paragraph("Лист согласования", h1))
     story.append(Paragraph(
@@ -98,7 +134,7 @@ def render_pdf(approval: Approval) -> bytes:
     # Шапка
     head_rows = [
         ["Название", approval.title or "—"],
-        ["Инициатор (ID Б24)", str(approval.initiator_b24_id or "—")],
+        ["Инициатор", by_bid.get(approval.initiator_b24_id) or f"ID Б24 {approval.initiator_b24_id or '—'}"],
         ["Тип согласования", approval.get_flow_type_display()],
         ["Создано", _fmt(approval.created_at)],
         ["Отправлено", _fmt(approval.submitted_at)],
@@ -125,9 +161,8 @@ def render_pdf(approval: Approval) -> bytes:
         ))
         data = [["Согласующий", "Роль", "Решение", "Дата", "Комментарий"]]
         for p in rnd.participants.all():
-            who = f"USER#{p.b24_user_id}" if p.type == "internal" else (p.email or p.name)
             data.append([
-                Paragraph(who or "—", base),
+                Paragraph(_who(p, by_bid, by_email), base),
                 Paragraph(p.role or "—", base),
                 Paragraph(_DECISION_RU.get(p.decision, p.decision), base),
                 Paragraph(_fmt(p.decided_at), base),

@@ -246,7 +246,7 @@ onMounted(load)
             <tr v-for="p in rnd.participants" :key="p.id">
               <td>{{ p.role || '—' }}</td>
               <td>
-                <template v-if="isGroupLegal(p)">Юридический отдел (любой юрист)</template>
+                <template v-if="isGroupLegal(p)">Юридический отдел</template>
                 <template v-else-if="p.type === 'external'">{{ p.email }}</template>
                 <template v-else>{{ nameByBid(p.b24_user_id) || `USER #${p.b24_user_id}` }}</template>
               </td>

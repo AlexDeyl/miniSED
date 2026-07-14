@@ -83,7 +83,7 @@ def build_route(request: RegulatoryRequest) -> list[dict]:
                     "group": True,
                     "resolved": True,
                     "b24_user_id": None,
-                    "user_name": "Любой юрист",
+                    "user_name": "Юридический отдел",
                     "needs_manual": False,
                 }
             )

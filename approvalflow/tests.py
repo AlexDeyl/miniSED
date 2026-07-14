@@ -9,7 +9,7 @@ from rest_framework.test import APIClient
 from approvals.models import Agreement
 from .models import Approval, ApprovalParticipant, ApprovalRound
 from . import services
-from .sheet import generate_sheet, render_pdf
+from .sheet import generate_sheet, render_pdf, _who
 
 
 def api(uid=None):
@@ -255,3 +255,19 @@ class ApiTests(TestCase):
         resp = api(self.AUTHOR).get(url)
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp["Content-Type"], "application/pdf")
+
+
+class SheetWhoTests(TestCase):
+    """Отображение согласующего в листе: групповой юрслот vs реальный юрист."""
+
+    def test_group_legal_unassigned_shows_department(self):
+        p = ApprovalParticipant(type="internal", role="legal_dept", b24_user_id=None)
+        self.assertEqual(_who(p, {}, {}), "Юридический отдел")
+
+    def test_group_legal_resolved_shows_actual_lawyer(self):
+        p = ApprovalParticipant(type="internal", role="legal_dept", b24_user_id=30)
+        self.assertEqual(_who(p, {30: "Юрист Юрьев"}, {}), "Юрист Юрьев")
+
+    def test_internal_resolved_by_name(self):
+        p = ApprovalParticipant(type="internal", role="cfo_head", b24_user_id=5)
+        self.assertEqual(_who(p, {5: "Иван Иванов"}, {}), "Иван Иванов")
