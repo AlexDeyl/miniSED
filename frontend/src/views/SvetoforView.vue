@@ -300,18 +300,28 @@ function b24DialogHint() {
   alert('Выбор сотрудников через диалог доступен внутри Битрикс24. Укажите ID через запятую.')
 }
 
+// Слить выбранные id с уже введёнными (строка «1, 2, 3») без дублей.
+function mergeIds(current: string, picked: number[]): string {
+  const existing = current.split(',').map((s) => s.trim()).filter(Boolean).map(Number)
+  return Array.from(new Set([...existing, ...picked])).join(', ')
+}
+
 // Выбор сотрудников через нативный диалог Битрикса; вне портала — подсказка.
-function pickBitrixUsers() {
+// apply получает выбранные id (переиспользуется формой создания и редактором маршрута).
+function pickUsersInto(apply: (ids: number[]) => void) {
   const BX24 = bx24()
   if (!BX24 || !BX24.selectUsers) { b24DialogHint(); return }
   BX24.init(() => {
     BX24.selectUsers!((users) => {
-      const picked = users.map((u) => Number(u.id)).filter((n) => !Number.isNaN(n))
-      const existing = form.value.internal_users
-        .split(',').map((s) => s.trim()).filter(Boolean).map(Number)
-      form.value.internal_users = Array.from(new Set([...existing, ...picked])).join(', ')
+      apply(users.map((u) => Number(u.id)).filter((n) => !Number.isNaN(n)))
     })
   })
+}
+function pickBitrixUsers() {
+  pickUsersInto((ids) => { form.value.internal_users = mergeIds(form.value.internal_users, ids) })
+}
+function pickRouteUsers() {
+  pickUsersInto((ids) => { routeInternal.value = mergeIds(routeInternal.value, ids) })
 }
 
 // Выбор сделки через нативный диалог CRM; вне портала — подсказка.
@@ -559,7 +569,10 @@ onMounted(loadList)
                   </button>
                   <div v-else class="inner-box" style="margin-top:8px">
                     <div class="ag-muted" style="margin-bottom:4px">Согласующие (ID Б24, через запятую)</div>
-                    <input v-model="routeInternal" class="ag-textarea" style="min-height:auto" placeholder="1099, 1535" />
+                    <div class="fr-inline">
+                      <input v-model="routeInternal" class="ag-textarea" style="min-height:auto" placeholder="1099, 1535" />
+                      <button class="ag-btn ag-btn--blue" @click="pickRouteUsers">+ Выбрать в Б24</button>
+                    </div>
                     <div class="ag-muted" style="margin:8px 0 4px">Внешние (email)</div>
                     <div class="fr-inline">
                       <input v-model="routeExtInput" class="ag-textarea" style="min-height:auto" placeholder="a@b.ru" @keyup.enter="addRouteExt" />
