@@ -8,7 +8,15 @@ Read-only API справочников ядра.
 from rest_framework import viewsets
 from rest_framework.permissions import AllowAny
 
-from .models import CFO, Counterparty, Department, Facility, Organization, Role
+from .models import (
+    CFO,
+    Counterparty,
+    Department,
+    Facility,
+    Organization,
+    Role,
+    UserProfile,
+)
 from .serializers import (
     CFOSerializer,
     CounterpartySerializer,
@@ -16,6 +24,7 @@ from .serializers import (
     FacilitySerializer,
     OrganizationSerializer,
     RoleSerializer,
+    UserProfileMiniSerializer,
 )
 
 
@@ -71,3 +80,26 @@ class RoleViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = RoleSerializer
     permission_classes = [AllowAny]
     pagination_class = None
+
+
+class UserProfileViewSet(viewsets.ReadOnlyModelViewSet):
+    """Справочник сотрудников для выбора согласующих по ФИО.
+
+    Только активные и с bitrix_id (движок согласований адресует по нему).
+    Поиск по ФИО через ?q=.
+    """
+
+    serializer_class = UserProfileMiniSerializer
+    permission_classes = [AllowAny]
+    pagination_class = None
+
+    def get_queryset(self):
+        qs = (
+            UserProfile.objects.filter(is_active=True, bitrix_id__isnull=False)
+            .select_related("position")
+            .order_by("fio")
+        )
+        q = self.request.query_params.get("q")
+        if q:
+            qs = qs.filter(fio__icontains=q)
+        return qs

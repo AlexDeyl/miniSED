@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
-import { requests } from '@/services/requests'
+import { requests, type UserOption } from '@/services/requests'
 import { api, ApiError } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import type { RegulatoryRequestDetail, RouteSlot } from '@/types/request'
@@ -24,8 +24,10 @@ const loading = ref(true)
 const error = ref<string | null>(null)
 const busy = ref(false)
 
-// маршрут для отправки (слоты + ручной ввод)
+// маршрут для отправки (слоты + ручной выбор согласующего)
 const route = ref<(RouteSlot & { manual: string })[]>([])
+// справочник сотрудников для выбора согласующих по ФИО
+const users = ref<UserOption[]>([])
 // исполнение
 const deliveryMethod = ref('personally')
 const deliveryComment = ref('')
@@ -36,6 +38,9 @@ async function load() {
   error.value = null
   try {
     req.value = await requests.get(props.id)
+    if (!users.value.length) {
+      try { users.value = await requests.users() } catch { /* не критично */ }
+    }
     if (canSubmit.value) await loadRoute()
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Не удалось загрузить'
@@ -47,6 +52,12 @@ async function load() {
 async function loadRoute() {
   const { route: slots } = await requests.routePreview(props.id)
   route.value = slots.map((s) => ({ ...s, manual: '' }))
+}
+
+// ФИО согласующего по его bitrix_id (для отображения авто-выбранных слотов)
+function nameByBid(bid: number | null | undefined): string {
+  const u = users.value.find((x) => x.bitrix_id === bid)
+  return u ? u.fio : ''
 }
 
 const isInitiator = computed(() => req.value?.initiator_b24_id === auth.b24UserId)
@@ -160,10 +171,15 @@ onMounted(load)
               <td>{{ s.order + 1 }}. {{ s.role_name }}</td>
               <td>
                 <template v-if="s.resolved">
-                  USER #{{ s.b24_user_id }} <em v-if="s.user_name">({{ s.user_name }})</em>
+                  {{ s.user_name || nameByBid(s.b24_user_id) || `USER #${s.b24_user_id}` }}
                 </template>
-                <input v-else v-model="s.manual" type="number" placeholder="ID Б24 — выбрать вручную"
-                       style="padding:5px 8px;border:1px solid var(--gray-border);border-radius:6px" />
+                <select v-else v-model="s.manual"
+                        style="padding:5px 8px;border:1px solid var(--gray-border);border-radius:6px;min-width:220px">
+                  <option value="">— выберите согласующего —</option>
+                  <option v-for="u in users" :key="u.id" :value="String(u.bitrix_id)">
+                    {{ u.fio }}<template v-if="u.position_name"> — {{ u.position_name }}</template>
+                  </option>
+                </select>
               </td>
               <td>
                 <span v-if="s.needs_manual" class="participant-pill" style="background:#ffe0b2">ручной выбор</span>
@@ -186,7 +202,7 @@ onMounted(load)
           <tbody>
             <tr v-for="p in rnd.participants" :key="p.id">
               <td>{{ p.role || '—' }}</td>
-              <td>USER #{{ p.b24_user_id }}</td>
+              <td>{{ p.type === 'external' ? p.email : (nameByBid(p.b24_user_id) || `USER #${p.b24_user_id}`) }}</td>
               <td>
                 <span class="participant-pill" :class="p.decision">{{ p.decision }}</span>
                 <em v-if="p.decision_comment"> — {{ p.decision_comment }}</em>

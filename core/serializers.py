@@ -1,6 +1,14 @@
 from rest_framework import serializers
 
-from .models import CFO, Counterparty, Department, Facility, Organization, Role
+from .models import (
+    CFO,
+    Counterparty,
+    Department,
+    Facility,
+    Organization,
+    Role,
+    UserProfile,
+)
 
 
 class OrganizationSerializer(serializers.ModelSerializer):
@@ -48,3 +56,13 @@ class RoleSerializer(serializers.ModelSerializer):
     class Meta:
         model = Role
         fields = ["id", "code", "name", "kind", "permissions"]
+
+
+class UserProfileMiniSerializer(serializers.ModelSerializer):
+    """Краткий справочник сотрудников для выбора согласующих по ФИО."""
+
+    position_name = serializers.CharField(source="position.name", read_only=True)
+
+    class Meta:
+        model = UserProfile
+        fields = ["id", "fio", "bitrix_id", "position_name"]

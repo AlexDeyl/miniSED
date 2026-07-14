@@ -12,6 +12,7 @@ const BASE = '/reg/requests'
 export interface Organization { id: number; short_name: string }
 export interface Facility { id: number; name: string; organization: number }
 export interface Cfo { id: number; name: string; code: string; organization: number }
+export interface UserOption { id: number; fio: string; bitrix_id: number; position_name?: string }
 
 export const requests = {
   list: (type?: string) =>
@@ -62,4 +63,5 @@ export const requests = {
   organizations: () => api.get<Organization[]>('/core/organizations/'),
   facilities: (org?: number) => api.get<Facility[]>(`/core/facilities/${org ? `?organization=${org}` : ''}`),
   cfos: () => api.get<Cfo[]>('/core/cfos/'),
+  users: () => api.get<UserOption[]>('/core/users/'),
 }

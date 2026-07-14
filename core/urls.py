@@ -11,5 +11,6 @@ router.register("departments", views.DepartmentViewSet, basename="department")
 router.register("cfos", views.CFOViewSet, basename="cfo")
 router.register("counterparties", views.CounterpartyViewSet, basename="counterparty")
 router.register("roles", views.RoleViewSet, basename="role")
+router.register("users", views.UserProfileViewSet, basename="user")
 
 urlpatterns = router.urls

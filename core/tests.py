@@ -140,6 +140,16 @@ class DirectoryApiTests(TestCase):
         names = {o["short_name"] for o in data}
         self.assertNotIn("Скрытая", names)
 
+    def test_users_list_only_active_with_bitrix_id(self):
+        UserProfile.objects.create(fio="Иванов Иван", bitrix_id=501)
+        UserProfile.objects.create(fio="Без битрикса")  # нет bitrix_id → скрыт
+        UserProfile.objects.create(fio="Уволенный", bitrix_id=502, is_active=False)
+        data = self.client.get("/api/core/users/").json()
+        fios = {u["fio"] for u in data}
+        self.assertIn("Иванов Иван", fios)
+        self.assertNotIn("Без битрикса", fios)
+        self.assertNotIn("Уволенный", fios)
+
 
 class AuthTests(TestCase):
     def setUp(self):
