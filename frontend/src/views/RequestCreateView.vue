@@ -73,6 +73,26 @@ const templates = ref<{ code: string; name: string; powers: string }[]>([])
 const saving = ref(false)
 const error = ref<string | null>(null)
 
+// Файлы-приложения: по одному на пункт чек-листа + произвольные «прочие».
+// Грузятся после создания заявки, чтобы у юристов был полный комплект.
+const attachmentFiles = reactive<Record<string, File | null>>({})
+const extraFiles = ref<File[]>([])
+function onAttachmentFile(code: string, e: Event) {
+  attachmentFiles[code] = (e.target as HTMLInputElement).files?.[0] || null
+}
+function onExtraFiles(e: Event) {
+  extraFiles.value = Array.from((e.target as HTMLInputElement).files || [])
+}
+async function uploadAttachments(reqId: number) {
+  const jobs: Promise<unknown>[] = []
+  for (const a of ATTACHMENTS) {
+    const f = attachmentFiles[a.code]
+    if (f) jobs.push(requests.uploadDocument(reqId, f, a.name))
+  }
+  extraFiles.value.forEach((f) => jobs.push(requests.uploadDocument(reqId, f, f.name)))
+  if (jobs.length) await Promise.all(jobs)
+}
+
 const isAnketa = computed(() => requestType.value === 'poa' || requestType.value === 'mchd')
 
 async function loadContext() {
@@ -97,8 +117,9 @@ async function save() {
   if (!organization.value) { error.value = 'Выберите организацию'; return }
   const subject = [rep.last_name, rep.first_name, rep.middle_name].filter(Boolean).join(' ')
   saving.value = true
+  let created
   try {
-    const created = await requests.create({
+    created = await requests.create({
       request_type: requestType.value,
       organization: organization.value,
       facility: facility.value,
@@ -108,11 +129,18 @@ async function save() {
       basis: basis.value.trim(),
       ...(isAnketa.value ? { data: JSON.parse(JSON.stringify(data)) } : {}),
     } as never)
-    router.push(`/requests/${created.id}`)
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Не удалось создать'
     saving.value = false
+    return
   }
+  // Заявка создана — прикладываем файлы (не блокируем переход, если часть не загрузилась).
+  try {
+    await uploadAttachments(created.id)
+  } catch {
+    error.value = 'Заявка создана, но некоторые файлы не загрузились — добавьте их в карточке заявки.'
+  }
+  router.push(`/requests/${created.id}`)
 }
 </script>
 
@@ -267,9 +295,21 @@ async function save() {
           </label>
           <div class="form-field" style="margin-bottom:10px">
             <span>Приложения к заявке</span>
-            <label v-for="a in ATTACHMENTS" :key="a.code" class="check">
-              <input type="checkbox" :value="a.code" v-model="(data.attachments as string[])" /> {{ a.name }}
-            </label>
+            <div class="attach-hint">Отметьте нужные документы и приложите файлы — юристы получат полный комплект.</div>
+            <div v-for="a in ATTACHMENTS" :key="a.code" class="attach-row">
+              <label class="check">
+                <input type="checkbox" :value="a.code" v-model="(data.attachments as string[])" /> {{ a.name }}
+              </label>
+              <div v-if="(data.attachments as string[]).includes(a.code)" class="attach-file">
+                <input type="file" @change="onAttachmentFile(a.code, $event)" />
+                <span v-if="attachmentFiles[a.code]" class="attach-ok">✓ {{ attachmentFiles[a.code]?.name }}</span>
+              </div>
+            </div>
+          </div>
+          <div class="form-field" style="margin-bottom:10px">
+            <span>Другие документы (по необходимости)</span>
+            <input type="file" multiple @change="onExtraFiles" />
+            <span v-if="extraFiles.length" class="attach-ok">Выбрано файлов: {{ extraFiles.length }}</span>
           </div>
           <label class="form-field">
             <span>Способ получения готовой доверенности</span>
@@ -298,4 +338,9 @@ async function save() {
 <style scoped>
 .check { display: block; font-size: 13px; margin: 3px 0; cursor: pointer; }
 .check input { margin-right: 6px; }
+.attach-hint { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+.attach-row { margin: 4px 0; }
+.attach-file { margin: 2px 0 8px 22px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.attach-file input[type=file] { font-size: 12px; }
+.attach-ok { font-size: 12px; color: var(--green-main); }
 </style>
