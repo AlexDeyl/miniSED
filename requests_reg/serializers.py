@@ -1,9 +1,21 @@
+from datetime import date
+
 from rest_framework import serializers
 
 from approvalflow.serializers import ApprovalDetailSerializer
 
 from . import constants, services
 from .models import RegulatoryRequest
+
+
+def _parse_date(value):
+    """ISO-строка → date или None (без падения на мусоре)."""
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
 
 
 def _documents(obj):
@@ -73,3 +85,24 @@ class RegulatoryRequestWriteSerializer(serializers.ModelSerializer):
         if value not in constants.REQUEST_TYPES:
             raise serializers.ValidationError("Неизвестный тип заявки.")
         return value
+
+    def validate(self, attrs):
+        # Серверная страховка правила «доверенность не более 3 лет».
+        data = attrs.get("data")
+        if isinstance(data, dict) and data.get("term_type") == "period":
+            f = _parse_date(data.get("term_from"))
+            t = _parse_date(data.get("term_to"))
+            if f and t:
+                if t <= f:
+                    raise serializers.ValidationError(
+                        {"detail": "Дата окончания срока должна быть позже даты начала."}
+                    )
+                try:
+                    max_t = f.replace(year=f.year + 3)
+                except ValueError:  # 29 февраля → 28-е
+                    max_t = f.replace(year=f.year + 3, day=28)
+                if t > max_t:
+                    raise serializers.ValidationError(
+                        {"detail": "Срок доверенности не может превышать 3 года."}
+                    )
+        return attrs

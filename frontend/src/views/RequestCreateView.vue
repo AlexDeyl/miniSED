@@ -95,6 +95,14 @@ async function uploadAttachments(reqId: number) {
 
 const isAnketa = computed(() => requestType.value === 'poa' || requestType.value === 'mchd')
 
+// Максимальная дата окончания срока — не более 3 лет от даты начала.
+const maxTermTo = computed(() => {
+  if (!data.term_from) return ''
+  const d = new Date(data.term_from as string)
+  d.setFullYear(d.getFullYear() + 3)
+  return d.toISOString().slice(0, 10)
+})
+
 async function loadContext() {
   const org = organization.value ?? undefined
   facilities.value = await requests.facilities(org)
@@ -112,9 +120,56 @@ onMounted(async () => {
 
 watch(organization, () => { facility.value = null; cfo.value = null; loadContext() })
 
+// Проверка формы. Возвращает текст первой ошибки или null, если всё верно.
+function validate(): string | null {
+  if (!organization.value) return 'Выберите организацию.'
+
+  if (isAnketa.value) {
+    // Раздел 1 — представитель
+    if (!rep.last_name.trim()) return 'Раздел 1: укажите фамилию представителя.'
+    if (!rep.first_name.trim()) return 'Раздел 1: укажите имя представителя.'
+    if (!rep.birth_date) return 'Раздел 1: укажите дату рождения представителя.'
+    if (!rep.position.trim()) return 'Раздел 1: укажите должность представителя.'
+    if (!rep.passport.trim()) return 'Раздел 1: укажите паспорт представителя (серия, №).'
+    if (!rep.passport_issued_by.trim()) return 'Раздел 1: укажите, кем выдан паспорт.'
+    if (!rep.passport_issue_date) return 'Раздел 1: укажите дату выдачи паспорта.'
+    if (!rep.reg_address.trim()) return 'Раздел 1: укажите адрес регистрации представителя.'
+
+    // Раздел 2 — полномочия
+    if (!(data.target_org as string).trim())
+      return 'Раздел 2: укажите, куда направляется представитель (организация / госорган).'
+    const powers = data.powers as string[]
+    const tpls = data.power_templates as string[]
+    if (!powers.length && !tpls.length && !(data.powers_other as string).trim())
+      return 'Раздел 2: выберите хотя бы одно полномочие (или заполните «Иные полномочия»).'
+
+    // Срок действия и правило «не более 3 лет»
+    if (data.term_type === 'period') {
+      if (!data.term_from) return 'Раздел 2: укажите дату начала срока действия.'
+      if (!data.term_to) return 'Раздел 2: укажите дату окончания срока действия.'
+      const from = new Date(data.term_from as string)
+      const to = new Date(data.term_to as string)
+      if (to <= from) return 'Раздел 2: дата окончания должна быть позже даты начала.'
+      const max = new Date(from)
+      max.setFullYear(max.getFullYear() + 3)
+      if (to > max) return 'Раздел 2: срок доверенности не может превышать 3 года.'
+    }
+
+    // Раздел 3 — отмеченное приложение обязано иметь файл
+    for (const a of ATTACHMENTS) {
+      if ((data.attachments as string[]).includes(a.code) && !attachmentFiles[a.code])
+        return `Раздел 3: приложите файл для «${a.name}» или снимите отметку.`
+    }
+  }
+
+  if (!basis.value.trim()) return 'Укажите основание оформления.'
+  return null
+}
+
 async function save() {
   error.value = null
-  if (!organization.value) { error.value = 'Выберите организацию'; return }
+  const problem = validate()
+  if (problem) { error.value = problem; return }
   const subject = [rep.last_name, rep.first_name, rep.middle_name].filter(Boolean).join(' ')
   saving.value = true
   let created
@@ -212,37 +267,37 @@ async function save() {
         <div class="detail-card">
           <div class="detail-card-header">Раздел 1. Представитель</div>
           <div class="form-row">
-            <label class="form-field"><span>Фамилия</span><input v-model="rep.last_name" /></label>
-            <label class="form-field"><span>Имя</span><input v-model="rep.first_name" /></label>
+            <label class="form-field"><span>Фамилия *</span><input v-model="rep.last_name" /></label>
+            <label class="form-field"><span>Имя *</span><input v-model="rep.first_name" /></label>
             <label class="form-field"><span>Отчество</span><input v-model="rep.middle_name" /></label>
           </div>
           <div class="form-row">
-            <label class="form-field"><span>Дата рождения</span><input v-model="rep.birth_date" type="date" /></label>
+            <label class="form-field"><span>Дата рождения *</span><input v-model="rep.birth_date" type="date" /></label>
             <label class="form-field">
               <span>Статус</span>
               <select v-model="rep.status">
                 <option v-for="s in REP_STATUS" :key="s.code" :value="s.code">{{ s.name }}</option>
               </select>
             </label>
-            <label class="form-field"><span>Должность</span><input v-model="rep.position" /></label>
+            <label class="form-field"><span>Должность *</span><input v-model="rep.position" /></label>
           </div>
           <div class="form-row">
             <label class="form-field"><span>Телефон</span><input v-model="rep.phone" /></label>
             <label class="form-field"><span>Email</span><input v-model="rep.email" type="email" /></label>
           </div>
           <div class="form-row">
-            <label class="form-field"><span>Паспорт (серия, №)</span><input v-model="rep.passport" /></label>
-            <label class="form-field"><span>Кем выдан</span><input v-model="rep.passport_issued_by" /></label>
-            <label class="form-field"><span>Дата выдачи</span><input v-model="rep.passport_issue_date" type="date" /></label>
+            <label class="form-field"><span>Паспорт (серия, №) *</span><input v-model="rep.passport" /></label>
+            <label class="form-field"><span>Кем выдан *</span><input v-model="rep.passport_issued_by" /></label>
+            <label class="form-field"><span>Дата выдачи *</span><input v-model="rep.passport_issue_date" type="date" /></label>
           </div>
-          <label class="form-field"><span>Адрес регистрации</span><input v-model="rep.reg_address" /></label>
+          <label class="form-field"><span>Адрес регистрации *</span><input v-model="rep.reg_address" /></label>
         </div>
 
         <!-- Раздел 2: полномочия -->
         <div class="detail-card">
           <div class="detail-card-header">Раздел 2. Полномочия и цель</div>
           <label class="form-field" style="margin-bottom:10px">
-            <span>Куда направляется представитель (организация / госорган)</span>
+            <span>Куда направляется представитель (организация / госорган) *</span>
             <input v-model="data.target_org" />
           </label>
           <div class="form-field" style="margin-bottom:10px">
@@ -279,8 +334,14 @@ async function save() {
             </label>
           </div>
           <div v-if="data.term_type === 'period'" class="form-row">
-            <label class="form-field"><span>с</span><input v-model="data.term_from" type="date" /></label>
-            <label class="form-field"><span>по</span><input v-model="data.term_to" type="date" /></label>
+            <label class="form-field"><span>с *</span><input v-model="data.term_from" type="date" /></label>
+            <label class="form-field">
+              <span>по *</span>
+              <input v-model="data.term_to" type="date" :min="data.term_from as string" :max="maxTermTo" />
+            </label>
+          </div>
+          <div v-if="data.term_type === 'period'" class="attach-hint">
+            Срок доверенности — не более 3 лет от даты начала.
           </div>
         </div>
 
@@ -321,7 +382,7 @@ async function save() {
       </template>
 
       <label class="form-field">
-        <span>Основание оформления</span>
+        <span>Основание оформления *</span>
         <input v-model="basis" placeholder="Приказ №… / служебная записка" />
       </label>
 

@@ -181,6 +181,22 @@ class ApiTests(TestCase):
         queue = api(30).get("/api/reg/requests/legal_queue/").json()
         self.assertTrue(any(x["id"] == rid for x in queue))
 
+    def test_term_over_3_years_rejected(self):
+        # доверенность более чем на 3 года — 400
+        r = api(1).post("/api/reg/requests/", {
+            "request_type": "poa", "organization": self.org.id, "subject_name": "Petrov",
+            "data": {"term_type": "period", "term_from": "2026-01-01", "term_to": "2029-06-01"},
+        }, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("3 года", str(r.json()))
+
+    def test_term_within_3_years_ok(self):
+        r = api(1).post("/api/reg/requests/", {
+            "request_type": "poa", "organization": self.org.id, "subject_name": "Petrov",
+            "data": {"term_type": "period", "term_from": "2026-01-01", "term_to": "2029-01-01"},
+        }, format="json")
+        self.assertEqual(r.status_code, 201)
+
     def test_power_templates(self):
         data = api(1).get("/api/reg/requests/power_templates/").json()
         codes = {t["code"] for t in data}
