@@ -201,6 +201,22 @@ class ApiTests(TestCase):
         }, format="json")
         self.assertEqual(r.status_code, 201)
 
+    def test_types_includes_roles(self):
+        data = api(1).get("/api/reg/requests/types/").json()
+        codes = {r["code"] for r in data["roles"]}
+        self.assertIn("legal_dept", codes)
+        self.assertIn("cfo_head", codes)
+
+    def test_sheet_pdf_endpoint(self):
+        rid = self._create()
+        api(1).post(f"/api/reg/requests/{rid}/submit/", {
+            "participants": [{"type": "internal", "b24_user_id": 20, "order": 0}],
+        }, format="json")
+        resp = api(1).get(f"/api/reg/requests/{rid}/sheet_pdf/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp["Content-Type"], "application/pdf")
+        self.assertTrue(b"".join(resp.streaming_content).startswith(b"%PDF"))
+
     def test_power_templates(self):
         data = api(1).get("/api/reg/requests/power_templates/").json()
         codes = {t["code"] for t in data}

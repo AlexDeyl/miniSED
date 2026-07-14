@@ -242,7 +242,25 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
             "types": [{"code": c, "name": n} for c, (n, _p) in constants.REQUEST_TYPES.items()],
             "statuses": [{"code": c, "name": n} for c, n in constants.STATUS_CHOICES],
             "delivery_methods": [{"code": c, "name": n} for c, n in constants.DELIVERY_CHOICES],
+            "roles": [{"code": c, "name": n} for c, n in constants.ROLE_NAMES.items()],
         })
+
+    @action(detail=True, methods=["get"], url_path="sheet_pdf")
+    def sheet_pdf(self, request, pk=None):
+        """Лист согласования заявки (PDF) — с ФИО, должностью и ролями."""
+        import io
+
+        from approvalflow import sheet as flow_sheet
+
+        req = self.get_object()
+        approval = services.get_approval(req)
+        if approval is None:
+            return Response({"detail": "Заявка ещё не отправлена на согласование."}, status=400)
+        pdf = flow_sheet.render_pdf(approval, role_names=constants.ROLE_NAMES)
+        return FileResponse(
+            io.BytesIO(pdf), content_type="application/pdf",
+            filename=f"Лист_согласования_{req.number}.pdf",
+        )
 
     @action(detail=True, methods=["get"], url_path="anketa_pdf")
     def anketa_pdf(self, request, pk=None):

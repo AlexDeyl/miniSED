@@ -73,7 +73,7 @@ def _fmt(dt) -> str:
 
 
 def _name_maps(approval: Approval):
-    """Карты b24_id→ФИО и email→ФИО из профилей (чтобы в листе были имена)."""
+    """Карты b24_id→ФИО, b24_id→должность и email→ФИО из профилей."""
     from core.models import UserProfile
 
     bids, emails = set(), set()
@@ -85,12 +85,16 @@ def _name_maps(approval: Approval):
                 emails.add(p.email.strip().lower())
     if approval.initiator_b24_id:
         bids.add(approval.initiator_b24_id)
-    by_bid = {u.bitrix_id: u.fio for u in UserProfile.objects.filter(bitrix_id__in=bids) if u.fio}
+    profiles = list(
+        UserProfile.objects.filter(bitrix_id__in=bids).select_related("position")
+    )
+    by_bid = {u.bitrix_id: u.fio for u in profiles if u.fio}
+    pos_by_bid = {u.bitrix_id: (u.position.name if u.position else "") for u in profiles}
     by_email = {
         u.email.strip().lower(): u.fio
         for u in UserProfile.objects.filter(email__in=emails) if u.fio
     }
-    return by_bid, by_email
+    return by_bid, by_email, pos_by_bid
 
 
 def _who(p: ApprovalParticipant, by_bid: dict, by_email: dict) -> str:
@@ -106,7 +110,14 @@ def _who(p: ApprovalParticipant, by_bid: dict, by_email: dict) -> str:
     return by_email.get((p.email or "").strip().lower()) or p.email or p.name or "участник"
 
 
-def render_pdf(approval: Approval) -> bytes:
+def _pos(p: ApprovalParticipant, pos_by_bid: dict) -> str:
+    if p.type == ApprovalParticipant.TYPE_INTERNAL and p.b24_user_id:
+        return pos_by_bid.get(p.b24_user_id, "")
+    return ""
+
+
+def render_pdf(approval: Approval, *, role_names: dict | None = None) -> bytes:
+    role_names = role_names or {}
     font = _ensure_font()
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -121,7 +132,7 @@ def render_pdf(approval: Approval) -> bytes:
     h1 = ParagraphStyle("h1", parent=base, fontSize=15, spaceAfter=6)
     label = ParagraphStyle("label", parent=base, textColor=colors.HexColor("#5a6675"))
 
-    by_bid, by_email = _name_maps(approval)
+    by_bid, by_email, pos_by_bid = _name_maps(approval)
 
     story = []
     story.append(Paragraph("Лист согласования", h1))
@@ -159,16 +170,17 @@ def render_pdf(approval: Approval) -> bytes:
             + (f" · завершён {_fmt(rnd.completed_at)}" if rnd.completed_at else ""),
             ParagraphStyle("rh", parent=base, fontSize=11, spaceBefore=6, spaceAfter=4),
         ))
-        data = [["Согласующий", "Роль", "Решение", "Дата", "Комментарий"]]
+        data = [["Согласующий", "Должность", "Роль", "Решение", "Дата", "Комментарий"]]
         for p in rnd.participants.all():
             data.append([
                 Paragraph(_who(p, by_bid, by_email), base),
-                Paragraph(p.role or "—", base),
+                Paragraph(_pos(p, pos_by_bid) or "—", base),
+                Paragraph(role_names.get(p.role, p.role) or "—", base),
                 Paragraph(_DECISION_RU.get(p.decision, p.decision), base),
                 Paragraph(_fmt(p.decided_at), base),
                 Paragraph(p.decision_comment or "—", base),
             ])
-        table = Table(data, colWidths=[40 * mm, 30 * mm, 26 * mm, 28 * mm, None])
+        table = Table(data, colWidths=[34 * mm, 28 * mm, 28 * mm, 20 * mm, 24 * mm, None])
         table.setStyle(TableStyle([
             ("FONTNAME", (0, 0), (-1, -1), font),
             ("FONTSIZE", (0, 0), (-1, -1), 8.5),

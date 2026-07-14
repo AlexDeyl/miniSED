@@ -20,6 +20,14 @@ const DELIVERY = [
 ]
 const LEGAL_STATUSES = ['to_legal', 'legal_work', 'signing']
 
+// Русские метки решений/итогов круга (в API — коды движка).
+const DECISION_RU: Record<string, string> = {
+  waiting: 'Ожидает', approved: 'Согласовано', rejected: 'Отклонено',
+}
+const RESULT_RU: Record<string, string> = {
+  pending: 'В процессе', approved: 'Согласован', rejected: 'Отклонён', returned: 'Возвращён',
+}
+
 const req = ref<RegulatoryRequestDetail | null>(null)
 const loading = ref(true)
 const error = ref<string | null>(null)
@@ -29,6 +37,11 @@ const busy = ref(false)
 const route = ref<(RouteSlot & { manual: string })[]>([])
 // справочник сотрудников для выбора согласующих по ФИО
 const users = ref<UserOption[]>([])
+// названия процессных ролей (код → человекочитаемое)
+const roleNames = ref<Record<string, string>>({})
+function roleName(code: string | undefined): string {
+  return (code && roleNames.value[code]) || code || '—'
+}
 // исполнение
 const deliveryMethod = ref('personally')
 const deliveryComment = ref('')
@@ -41,6 +54,12 @@ async function load() {
     req.value = await requests.get(props.id)
     if (!users.value.length) {
       try { users.value = await requests.users() } catch { /* не критично */ }
+    }
+    if (!Object.keys(roleNames.value).length) {
+      try {
+        const t = await requests.types()
+        roleNames.value = Object.fromEntries(t.roles?.map((r) => [r.code, r.name]) || [])
+      } catch { /* не критично */ }
     }
     if (canSubmit.value) await loadRoute()
   } catch (e) {
@@ -148,6 +167,12 @@ function downloadAnketa() {
   if (req.value) api.download(requests.anketaPdfUrl(req.value.id), `Заявление_${req.value.number}.pdf`)
     .catch((e) => (error.value = e.message))
 }
+function downloadSheet() {
+  if (req.value) api.download(requests.sheetPdfUrl(req.value.id), `Лист_согласования_${req.value.number}.pdf`)
+    .catch((e) => (error.value = e.message))
+}
+// лист согласования доступен, когда есть хотя бы один круг
+const hasApproval = computed(() => (req.value?.approval?.rounds?.length || 0) > 0)
 const isAnketaType = computed(() => req.value && (req.value.request_type === 'poa' || req.value.request_type === 'mchd'))
 
 async function uploadFile(e: Event) {
@@ -235,23 +260,29 @@ onMounted(load)
         </div>
       </div>
 
+      <!-- Лист согласования (PDF) -->
+      <div v-if="hasApproval" class="detail-card">
+        <div class="detail-card-header">Лист согласования</div>
+        <button class="btn btn--soft" :disabled="busy" @click="downloadSheet">Скачать лист согласования (PDF)</button>
+      </div>
+
       <!-- Круги согласования -->
       <div v-for="rnd in req.approval?.rounds || []" :key="rnd.id" class="detail-card">
         <div class="detail-card-header">
           Круг {{ rnd.round_number }}
-          <span class="participant-pill" :class="rnd.result">{{ rnd.result }}</span>
+          <span class="participant-pill" :class="rnd.result">{{ RESULT_RU[rnd.result] || rnd.result }}</span>
         </div>
         <table class="round-table">
           <tbody>
             <tr v-for="p in rnd.participants" :key="p.id">
-              <td>{{ p.role || '—' }}</td>
+              <td>{{ roleName(p.role) }}</td>
               <td>
                 <template v-if="isGroupLegal(p)">Юридический отдел</template>
                 <template v-else-if="p.type === 'external'">{{ p.email }}</template>
                 <template v-else>{{ nameByBid(p.b24_user_id) || `USER #${p.b24_user_id}` }}</template>
               </td>
               <td>
-                <span class="participant-pill" :class="p.decision">{{ p.decision }}</span>
+                <span class="participant-pill" :class="p.decision">{{ DECISION_RU[p.decision] || p.decision }}</span>
                 <em v-if="p.decision_comment"> — {{ p.decision_comment }}</em>
               </td>
               <td class="row-actions">

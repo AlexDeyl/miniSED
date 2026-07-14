@@ -58,11 +58,13 @@ export const requests = {
       types: { code: string; name: string }[]
       statuses: { code: string; name: string }[]
       delivery_methods: { code: string; name: string }[]
+      roles?: { code: string; name: string }[]
     }>(`${BASE}/types/`),
 
   powerTemplates: () =>
     api.get<{ code: string; name: string; powers: string }[]>(`${BASE}/power_templates/`),
   anketaPdfUrl: (id: number | string) => `/api${BASE}/${id}/anketa_pdf/`,
+  sheetPdfUrl: (id: number | string) => `/api${BASE}/${id}/sheet_pdf/`,
 
   organizations: () => api.get<Organization[]>('/core/organizations/'),
   facilities: (org?: number) => api.get<Facility[]>(`/core/facilities/${org ? `?organization=${org}` : ''}`),
