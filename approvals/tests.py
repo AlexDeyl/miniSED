@@ -465,6 +465,32 @@ class SheetAndVersionedDocsTests(TestCase):
         self.assertEqual(dv["current_version_number"], 2)
         self.assertEqual(len(dv["versions"]), 2)
 
+    def test_sheet_groups_rounds_and_versions(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from documents import services as docsvc
+        from approvals.sheet import render_pdf
+
+        a = Factory.agreement(author=AUTHOR)
+        # круг 1 (отклонён) и круг 2 (текущий)
+        Participant.objects.create(
+            agreement=a, type=Participant.TYPE_INTERNAL, b24_user_id=APPROVER_A,
+            round_number=1, order_index=0, status=Participant.STATUS_REJECTED, comment="правьте",
+        )
+        a.current_round = 2
+        a.save(update_fields=["current_round"])
+        Participant.objects.create(
+            agreement=a, type=Participant.TYPE_INTERNAL, b24_user_id=APPROVER_B,
+            round_number=2, order_index=0, status=Participant.STATUS_APPROVED,
+        )
+        # версионируемый документ с историей
+        doc = docsvc.create_document(title="Договор", linked_object=a)
+        docsvc.add_version(doc, SimpleUploadedFile("v1.pdf", b"one"), change_comment="первая версия")
+        docsvc.add_version(doc, SimpleUploadedFile("v2.pdf", b"two"), change_comment="учтены правки")
+
+        pdf = render_pdf(a)
+        self.assertTrue(pdf.startswith(b"%PDF"))
+        self.assertGreater(len(pdf), 2500)
+
 
 class SimpleCreateEndpointTests(TestCase):
     def test_create_with_participants(self):
