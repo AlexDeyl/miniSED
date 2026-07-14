@@ -30,7 +30,12 @@ interface RequestOptions {
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const auth = useAuthStore()
-  const headers: Record<string, string> = {}
+  const headers: Record<string, string> = {
+    // Пропуск заставки ngrok-free (ERR_NGROK_6024): без него ngrok отдаёт
+    // HTML-заглушку вместо JSON на fetch-запросы → JSON.parse падает.
+    // На реальном домене заголовок просто игнорируется.
+    'ngrok-skip-browser-warning': 'true',
+  }
 
   // Токен MiniSED (вход по email+пароль)
   if (auth.token) {
@@ -57,12 +62,21 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
   const raw = await resp.text()
   let data: unknown = null
+  let parseFailed = false
   if (raw) {
     try {
       data = JSON.parse(raw)
     } catch {
       data = raw
+      parseFailed = true
     }
+  }
+
+  // Успешный ответ, но тело — не JSON (например HTML-заглушка прокси/ngrok).
+  // Раньше строка возвращалась как есть и v-for шёл по её символам → «пустые
+  // карточки». Лучше явная ошибка, чем молчаливо битые данные.
+  if (resp.ok && parseFailed) {
+    throw new ApiError('Некорректный ответ сервера (ожидался JSON).', resp.status)
   }
 
   if (!resp.ok) {
@@ -80,7 +94,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 // path — полный путь от корня (например «/api/reg/requests/1/anketa_pdf/»).
 async function download(path: string, filename?: string): Promise<void> {
   const auth = useAuthStore()
-  const headers: Record<string, string> = {}
+  const headers: Record<string, string> = { 'ngrok-skip-browser-warning': 'true' }
   if (auth.token) headers['Authorization'] = `Token ${auth.token}`
   if (auth.b24UserId) headers['X-B24-User'] = String(auth.b24UserId)
 
