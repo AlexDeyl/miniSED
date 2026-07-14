@@ -75,7 +75,9 @@ class RoleAdmin(admin.ModelAdmin):
 
 
 class UserProfileAdminForm(forms.ModelForm):
-    """Позволяет админу завести вход (email+пароль) прямо в карточке профиля."""
+    """Позволяет админу завести сотрудника целиком: ФИО, вход (email+пароль),
+    Битрикс-ID, роли. Технический username (auth.User) создаётся сам из email —
+    вводить его вручную не нужно (в отличие от стандартной формы «Пользователи»)."""
 
     password = forms.CharField(
         label="Пароль для входа",
@@ -86,7 +88,8 @@ class UserProfileAdminForm(forms.ModelForm):
 
     class Meta:
         model = UserProfile
-        fields = "__all__"
+        # auth_user скрываем — он создаётся/связывается автоматически.
+        exclude = ("auth_user",)
 
     def save(self, commit=True):
         profile = super().save(commit=False)
@@ -122,6 +125,19 @@ class UserProfileAdmin(admin.ModelAdmin):
     list_filter = ("is_active", "roles", "organizations")
     search_fields = ("fio", "email", "bitrix_id")
     filter_horizontal = ("roles", "organizations", "facilities")
+    fieldsets = (
+        ("Сотрудник", {
+            "fields": ("fio", "position", "is_active"),
+            "description": "ФИО вводится свободно (с пробелами) — это не логин.",
+        }),
+        ("Вход и связка", {
+            "fields": ("email", "password", "bitrix_id"),
+            "description": "Email = логин. Битрикс-ID связывает тот же аккаунт со входом «через Битрикс24».",
+        }),
+        ("Роли и доступ", {
+            "fields": ("roles", "organizations", "facilities"),
+        }),
+    )
 
     @admin.display(boolean=True, description="Вход")
     def has_login(self, obj):
