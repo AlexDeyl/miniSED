@@ -88,8 +88,12 @@ def app_view(request):
     # токены прямо в POST (AUTH_ID/REFRESH_ID/member_id/DOMAIN). Сохраняем их,
     # чтобы сервер (Bitrix Connector) мог сам вызывать REST портала.
     if request.method == "POST" and request.POST.get("AUTH_ID"):
-        domain = request.POST.get("DOMAIN")
-        member_id = request.POST.get("member_id")
+        # Битрикс24 при открытии/установке кладёт AUTH_ID/REFRESH_ID/member_id
+        # в тело POST, а DOMAIN — в query-строку (/app/?DOMAIN=...). Поэтому
+        # читаем и из тела, и из query (иначе domain=None → токен не сохраняется
+        # и вызов user.current уходит на https://none/...).
+        domain = request.POST.get("DOMAIN") or request.GET.get("DOMAIN")
+        member_id = request.POST.get("member_id") or request.GET.get("member_id")
         access_token = request.POST.get("AUTH_ID")
         _store_bitrix_portal_token(
             domain,
