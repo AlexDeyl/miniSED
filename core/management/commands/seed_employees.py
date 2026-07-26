@@ -29,7 +29,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from core.models import Organization, Position, Role, UserProfile
+from core.models import Facility, Organization, Position, Role, UserProfile
 
 # Путь к файлу с данными сотрудников (негитируемый, содержит ПДн).
 DEFAULT_DATA_FILE = Path(settings.BASE_DIR) / "seed_data" / "employees.json"
@@ -39,7 +39,8 @@ def _load_employees():
     """Читает список сотрудников из JSON. Возвращает (records | None, path).
 
     None означает «файл не найден» — вызывающий код делает no-op.
-    Каждая запись JSON: {bitrix_id, fio, email, position, organization, roles}.
+    Каждая запись JSON: {bitrix_id, fio, email, position, organization, roles,
+    access_all?}. access_all=true — доступ ко всем организациям и объектам.
     """
     path = Path(os.environ.get("SEED_EMPLOYEES_FILE", str(DEFAULT_DATA_FILE)))
     if not path.exists():
@@ -51,6 +52,7 @@ def _load_employees():
         (
             r["bitrix_id"], r["fio"], r["email"],
             r["position"], r["organization"], r["roles"],
+            r.get("access_all", False),
         )
         for r in raw
     ]
@@ -87,7 +89,7 @@ class Command(BaseCommand):
             # Кэш ролей по коду
             roles = {r.code: r for r in Role.objects.all()}
 
-            for bitrix_id, fio, email, position_name, org_name, role_codes in employees:
+            for bitrix_id, fio, email, position_name, org_name, role_codes, access_all in employees:
                 org, _ = Organization.objects.get_or_create(
                     short_name=org_name, defaults={"is_active": True}
                 )
@@ -107,6 +109,13 @@ class Command(BaseCommand):
 
                 # Аддитивно: роли и организации не затираем
                 user.organizations.add(org)
+                # access_all — доступ ко всем юрлицам и объектам (юротдел, отдел
+                # продаж): такие сотрудники работают по всем организациям.
+                # Требует, чтобы объекты уже были засеяны (seed_org_structure
+                # выполняется раньше seed_employees в scripts/deploy.sh).
+                if access_all:
+                    user.organizations.add(*Organization.objects.all())
+                    user.facilities.add(*Facility.objects.all())
                 missing = [c for c in role_codes if c not in roles]
                 if missing:
                     self.stderr.write(

@@ -24,6 +24,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from core.models import CFO, Facility, Organization
+from requests_reg.models import RoleAssignment
 
 DEFAULT_DATA_FILE = Path(settings.BASE_DIR) / "seed_data" / "org_structure.json"
 
@@ -56,7 +57,7 @@ class Command(BaseCommand):
             data = json.load(fh)
 
         dry_run = options["dry_run"]
-        orgs_n = fac_n = cfo_n = 0
+        orgs_n = fac_n = cfo_n = ra_n = 0
 
         with transaction.atomic():
             # --- Организации ---
@@ -122,6 +123,49 @@ class Command(BaseCommand):
                     + (f", рук.: {c['head']}" if c.get("head") else "")
                 )
 
+            # --- Матрица исполнителей маршрутных ролей (RoleAssignment) ---
+            # Контекст задаётся полями organization/cfo/facility (по названию);
+            # без них — глобальное назначение. resolve_role в requests_reg берёт
+            # самое специфичное (ЦФО → объект → организация → глобально).
+            for ra in data.get("role_assignments", []):
+                cfo = org = fac = None
+                if ra.get("cfo"):
+                    cfo = CFO.objects.filter(name=ra["cfo"]).first()
+                    if cfo is None:
+                        self.stderr.write(
+                            f"  ! ЦФО не найден для роли {ra['role_code']!r}: "
+                            f"{ra['cfo']!r} — пропуск"
+                        )
+                        continue
+                if ra.get("organization"):
+                    org = Organization.objects.filter(
+                        short_name=ra["organization"]
+                    ).first()
+                if ra.get("facility"):
+                    fac = Facility.objects.filter(name=ra["facility"]).first()
+
+                _, created = RoleAssignment.objects.update_or_create(
+                    role_code=ra["role_code"],
+                    organization=org,
+                    cfo=cfo,
+                    facility=fac,
+                    defaults={
+                        "user_b24_id": ra["user_b24_id"],
+                        "user_name": ra.get("user_name", ""),
+                        "is_active": True,
+                    },
+                )
+                ra_n += 1
+                ctx = (
+                    f"ЦФО {cfo.name}" if cfo else
+                    f"объект {fac.name}" if fac else
+                    f"орг {org.short_name}" if org else "глобально"
+                )
+                self.stdout.write(
+                    f"  [роль {'СОЗДАНА' if created else 'обновлена'}] "
+                    f"{ra['role_code']} @ {ctx} → {ra.get('user_name', ra['user_b24_id'])}"
+                )
+
             if dry_run:
                 transaction.set_rollback(True)
                 self.stdout.write(
@@ -130,6 +174,7 @@ class Command(BaseCommand):
 
         self.stdout.write(
             self.style.SUCCESS(
-                f"\nГотово. Организаций: {orgs_n}, объектов: {fac_n}, ЦФО: {cfo_n}."
+                f"\nГотово. Организаций: {orgs_n}, объектов: {fac_n}, "
+                f"ЦФО: {cfo_n}, назначений ролей: {ra_n}."
             )
         )
