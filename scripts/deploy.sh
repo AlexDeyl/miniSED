@@ -115,6 +115,9 @@ python manage.py migrate --noinput
 echo "[deploy]      python manage.py seed_employees (идемпотентно) ..."
 python manage.py seed_employees
 
+echo "[deploy]      python manage.py seed_org_structure (идемпотентно) ..."
+python manage.py seed_org_structure
+
 echo "[deploy]      python manage.py collectstatic --noinput ..."
 python manage.py collectstatic --noinput --clear
 
