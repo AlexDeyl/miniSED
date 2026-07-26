@@ -112,6 +112,9 @@ echo ""
 echo "[deploy] 6/8  python manage.py migrate --noinput ..."
 python manage.py migrate --noinput
 
+echo "[deploy]      python manage.py seed_employees (идемпотентно) ..."
+python manage.py seed_employees
+
 echo "[deploy]      python manage.py collectstatic --noinput ..."
 python manage.py collectstatic --noinput --clear
 

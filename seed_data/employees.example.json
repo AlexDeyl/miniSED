@@ -1,0 +1,18 @@
+[
+  {
+    "bitrix_id": 1,
+    "fio": "Иванов Иван Иванович",
+    "email": "ivanov@example.com",
+    "position": "Менеджер по продажам",
+    "organization": "ООО \"Пример\"",
+    "roles": ["initiator"]
+  },
+  {
+    "bitrix_id": 2,
+    "fio": "Петров Пётр Петрович",
+    "email": "petrov@example.com",
+    "position": "Юрисконсульт",
+    "organization": "ООО \"Пример\"",
+    "roles": ["approver", "lawyer"]
+  }
+]
