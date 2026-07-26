@@ -11,7 +11,7 @@ const BASE = '/reg/requests'
 
 export interface Organization { id: number; short_name: string }
 export interface Facility { id: number; name: string; organization: number }
-export interface Cfo { id: number; name: string; code: string; organization: number }
+export interface Cfo { id: number; name: string; code: string; organization: number | null }
 export interface UserOption { id: number; fio: string; bitrix_id: number; position_name?: string }
 
 export const requests = {

@@ -96,20 +96,27 @@ class Command(BaseCommand):
                 )
 
             # --- ЦФО ---
+            # organization отсутствует/null → надорганизационный (общий) ЦФО,
+            # ключ идемпотентности — только name. Если организация задана —
+            # объектный/орг-специфичный ЦФО, ключ — (name, organization).
             for c in data.get("cfos", []):
-                org = Organization.objects.filter(
-                    short_name=c["organization"]
-                ).first()
-                if org is None:
-                    self.stderr.write(
-                        f"  ! организация не найдена для ЦФО "
-                        f"{c['name']!r}: {c['organization']!r} — пропуск"
-                    )
-                    continue
+                org_name = c.get("organization")
+                org = None
+                if org_name:
+                    org = Organization.objects.filter(short_name=org_name).first()
+                    if org is None:
+                        self.stderr.write(
+                            f"  ! организация не найдена для ЦФО "
+                            f"{c['name']!r}: {org_name!r} — пропуск"
+                        )
+                        continue
+                lookup = {"name": c["name"]}
+                if org is not None:
+                    lookup["organization"] = org
                 _, created = CFO.objects.update_or_create(
-                    name=c["name"],
-                    organization=org,
+                    **lookup,
                     defaults={
+                        "organization": org,
                         "code": c.get("code", ""),
                         "category": c.get("category", ""),
                         "head": c.get("head", ""),
@@ -119,7 +126,7 @@ class Command(BaseCommand):
                 cfo_n += 1
                 self.stdout.write(
                     f"  [ЦФО {'СОЗДАН' if created else 'обновлён'}] "
-                    f"{c['name']} → {org.short_name}"
+                    f"{c['name']} → {org.short_name if org else 'общий (все юрлица)'}"
                     + (f", рук.: {c['head']}" if c.get("head") else "")
                 )
 

@@ -114,7 +114,11 @@ function isoMinusYears(years: number): string {
 async function loadContext() {
   const org = organization.value ?? undefined
   facilities.value = await requests.facilities(org)
-  cfos.value = (await requests.cfos()).filter((c) => !org || c.organization === org)
+  // Показываем ЦФО без организации (надорганизационные, напр. Отдел продаж —
+  // доступны при любом юрлице) плюс ЦФО, привязанные к выбранной организации.
+  cfos.value = (await requests.cfos()).filter(
+    (c) => !org || c.organization == null || c.organization === org,
+  )
 }
 
 onMounted(async () => {

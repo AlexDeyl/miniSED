@@ -140,10 +140,15 @@ class CFO(models.Model):
     category = models.CharField(
         "Категория", max_length=32, choices=CATEGORY_CHOICES, blank=True
     )
+    # organization = NULL → надорганизационный (общий) ЦФО: доступен при любом
+    # юрлице (напр. Отдел продаж, Юридический). Если организация задана — ЦФО
+    # привязан к конкретному юрлицу/объекту (напр. «СГХ Дом Бутик Отель»).
     organization = models.ForeignKey(
         Organization,
         on_delete=models.PROTECT,
         related_name="cfos",
+        null=True,
+        blank=True,
         verbose_name="Организация",
     )
     head = models.CharField("Руководитель ЦФО", max_length=255, blank=True)
