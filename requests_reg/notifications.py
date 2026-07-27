@@ -16,9 +16,25 @@ from __future__ import annotations
 
 from django.conf import settings
 from django.core.mail import send_mail
+from django.urls import reverse
+from django.utils.crypto import get_random_string
 
 from approvalflow.models import ApprovalParticipant
 from core.models import UserProfile
+
+
+def _approve_url(participant) -> str:
+    """Абсолютная ссылка на страницу согласования по токену участника.
+
+    URL строится вне запроса (on_commit), поэтому база — settings.PUBLIC_BASE_URL.
+    """
+    base = (getattr(settings, "PUBLIC_BASE_URL", "") or "").rstrip("/")
+    if not base:
+        return ""
+    if not participant.external_token:
+        participant.external_token = get_random_string(24)
+        participant.save(update_fields=["external_token"])
+    return base + reverse("reg_external_approve", args=[participant.external_token])
 
 
 def lawyer_b24_ids() -> list[int]:
@@ -72,6 +88,25 @@ def _recipients(b24_ids):
     return b24_ids, list(emails)
 
 
+def _b24_by_email(email: str) -> int | None:
+    """b24-id по email через Битрикс (для внешнего участника, если он есть в Б24)."""
+    email = (email or "").strip()
+    if not email:
+        return None
+    try:
+        from bitrix.client import BitrixClient, get_active_portal
+
+        portal = get_active_portal()
+        if not portal:
+            return None
+        res = BitrixClient(portal).call("user.get", {"EMAIL": email})
+        if isinstance(res, list) and res:
+            return int(res[0].get("ID"))
+    except Exception:
+        pass
+    return None
+
+
 def _bitrix_notify(b24_ids, message):
     try:
         from bitrix.client import BitrixClient, get_active_portal, notify_user
@@ -122,16 +157,25 @@ def notify_current_approver(request):
         return
     label = _label(request)
     if services.is_group_legal(p):
+        # Групповой юрэтап: согласует любой юрист в приложении — без токен-ссылки.
         b24, emails = _recipients(lawyer_b24_ids())
         _dispatch(b24, emails, "Требуется согласование юротдела",
                   f"Требуется согласование юридического отдела: {label}")
-    elif p.type == ApprovalParticipant.TYPE_INTERNAL and p.b24_user_id:
+        return
+
+    # Конкретный согласующий (внутренний или внешний) — даём ссылку-токен,
+    # по которой можно согласовать прямо из письма/уведомления.
+    url = _approve_url(p)
+    msg = f"Требуется ваше согласование: {label}"
+    if url:
+        msg += f"\nПерейти к согласованию: {url}"
+    if p.type == ApprovalParticipant.TYPE_INTERNAL and p.b24_user_id:
         b24, emails = _recipients([p.b24_user_id])
-        _dispatch(b24, emails, "Требуется ваше согласование",
-                  f"Требуется ваше согласование: {label}")
+        _dispatch(b24, emails, "Требуется ваше согласование", msg)
     elif p.email:
-        _dispatch([], [p.email], "Требуется ваше согласование",
-                  f"Требуется ваше согласование: {label}")
+        b24_id = _b24_by_email(p.email)
+        _dispatch([b24_id] if b24_id else [], [p.email],
+                  "Требуется ваше согласование", msg)
 
 
 def notify_legal_queue(request):

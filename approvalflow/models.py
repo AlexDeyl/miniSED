@@ -157,7 +157,8 @@ class ApprovalParticipant(models.Model):
         verbose_name_plural = "Согласующие"
 
     def save(self, *args, **kwargs):
-        if self.type == self.TYPE_EXTERNAL and not self.external_token:
+        # Токен генерируем всем участникам: по ссылке согласуют и внутренние.
+        if not self.external_token:
             self.external_token = get_random_string(24)
         super().save(*args, **kwargs)
 

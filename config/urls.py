@@ -5,6 +5,7 @@ from django.conf.urls.static import static
 from django.views.static import serve as static_serve
 from rest_framework.routers import DefaultRouter
 from core import auth_views
+from requests_reg.public_views import reg_external_approve
 from approvals.views import (
     AgreementViewSet,
     ApprovalTemplateViewSet,
@@ -35,6 +36,10 @@ urlpatterns = [
     path(
         "external/approve/<str:token>/", external_approve_view,
         name="external_approve"
+    ),
+    path(
+        "external/reg/approve/<str:token>/", reg_external_approve,
+        name="reg_external_approve"
     ),
     path(
         "api/agreements/create_simple/",

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Решение принято — {{ req.number }}</title>
+  <style>
+    body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; background:#f4f6f8; margin:0; color:#1f2d3d; }
+    .wrap { max-width:560px; margin:48px auto; padding:0 16px; }
+    .card { background:#fff; border-radius:10px; box-shadow:0 1px 4px rgba(0,0,0,.08); padding:28px; text-align:center; }
+    .ico { font-size:44px; }
+    h1 { font-size:20px; margin:12px 0 6px; }
+    .sub { color:#6b7a8d; font-size:14px; }
+    .status { margin-top:16px; font-size:14px; color:#1f2d3d; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      {% if participant.decision == "approved" %}
+        <div class="ico">✅</div><h1>Заявка согласована вами</h1>
+      {% elif participant.decision == "rejected" %}
+        <div class="ico">⛔</div><h1>Заявка отклонена</h1>
+      {% else %}
+        <div class="ico">ℹ️</div><h1>Решение зафиксировано</h1>
+      {% endif %}
+      <div class="sub">{{ req.number }} · {{ req.get_request_type_display }}{% if req.subject_name %} — {{ req.subject_name }}{% endif %}</div>
+      <div class="status">Текущий статус заявки: <b>{{ req.get_status_display }}</b></div>
+    </div>
+  </div>
+</body>
+</html>

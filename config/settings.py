@@ -166,6 +166,13 @@ AUTH_PASSWORD_VALIDATORS = [
 # ---------------------------------------------------------------------------
 CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS")
 
+# Базовый публичный URL приложения — для абсолютных ссылок в письмах/
+# уведомлениях, которые формируются ВНЕ HTTP-запроса (напр. в transaction.
+# on_commit). Если не задан явно — берём первый из CSRF_TRUSTED_ORIGINS.
+PUBLIC_BASE_URL = (env("PUBLIC_BASE_URL", "") or "").rstrip("/")
+if not PUBLIC_BASE_URL and CSRF_TRUSTED_ORIGINS:
+    PUBLIC_BASE_URL = CSRF_TRUSTED_ORIGINS[0].rstrip("/")
+
 # Домены, которым разрешено встраивать MiniSED в iframe.
 # По умолчанию — сам сайт и порталы Битрикс24.
 FRAME_ANCESTORS = env_list(
