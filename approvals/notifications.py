@@ -57,8 +57,31 @@ def _resolve_email(participant) -> str:
     return ""
 
 
+def _bitrix_b24_by_email(email: str) -> int | None:
+    """Ищет сотрудника Битрикса по email (user.get). Найденное кэшируем в B24UserEmail."""
+    try:
+        from bitrix.client import BitrixClient, get_active_portal
+
+        portal = get_active_portal()
+        if not portal:
+            return None
+        res = BitrixClient(portal).call("user.get", {"EMAIL": email})
+        if isinstance(res, list) and res:
+            b24 = int(res[0].get("ID"))
+            try:
+                B24UserEmail.objects.get_or_create(
+                    b24_user_id=b24, email=email.strip().lower()
+                )
+            except Exception:
+                pass
+            return b24
+    except Exception:
+        pass
+    return None
+
+
 def _resolve_b24_id(participant) -> int | None:
-    """b24-id участника: явный (внутренний) → по email через B24UserEmail (внешний)."""
+    """b24-id участника: явный (внутренний) → B24UserEmail → Битрикс по email (внешний)."""
     if participant.b24_user_id:
         return participant.b24_user_id
     if participant.email:
@@ -67,6 +90,7 @@ def _resolve_b24_id(participant) -> int | None:
         ).first()
         if link:
             return link.b24_user_id
+        return _bitrix_b24_by_email(participant.email.strip())
     return None
 
 
