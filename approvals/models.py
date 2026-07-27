@@ -185,7 +185,9 @@ class Participant(models.Model):
         verbose_name_plural = "Участники"
 
     def save(self, *args, **kwargs):
-        if self.type == self.TYPE_EXTERNAL and not self.external_token:
+        # Токен генерируем всем участникам (не только внешним): по нему теперь
+        # согласуют и внутренние — им уходит такое же письмо со ссылкой.
+        if not self.external_token:
             self.external_token = get_random_string(24)
         super().save(*args, **kwargs)
 

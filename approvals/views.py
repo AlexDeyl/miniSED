@@ -410,62 +410,17 @@ class AgreementViewSet(viewsets.ModelViewSet):
     def _notify_participant(self, agreement: Agreement,
                             participant: Participant):
         """
-        Уведомления:
-
-        - ВНЕШНИЕ участники (type=external):
-            отправляем письмо с ссылкой на страницу согласования.
-        - ВНУТРЕННИЕ (type=internal):
-            ничего не шлём — уведомление отправляет фронт через BX24.im.notify.
+        Уведомление участнику — и внутреннему, и внешнему (единая логика,
+        см. approvals.notifications): письмо со ссылкой-токеном на страницу
+        согласования + Битрикс-колокольчик, если участник есть в Битриксе.
         """
-        if participant.type == Participant.TYPE_EXTERNAL and participant.email:
-            try:
-                approve_url = self.request.build_absolute_uri(
-                    reverse("external_approve", args=[participant.external_token])
-                )
-            except Exception as e:
-                print("ERROR build approve_url in _notify_participant:", e)
-                return
+        from . import notifications
 
-            subject = f"Согласование #{agreement.id}: {agreement.title}"
-            body_lines = [
-                "Вам отправлен документ на согласование.",
-                "",
-                f"Название: {agreement.title}",
-            ]
-            if agreement.description:
-                body_lines.append(f"Описание: {agreement.description}")
-            if agreement.amount is not None:
-                body_lines.append(f"Сумма: {agreement.amount}")
-            if agreement.crm_link:
-                body_lines.append(f"CRM: {agreement.crm_link}")
-
-            body_lines.extend(
-                [
-                    "",
-                    f"Перейти к согласованию: {approve_url}",
-                ]
-            )
-            body = "\n".join(body_lines)
-
-            try:
-                send_mail(
-                    subject,
-                    body,
-                    settings.DEFAULT_FROM_EMAIL,
-                    [participant.email],
-                    fail_silently=False,
-                )
-            except Exception as e:
-                print(
-                    "EMAIL ERROR in _notify_participant for participant",
-                    participant.id,
-                    e,
-                )
-        elif participant.type == Participant.TYPE_INTERNAL and participant.b24_user_id:
-            print(
-                f"Internal participant {participant.b24_user_id}: "
-                f"уведомление отправит фронт через BX24.im.notify"
-            )
+        try:
+            base_url = self.request.build_absolute_uri("/")
+            notifications.notify_participant(agreement, participant, base_url)
+        except Exception as e:
+            print("NOTIFY ERROR for participant", participant.id, e)
 
     @action(detail=False, methods=["get"])
     def my(self, request):
@@ -1123,9 +1078,10 @@ def register_b24_identity(request):
 @csrf_exempt
 def external_approve_view(request, token):
     try:
+        # По токену согласуют и внешние, и внутренние участники (внутренним
+        # теперь тоже уходит письмо со ссылкой), поэтому по типу не фильтруем.
         participant = Participant.objects.select_related("agreement").get(
             external_token=token,
-            type=Participant.TYPE_EXTERNAL,
         )
     except Participant.DoesNotExist:
         return render(
@@ -1229,6 +1185,31 @@ def external_approve_view(request, token):
         else:
             agreement.status = Agreement.STATUS_IN_PROGRESS
         agreement.save(update_fields=["status"])
+
+        # Последовательный флоу: после решения уведомляем следующего по очереди
+        # (раньше это делал только API-endpoint; теперь и согласование по ссылке).
+        if (
+            participant.status == Participant.STATUS_APPROVED
+            and agreement.flow_type == Agreement.FLOW_SEQUENTIAL
+            and agreement.status == Agreement.STATUS_IN_PROGRESS
+        ):
+            nxt = (
+                agreement.participants.filter(
+                    round_number=agreement.current_round,
+                    status=Participant.STATUS_WAITING,
+                )
+                .order_by("order_index")
+                .first()
+            )
+            if nxt:
+                try:
+                    from . import notifications
+
+                    notifications.notify_participant(
+                        agreement, nxt, request.build_absolute_uri("/")
+                    )
+                except Exception as e:
+                    print("NOTIFY next ERROR:", e)
 
         return render(
             request,
