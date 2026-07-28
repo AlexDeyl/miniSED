@@ -50,13 +50,14 @@ def _one(choices, code: str) -> str:
 
 
 def _initiator_name(request) -> str:
-    """ФИО инициатора из профиля (заводится админом); иначе — ID Б24."""
+    """Должность + ФИО инициатора из профиля (заводится админом); иначе — ID Б24."""
     from core.models import UserProfile
 
     if request.initiator_b24_id:
         p = UserProfile.objects.filter(bitrix_id=request.initiator_b24_id).first()
         if p and p.fio:
-            return p.fio
+            position = p.position.name if p.position_id else ""
+            return f"{position} {p.fio}".strip()
     return f"ID Б24 {request.initiator_b24_id or '—'}"
 
 
