@@ -71,4 +71,10 @@ export const requests = {
   facilities: (org?: number) => api.get<Facility[]>(`/core/facilities/${org ? `?organization=${org}` : ''}`),
   cfos: () => api.get<Cfo[]>('/core/cfos/'),
   users: () => api.get<UserOption[]>('/core/users/'),
+
+  // Справочник подразделений ФМС по коду (XXX-XXX) → «кем выдан».
+  fmsUnit: (code: string) =>
+    api
+      .get<{ results: { value: string; code: string }[] }>(`/reg/fms-unit/?code=${encodeURIComponent(code)}`)
+      .then((r) => r.results),
 }

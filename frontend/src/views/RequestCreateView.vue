@@ -50,13 +50,33 @@ const organization = ref<number | null>(null)
 const facility = ref<number | null>(null)
 const cfo = ref<number | null>(null)
 const basis = ref('')
+const deptMsg = ref('')
+
+// Код подразделения (XXX-XXX) → подтягиваем «кем выдан» из справочника ФМС (DaData).
+async function onDeptCode() {
+  const digits = (rep.passport_department_code || '').replace(/\D/g, '')
+  if (digits.length !== 6) { deptMsg.value = ''; return }
+  rep.passport_department_code = digits.slice(0, 3) + '-' + digits.slice(3)
+  deptMsg.value = 'ищем подразделение…'
+  try {
+    const results = await requests.fmsUnit(rep.passport_department_code)
+    if (results.length) {
+      rep.passport_issued_by = results[0].value
+      deptMsg.value = results.length > 1 ? `подставлено (найдено вариантов: ${results.length})` : 'подставлено автоматически'
+    } else {
+      deptMsg.value = 'подразделение не найдено — заполните вручную'
+    }
+  } catch {
+    deptMsg.value = ''
+  }
+}
 
 const data = reactive<Record<string, unknown>>({
   poa_type: 'single', urgency: 'standard', planned_date: '',
   rep: {
     last_name: '', first_name: '', middle_name: '', birth_date: '', status: 'employee',
-    position: '', phone: '', email: '', passport: '', passport_issued_by: '',
-    passport_issue_date: '', reg_address: '',
+    position: '', phone: '', email: '', passport: '', passport_department_code: '',
+    passport_issued_by: '', passport_issue_date: '', reg_address: '',
   },
   rep_legal: { name: '', ogrn: '', inn: '', kpp: '', address: '', acting_person: '' },
   target_org: '', powers: [], power_templates: [], powers_other: '',
@@ -316,9 +336,16 @@ async function save() {
           </div>
           <div class="form-row">
             <label class="form-field"><span>Паспорт (серия, №) *</span><input v-model="rep.passport" inputmode="numeric" maxlength="11" placeholder="1234 567890" /></label>
-            <label class="form-field"><span>Кем выдан *</span><input v-model="rep.passport_issued_by" /></label>
+            <label class="form-field">
+              <span>Код подразделения</span>
+              <input v-model="rep.passport_department_code" @change="onDeptCode" @blur="onDeptCode" inputmode="numeric" maxlength="7" placeholder="770-053" />
+            </label>
             <label class="form-field"><span>Дата выдачи *</span><input v-model="rep.passport_issue_date" type="date" :max="todayStr" /></label>
           </div>
+          <label class="form-field">
+            <span>Кем выдан *<template v-if="deptMsg"> — <em style="color:#6b7a8d;font-style:normal">{{ deptMsg }}</em></template></span>
+            <input v-model="rep.passport_issued_by" />
+          </label>
           <label class="form-field"><span>Адрес регистрации *</span><input v-model="rep.reg_address" /></label>
         </div>
 

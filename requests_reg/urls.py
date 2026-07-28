@@ -1,10 +1,14 @@
+from django.urls import path
 from rest_framework.routers import DefaultRouter
 
-from .views import RegulatoryRequestViewSet
+from .views import RegulatoryRequestViewSet, fms_unit
 
 app_name = "requests_reg"
 
 router = DefaultRouter()
 router.register("requests", RegulatoryRequestViewSet, basename="request")
 
-urlpatterns = router.urls
+urlpatterns = [
+    path("fms-unit/", fms_unit, name="fms_unit"),
+    *router.urls,
+]

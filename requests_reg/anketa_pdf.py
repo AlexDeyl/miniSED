@@ -117,6 +117,7 @@ def render_pdf(request) -> bytes:
         ("Телефон", rep.get("phone") or "—"),
         ("Email", rep.get("email") or "—"),
         ("Паспорт (серия, №)", rep.get("passport") or "—"),
+        ("Код подразделения", rep.get("passport_department_code") or "—"),
         ("Кем и когда выдан", " · ".join(filter(None, [rep.get("passport_issued_by"), rep.get("passport_issue_date")])) or "—"),
         ("Адрес регистрации", rep.get("reg_address") or "—"),
     ]))

@@ -173,6 +173,10 @@ PUBLIC_BASE_URL = (env("PUBLIC_BASE_URL", "") or "").rstrip("/")
 if not PUBLIC_BASE_URL and CSRF_TRUSTED_ORIGINS:
     PUBLIC_BASE_URL = CSRF_TRUSTED_ORIGINS[0].rstrip("/")
 
+# DaData — подсказки для кода подразделения ФМС (→ «кем выдан» в анкете
+# доверенности). Ключ необязателен: без него подсказки просто не работают.
+DADATA_API_KEY = env("DADATA_API_KEY", "")
+
 # Домены, которым разрешено встраивать MiniSED в iframe.
 # По умолчанию — сам сайт и порталы Битрикс24.
 FRAME_ANCESTORS = env_list(

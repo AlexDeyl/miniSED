@@ -3,11 +3,13 @@ API регламентных заявок: согласование (через 
 Личность — b24_user_id (заголовок X-B24-User).
 """
 
+import requests as http
+from django.conf import settings
 from django.http import FileResponse
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework import viewsets
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -24,6 +26,37 @@ from .serializers import (
     RegulatoryRequestListSerializer,
     RegulatoryRequestWriteSerializer,
 )
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def fms_unit(request):
+    """Подсказка «кем выдан» по коду подразделения ФМС (XXX-XXX) через DaData.
+
+    Без настроенного DADATA_API_KEY возвращает пустой список (фронт не подставляет).
+    """
+    code = (request.GET.get("code") or "").strip()
+    key = getattr(settings, "DADATA_API_KEY", "") or ""
+    if not code or not key:
+        return Response({"results": []})
+    try:
+        resp = http.post(
+            "https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/fms_unit",
+            json={"query": code, "count": 10},
+            headers={"Accept": "application/json", "Authorization": f"Token {key}"},
+            timeout=8,
+        )
+        suggestions = resp.json().get("suggestions", []) if resp.ok else []
+    except Exception:
+        suggestions = []
+    # приоритет — точные совпадения по коду
+    exact = [s for s in suggestions if (s.get("data") or {}).get("code") == code]
+    picked = exact or suggestions
+    results = [
+        {"value": s.get("value", ""), "code": (s.get("data") or {}).get("code", "")}
+        for s in picked
+    ]
+    return Response({"results": results})
 
 
 def _participants(data):
