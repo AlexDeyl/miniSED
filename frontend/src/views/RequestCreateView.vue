@@ -4,6 +4,7 @@ import { RouterLink, useRouter } from 'vue-router'
 import { requests, type Cfo, type Facility, type Organization } from '@/services/requests'
 import { ApiError } from '@/services/api'
 import type { RequestType } from '@/types/request'
+import AddressAutocomplete from '@/components/AddressAutocomplete.vue'
 
 const router = useRouter()
 
@@ -346,7 +347,9 @@ async function save() {
             <span>Кем выдан *<template v-if="deptMsg"> — <em style="color:#6b7a8d;font-style:normal">{{ deptMsg }}</em></template></span>
             <input v-model="rep.passport_issued_by" />
           </label>
-          <label class="form-field"><span>Адрес регистрации *</span><input v-model="rep.reg_address" /></label>
+          <label class="form-field"><span>Адрес регистрации *</span>
+            <AddressAutocomplete v-model="rep.reg_address" placeholder="Начните вводить адрес…" />
+          </label>
         </div>
 
         <!-- Раздел 2: полномочия -->

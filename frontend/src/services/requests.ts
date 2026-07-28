@@ -77,4 +77,10 @@ export const requests = {
     api
       .get<{ results: { value: string; code: string }[] }>(`/reg/fms-unit/?code=${encodeURIComponent(code)}`)
       .then((r) => r.results),
+
+  // Подсказки по адресу (DaData) для автокомплита.
+  addressSuggest: (q: string) =>
+    api
+      .get<{ results: { value: string; postal_code: string }[] }>(`/reg/address-suggest/?q=${encodeURIComponent(q)}`)
+      .then((r) => r.results),
 }

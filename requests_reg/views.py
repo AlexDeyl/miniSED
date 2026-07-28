@@ -59,6 +59,37 @@ def fms_unit(request):
     return Response({"results": results})
 
 
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def address_suggest(request):
+    """Подсказки по адресу (DaData) для автокомплита. ?q=... → список адресов.
+
+    Без DADATA_API_KEY или при query < 3 символов возвращает пустой список.
+    """
+    q = (request.GET.get("q") or "").strip()
+    key = getattr(settings, "DADATA_API_KEY", "") or ""
+    if len(q) < 3 or not key:
+        return Response({"results": []})
+    try:
+        resp = http.post(
+            "https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/address",
+            json={"query": q, "count": 8},
+            headers={"Accept": "application/json", "Authorization": f"Token {key}"},
+            timeout=8,
+        )
+        suggestions = resp.json().get("suggestions", []) if resp.ok else []
+    except Exception:
+        suggestions = []
+    results = [
+        {
+            "value": s.get("value", ""),
+            "postal_code": (s.get("data") or {}).get("postal_code") or "",
+        }
+        for s in suggestions
+    ]
+    return Response({"results": results})
+
+
 def _participants(data):
     raw = data.get("participants")
     if not isinstance(raw, list):
