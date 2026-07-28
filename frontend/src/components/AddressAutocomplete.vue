@@ -77,6 +77,9 @@ function onBlur() {
 
 <style scoped>
 .addr-ac { position: relative; }
+/* Инпут — на всю ширину (он не прямой flex-потомок .form-field, поэтому
+   растяжку задаём явно, иначе поле получается узким по intrinsic-ширине). */
+.addr-ac input { width: 100%; box-sizing: border-box; }
 .addr-list {
   position: absolute;
   z-index: 30;
