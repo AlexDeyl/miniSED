@@ -3,6 +3,7 @@ from datetime import date
 from rest_framework import serializers
 
 from approvalflow.serializers import ApprovalDetailSerializer
+from documents.serializers import linked_documents
 
 from . import constants, services
 from .models import RegulatoryRequest
@@ -16,22 +17,6 @@ def _parse_date(value):
         return date.fromisoformat(str(value)[:10])
     except ValueError:
         return None
-
-
-def _documents(obj):
-    out = []
-    for d in obj.documents.filter(deleted_at__isnull=True):
-        cur = d.current_version
-        out.append({
-            "id": d.id,
-            "title": d.title,
-            "document_type": d.document_type,
-            "current_version_number": cur.version_number if cur else None,
-            "download_url": (
-                f"/api/documents/{d.id}/versions/{cur.id}/download/" if cur else None
-            ),
-        })
-    return out
 
 
 class RegulatoryRequestListSerializer(serializers.ModelSerializer):
@@ -70,7 +55,7 @@ class RegulatoryRequestDetailSerializer(RegulatoryRequestListSerializer):
         return ApprovalDetailSerializer(approval).data if approval else None
 
     def get_documents(self, obj):
-        return _documents(obj)
+        return linked_documents(obj)
 
 
 class RegulatoryRequestWriteSerializer(serializers.ModelSerializer):

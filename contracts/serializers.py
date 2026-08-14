@@ -1,27 +1,10 @@
 from rest_framework import serializers
 
 from approvalflow.serializers import ApprovalDetailSerializer
-from documents.serializers import DocumentSerializer
+from documents.serializers import linked_documents
 
 from . import services
 from .models import Contract
-
-
-def _documents(obj):
-    """Документы договора со ВСЕМИ версиями (как в карточке согласования).
-
-    Берём общий DocumentSerializer (версии, can_edit_online), сверху добавляем
-    download_url актуальной версии — по нему фронт качает «текущий» файл."""
-    out = []
-    qs = obj.documents.filter(deleted_at__isnull=True).prefetch_related("versions")
-    for d in qs:
-        data = DocumentSerializer(d).data
-        cur = d.current_version
-        data["download_url"] = (
-            f"/api/documents/{d.id}/versions/{cur.id}/download/" if cur else None
-        )
-        out.append(data)
-    return out
 
 
 class ContractListSerializer(serializers.ModelSerializer):
@@ -55,7 +38,7 @@ class ContractDetailSerializer(ContractListSerializer):
         return ApprovalDetailSerializer(approval).data if approval else None
 
     def get_documents(self, obj):
-        return _documents(obj)
+        return linked_documents(obj)
 
 
 class ContractWriteSerializer(serializers.ModelSerializer):

@@ -28,6 +28,8 @@ export const requests = {
   submit: (id: number | string, participants: ParticipantInput[]) =>
     api.post<RegulatoryRequestDetail>(`${BASE}/${id}/submit/`, { participants }),
   cancel: (id: number | string) => api.post<RegulatoryRequestDetail>(`${BASE}/${id}/cancel/`),
+  returnForRevision: (id: number | string, comment: string) =>
+    api.post<RegulatoryRequestDetail>(`${BASE}/${id}/return/`, { comment }),
   remove: (id: number | string) => api.delete<void>(`${BASE}/${id}/`),
   decide: (id: number | string, participantId: number, decision: 'approve' | 'reject', comment = '') =>
     api.post<RegulatoryRequestDetail>(`${BASE}/${id}/decide/`, {

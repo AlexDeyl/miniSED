@@ -3,10 +3,18 @@ import { computed, onMounted, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { bitrix } from '@/services/bitrix'
 import { requests, type UserOption } from '@/services/requests'
+import { documents as documentsApi } from '@/services/documents'
 import { api, ApiError } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import type { RegulatoryRequestDetail, RouteSlot } from '@/types/request'
 import type { ApprovalParticipant, ParticipantInput } from '@/types/approval'
+import { fmtDateTime, isGroupLegal, useApprovalCard } from '@/composables/useApprovalCard'
+import DocumentEditor from '@/components/DocumentEditor.vue'
+import DocumentsCard from '@/components/DocumentsCard.vue'
+import DecisionCard from '@/components/approval/DecisionCard.vue'
+import HistoryCard from '@/components/approval/HistoryCard.vue'
+import RoundsCards from '@/components/approval/RoundsCards.vue'
+import SummaryCard from '@/components/approval/SummaryCard.vue'
 
 const props = defineProps<{ id: string }>()
 const auth = useAuthStore()
@@ -20,14 +28,6 @@ const DELIVERY = [
   { code: 'other', name: 'Другое' },
 ]
 const LEGAL_STATUSES = ['to_legal', 'legal_work', 'signing']
-
-// Русские метки решений/итогов круга (в API — коды движка).
-const DECISION_RU: Record<string, string> = {
-  waiting: 'Ожидает', approved: 'Согласовано', rejected: 'Отклонено',
-}
-const RESULT_RU: Record<string, string> = {
-  pending: 'В процессе', approved: 'Согласован', rejected: 'Отклонён', returned: 'Возвращён',
-}
 
 const req = ref<RegulatoryRequestDetail | null>(null)
 const loading = ref(true)
@@ -47,6 +47,9 @@ function roleName(code: string | undefined): string {
 const deliveryMethod = ref('personally')
 const deliveryComment = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
+const versionInput = ref<HTMLInputElement | null>(null)
+const versionDocId = ref<number | null>(null)
+const editingDocId = ref<number | null>(null)
 
 async function load() {
   loading.value = true
@@ -160,25 +163,40 @@ function submit() {
   })
 }
 
-function isGroupLegal(p: ApprovalParticipant): boolean {
-  return p.role === 'legal_dept' && !p.b24_user_id
-}
-function canDecide(p: ApprovalParticipant): boolean {
-  if (req.value?.status !== 'on_approval' || p.decision !== 'waiting' || p.type !== 'internal')
-    return false
-  // Групповой юрэтап — согласовать может любой юрист.
-  if (isGroupLegal(p)) return auth.isLawyer
-  return p.b24_user_id === auth.b24UserId
+// Как участник подписан в кругах и в истории.
+function partLabel(p: ApprovalParticipant): string {
+  if (isGroupLegal(p)) return 'Юридический отдел'
+  if (p.type === 'external') return p.email || p.name || 'внешний участник'
+  return nameByBid(p.b24_user_id) || `USER #${p.b24_user_id}`
 }
 
-function decide(p: ApprovalParticipant, decision: 'approve' | 'reject') {
-  let comment = ''
-  if (decision === 'reject') {
-    comment = window.prompt('Комментарий (обязателен при отклонении):') || ''
-    if (!comment.trim()) return
-  }
+// Общая логика карточки согласования (та же, что у договоров).
+const { rounds, currentRound, pendingPart, myPart, myDecided, iAmParticipant, progress, history } =
+  useApprovalCard(
+    () => req.value?.approval,
+    () => req.value?.status === 'on_approval',
+    partLabel,
+  )
+
+function decide(p: ApprovalParticipant, decision: 'approve' | 'reject', comment: string) {
   run(() => requests.decide(props.id, p.id, decision, comment))
 }
+
+// Инициатор может отозвать заявку с круга и доработать (потом — новый круг).
+const canReturn = computed(() => isInitiator.value && req.value?.status === 'on_approval')
+function returnForRevision() {
+  const comment = window.prompt('Причина возврата на доработку:') || ''
+  if (!comment.trim()) return
+  run(() => requests.returnForRevision(props.id, comment.trim()))
+}
+
+// Строки сводки, специфичные для доверенности: исполнение и получение.
+const summaryExtras = computed(() => {
+  const rows: { label: string; value: string }[] = []
+  if (req.value?.executed_at) rows.push({ label: 'Исполнена', value: fmtDateTime(req.value.executed_at) })
+  if (req.value?.received_at) rows.push({ label: 'Получена инициатором', value: fmtDateTime(req.value.received_at) })
+  return rows
+})
 
 function dl(url: string | null, name: string) {
   if (url) api.download(url, name).catch((e) => (error.value = e.message))
@@ -216,6 +234,36 @@ async function uploadFile(e: Event) {
   }
 }
 
+// Новая версия существующего документа: старая остаётся в истории.
+function pickVersion(docId: number) {
+  versionDocId.value = docId
+  versionInput.value?.click()
+}
+async function uploadVersion(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  const docId = versionDocId.value
+  if (!file || !docId) return
+  const comment = window.prompt('Комментарий к версии (что изменено, необязательно):') || ''
+  busy.value = true
+  error.value = null
+  try {
+    await documentsApi.addVersion(docId, file, comment)
+    req.value = await requests.get(props.id)
+  } catch (err) {
+    error.value = err instanceof ApiError ? err.message : 'Не удалось загрузить версию'
+  } finally {
+    busy.value = false
+    versionDocId.value = null
+    input.value = ''
+  }
+}
+
+function onEditorClose(changed: boolean) {
+  editingDocId.value = null
+  if (changed) load()
+}
+
 onMounted(load)
 </script>
 
@@ -238,6 +286,23 @@ onMounted(load)
       </div>
 
       <p v-if="error" class="state state--error">{{ error }}</p>
+
+      <!-- Суть заявки: основание и комментарий инициатора -->
+      <div v-if="req.basis || req.comment || req.position || req.department" class="detail-card">
+        <div class="detail-card-header">Заявка</div>
+        <table class="round-table">
+          <tbody>
+            <tr v-if="req.position"><td>Должность</td><td>{{ req.position }}</td></tr>
+            <tr v-if="req.department"><td>Подразделение</td><td>{{ req.department }}</td></tr>
+            <tr v-if="req.valid_from || req.valid_until">
+              <td>Срок</td>
+              <td>{{ req.valid_from || '—' }} — {{ req.valid_until || '—' }}</td>
+            </tr>
+            <tr v-if="req.basis"><td>Основание</td><td style="white-space:pre-line">{{ req.basis }}</td></tr>
+            <tr v-if="req.comment"><td>Комментарий</td><td style="white-space:pre-line">{{ req.comment }}</td></tr>
+          </tbody>
+        </table>
+      </div>
 
       <!-- Предпросмотр маршрута + отправка -->
       <div v-if="canSubmit" class="detail-card">
@@ -271,10 +336,11 @@ onMounted(load)
         </div>
       </div>
 
-      <!-- Управление: отмена / удаление -->
-      <div v-if="canCancel || canDelete" class="detail-card">
+      <!-- Управление: возврат / отмена / удаление -->
+      <div v-if="canCancel || canDelete || canReturn" class="detail-card">
         <div class="detail-card-header">Управление</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button v-if="canReturn" class="btn btn--soft" :disabled="busy" @click="returnForRevision">Вернуть на доработку</button>
           <button v-if="canCancel" class="btn btn--soft" :disabled="busy" @click="cancelRequest">Отменить заявку</button>
           <button v-if="canDelete" class="btn btn--danger" :disabled="busy" @click="removeRequest">Удалить заявку</button>
         </div>
@@ -290,53 +356,44 @@ onMounted(load)
         <button class="btn btn--soft" :disabled="busy" @click="downloadSheet">Скачать лист согласования (PDF)</button>
       </div>
 
-      <!-- Круги согласования -->
-      <div v-for="rnd in req.approval?.rounds || []" :key="rnd.id" class="detail-card">
-        <div class="detail-card-header">
-          Круг {{ rnd.round_number }}
-          <span class="participant-pill" :class="rnd.result">{{ RESULT_RU[rnd.result] || rnd.result }}</span>
-        </div>
-        <table class="round-table">
-          <tbody>
-            <tr v-for="p in rnd.participants" :key="p.id">
-              <td>{{ roleName(p.role) }}</td>
-              <td>
-                <template v-if="isGroupLegal(p)">Юридический отдел</template>
-                <template v-else-if="p.type === 'external'">{{ p.email }}</template>
-                <template v-else>{{ nameByBid(p.b24_user_id) || `USER #${p.b24_user_id}` }}</template>
-              </td>
-              <td>
-                <span class="participant-pill" :class="p.decision">{{ DECISION_RU[p.decision] || p.decision }}</span>
-                <em v-if="p.decision_comment"> — {{ p.decision_comment }}</em>
-              </td>
-              <td class="row-actions">
-                <template v-if="canDecide(p)">
-                  <button class="btn btn--ok" :disabled="busy" @click="decide(p, 'approve')">✓</button>
-                  <button class="btn btn--no" :disabled="busy" @click="decide(p, 'reject')">✕</button>
-                </template>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      <DecisionCard
+        :pending="pendingPart" :my-part="myPart" :my-decided="myDecided"
+        :is-participant="iAmParticipant" :busy="busy"
+        :role-name="roleName" :label="partLabel"
+        @decide="decide" @error="(m) => (error = m)"
+      />
 
-      <!-- Документы -->
-      <div class="detail-card">
-        <div class="detail-card-header">Документы</div>
-        <ul v-if="req.documents.length" class="item-tags" style="flex-direction:column;align-items:flex-start;gap:6px;margin-bottom:8px">
-          <li v-for="d in req.documents" :key="d.id">
-            <a href="#" @click.prevent="dl(d.download_url, d.title)">{{ d.title }} (в{{ d.current_version_number }})</a>
-          </li>
-        </ul>
-        <p v-else class="muted" style="margin:0 0 8px">Файлов пока нет.</p>
-        <div class="row-actions">
+      <RoundsCards
+        :rounds="rounds" :pending-id="pendingPart?.id ?? null"
+        :role-name="roleName" :label="partLabel"
+      />
+
+      <HistoryCard :history="history" />
+
+      <SummaryCard
+        v-if="rounds.length"
+        :round-number="currentRound?.round_number ?? null"
+        :progress="progress"
+        :waiting-for="pendingPart ? partLabel(pendingPart) : ''"
+        :created-at="req.created_at"
+        :submitted-at="req.approval?.submitted_at"
+        :completed-at="req.approval?.completed_at"
+        :extra-rows="summaryExtras"
+      />
+
+      <DocumentsCard
+        :docs="req.documents" :busy="busy"
+        :upload-label="isLegalStage ? 'Прикрепить скан доверенности' : 'Прикрепить документ'"
+        hint="Правки: скачайте версию, измените локально и загрузите как «новую версию» — старая останется в истории. Файлы Word/Excel можно править прямо в браузере."
+        @download="dl" @upload="fileInput?.click()"
+        @add-version="pickVersion" @edit="(id) => (editingDocId = id)"
+      >
+        <template #actions>
           <button v-if="isAnketaType" class="btn btn--ghost" @click="downloadAnketa">Скачать заявление (PDF)</button>
-          <template v-if="isLegalStage">
-            <input ref="fileInput" type="file" style="display:none" @change="uploadFile" />
-            <button class="btn btn--ghost" :disabled="busy" @click="fileInput?.click()">Прикрепить скан доверенности</button>
-          </template>
-        </div>
-      </div>
+        </template>
+      </DocumentsCard>
+      <input ref="fileInput" type="file" style="display:none" @change="uploadFile" />
+      <input ref="versionInput" type="file" style="display:none" @change="uploadVersion" />
 
       <!-- Раздел юристов: исполнение -->
       <div v-if="isLegalStage" class="detail-card">
@@ -381,5 +438,8 @@ onMounted(load)
         </div>
       </div>
     </template>
+
+    <!-- Оверлей онлайн-редактора -->
+    <DocumentEditor v-if="editingDocId" :doc-id="editingDocId" @close="onEditorClose" />
   </section>
 </template>

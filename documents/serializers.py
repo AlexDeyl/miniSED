@@ -38,3 +38,19 @@ class DocumentSerializer(serializers.ModelSerializer):
 
     def get_can_edit_online(self, obj) -> bool:
         return editing.is_editable(obj.current_version)
+
+
+def linked_documents(obj) -> list[dict]:
+    """Документы карточки (договора, заявки…) со всеми версиями.
+
+    Общий вид для всех модулей: версии + can_edit_online из DocumentSerializer
+    плюс download_url актуальной версии — по нему качают «текущий» файл."""
+    out = []
+    for d in obj.documents.filter(deleted_at__isnull=True).prefetch_related("versions"):
+        data = DocumentSerializer(d).data
+        cur = d.current_version
+        data["download_url"] = (
+            f"/api/documents/{d.id}/versions/{cur.id}/download/" if cur else None
+        )
+        out.append(data)
+    return out

@@ -8,19 +8,18 @@ import { api, ApiError } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import type { ContractDetail, ContractRouteSlot } from '@/types/contract'
 import type { ApprovalParticipant, ParticipantInput } from '@/types/approval'
+import { isGroupLegal, useApprovalCard } from '@/composables/useApprovalCard'
 import DocumentEditor from '@/components/DocumentEditor.vue'
+import DocumentsCard from '@/components/DocumentsCard.vue'
 import UserSearchSelect from '@/components/UserSearchSelect.vue'
+import DecisionCard from '@/components/approval/DecisionCard.vue'
+import HistoryCard from '@/components/approval/HistoryCard.vue'
+import RoundsCards from '@/components/approval/RoundsCards.vue'
+import SummaryCard from '@/components/approval/SummaryCard.vue'
 
 const props = defineProps<{ id: string }>()
 const auth = useAuthStore()
 const router = useRouter()
-
-const DECISION_RU: Record<string, string> = {
-  waiting: 'Ожидает', approved: 'Согласовано', rejected: 'Отклонено',
-}
-const RESULT_RU: Record<string, string> = {
-  pending: 'В процессе', approved: 'Согласован', rejected: 'Отклонён', returned: 'Возвращён',
-}
 
 const contract = ref<ContractDetail | null>(null)
 const loading = ref(true)
@@ -42,8 +41,6 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const versionInput = ref<HTMLInputElement | null>(null)
 const versionDocId = ref<number | null>(null)
 const editingDocId = ref<number | null>(null)
-// Комментарий к моему решению (при отклонении обязателен) — как в светофоре.
-const decisionComment = ref('')
 
 const isInitiator = computed(() => contract.value?.initiator_b24_id === auth.b24UserId)
 const canSubmit = computed(
@@ -186,9 +183,6 @@ function submit() {
   })
 }
 
-function isGroupLegal(p: ApprovalParticipant): boolean {
-  return p.role === 'legal_dept' && !p.b24_user_id
-}
 // Как участник подписан в кругах/истории.
 function partLabel(p: ApprovalParticipant): string {
   if (isGroupLegal(p)) return 'Юридический отдел'
@@ -196,84 +190,16 @@ function partLabel(p: ApprovalParticipant): string {
   return nameByBid(p.b24_user_id) || `USER #${p.b24_user_id}`
 }
 
-const rounds = computed(() => contract.value?.approval?.rounds || [])
-const currentRound = computed(() => rounds.value[rounds.value.length - 1] || null)
+// Общая логика карточки согласования (та же у заявок и будущих модулей).
+const { rounds, currentRound, pendingPart, myPart, myDecided, iAmParticipant, progress, history } =
+  useApprovalCard(
+    () => contract.value?.approval,
+    () => contract.value?.status === 'on_approval',
+    partLabel,
+  )
 
-// Маршрут строго последовательный: решает первый ожидающий в текущем круге
-// (движок это же и проверяет — см. approvalflow.services._is_turn).
-const pendingPart = computed<ApprovalParticipant | null>(() => {
-  if (contract.value?.status !== 'on_approval' || !currentRound.value) return null
-  return [...currentRound.value.participants]
-    .sort((a, b) => a.order - b.order)
-    .find((p) => p.decision === 'waiting') || null
-})
-
-function isMine(p: ApprovalParticipant): boolean {
-  if (p.type !== 'internal') return false
-  return isGroupLegal(p) ? auth.isLawyer : p.b24_user_id === auth.b24UserId
-}
-// Моё решение сейчас ждут (кнопки «Согласовать/Отклонить»).
-const myPart = computed(() => (pendingPart.value && isMine(pendingPart.value) ? pendingPart.value : null))
-// Моё уже принятое решение в текущем круге (чтобы показать его в карточке).
-const myDecided = computed(
-  () => currentRound.value?.participants.find((p) => isMine(p) && p.decision !== 'waiting') || null,
-)
-// Я вообще участник этого договора?
-const iAmParticipant = computed(() => rounds.value.some((r) => r.participants.some(isMine)))
-
-function decide(p: ApprovalParticipant, decision: 'approve' | 'reject') {
-  const comment = decisionComment.value.trim()
-  if (decision === 'reject' && !comment) {
-    error.value = 'При отклонении комментарий обязателен.'
-    return
-  }
-  run(async () => {
-    const r = await contracts.decide(props.id, p.id, decision, comment)
-    decisionComment.value = ''
-    return r
-  })
-}
-
-// --- сводка по текущему кругу ---
-const progress = computed(() => {
-  const parts = currentRound.value?.participants || []
-  return { done: parts.filter((p) => p.decision !== 'waiting').length, total: parts.length }
-})
-
-// --- история согласования (лента по кругам) ---
-interface HistoryEvent {
-  key: string
-  when: string
-  who: string
-  what: string
-  ok: boolean | null
-  comment: string
-}
-const history = computed(() =>
-  rounds.value.map((rnd) => {
-    const events: HistoryEvent[] = rnd.participants
-      .filter((p) => p.decided_at)
-      .map((p) => ({
-        key: `p${p.id}`,
-        when: p.decided_at as string,
-        who: partLabel(p),
-        what: p.decision === 'approved' ? 'согласовал(а)' : 'отклонил(а)',
-        ok: p.decision === 'approved',
-        comment: p.decision_comment,
-      }))
-      .sort((a, b) => a.when.localeCompare(b.when))
-    if (rnd.result === 'returned' && rnd.completed_at) {
-      events.push({
-        key: `r${rnd.id}`, when: rnd.completed_at, who: 'Инициатор',
-        what: 'вернул(а) на доработку', ok: null, comment: rnd.comment,
-      })
-    }
-    return { round: rnd.round_number, result: rnd.result, started_at: rnd.started_at, events }
-  }),
-)
-
-function fmt(dt: string | null | undefined): string {
-  return dt ? new Date(dt).toLocaleString('ru') : '—'
+function decide(p: ApprovalParticipant, decision: 'approve' | 'reject', comment: string) {
+  run(() => contracts.decide(props.id, p.id, decision, comment))
 }
 
 function cancelContract() {
@@ -477,131 +403,38 @@ onMounted(load)
         <button class="btn btn--soft" :disabled="busy" @click="downloadSheet">Скачать лист согласования (PDF)</button>
       </div>
 
-      <!-- Ваше решение -->
-      <div v-if="myPart || myDecided || iAmParticipant" class="detail-card">
-        <div class="detail-card-header">Ваше решение</div>
-        <template v-if="myPart">
-          <div class="detail-meta" style="margin-bottom:6px">
-            Сейчас очередь за вами<template v-if="myPart.role"> — как «{{ roleName(myPart.role) }}»</template>.
-          </div>
-          <textarea
-            v-model="decisionComment" rows="3" class="decision-comment"
-            placeholder="Комментарий (при отклонении обязателен)"
-          ></textarea>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
-            <button class="btn btn--primary" :disabled="busy" @click="decide(myPart, 'approve')">Согласовать</button>
-            <button class="btn btn--danger" :disabled="busy" @click="decide(myPart, 'reject')">Отклонить</button>
-          </div>
-        </template>
-        <template v-else-if="myDecided">
-          <div>
-            Ваше решение:
-            <span class="participant-pill" :class="myDecided.decision">
-              {{ DECISION_RU[myDecided.decision] || myDecided.decision }}
-            </span>
-            <span class="detail-meta"> · {{ fmt(myDecided.decided_at) }}</span>
-          </div>
-          <div v-if="myDecided.decision_comment" class="detail-meta" style="margin-top:4px">
-            {{ myDecided.decision_comment }}
-          </div>
-        </template>
-        <div v-else class="detail-meta">
-          <template v-if="pendingPart">Ждём решения: {{ partLabel(pendingPart) }}.</template>
-          <template v-else>Ваше решение сейчас не требуется.</template>
-        </div>
-      </div>
+      <DecisionCard
+        :pending="pendingPart" :my-part="myPart" :my-decided="myDecided"
+        :is-participant="iAmParticipant" :busy="busy"
+        :role-name="roleName" :label="partLabel"
+        @decide="decide" @error="(m) => (error = m)"
+      />
 
-      <!-- Круги согласования -->
-      <div v-for="rnd in rounds" :key="rnd.id" class="detail-card">
-        <div class="detail-card-header">
-          Круг {{ rnd.round_number }}
-          <span class="participant-pill" :class="rnd.result">{{ RESULT_RU[rnd.result] || rnd.result }}</span>
-        </div>
-        <table class="round-table">
-          <tbody>
-            <tr v-for="p in rnd.participants" :key="p.id">
-              <td>{{ roleName(p.role) }}</td>
-              <td>
-                {{ partLabel(p) }}
-                <span v-if="pendingPart && pendingPart.id === p.id" class="participant-pill" style="background:#fff3cd">сейчас решает</span>
-              </td>
-              <td>
-                <span class="participant-pill" :class="p.decision">{{ DECISION_RU[p.decision] || p.decision }}</span>
-                <span v-if="p.decided_at" class="detail-meta"> · {{ fmt(p.decided_at) }}</span>
-                <em v-if="p.decision_comment"> — {{ p.decision_comment }}</em>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      <RoundsCards
+        :rounds="rounds" :pending-id="pendingPart?.id ?? null"
+        :role-name="roleName" :label="partLabel"
+      />
 
-      <!-- История согласования -->
-      <div v-if="rounds.length" class="detail-card">
-        <div class="detail-card-header">История согласования</div>
-        <div v-for="grp in history" :key="grp.round" style="margin-bottom:10px">
-          <div style="font-weight:600;font-size:12px;margin-bottom:4px">
-            Круг {{ grp.round }} · отправлен {{ fmt(grp.started_at) }}
-            <span class="participant-pill" :class="grp.result">{{ RESULT_RU[grp.result] || grp.result }}</span>
-          </div>
-          <p v-if="!grp.events.length" class="detail-meta" style="margin:0">Решений пока нет.</p>
-          <div v-for="ev in grp.events" :key="ev.key" class="log-item">
-            <b>{{ ev.who }}</b>
-            <span :style="{ color: ev.ok === null ? 'inherit' : ev.ok ? 'var(--green-main)' : 'var(--red-main)' }">
-              {{ ev.what }}</span>
-            · {{ fmt(ev.when) }}
-            <div v-if="ev.comment" class="detail-meta">{{ ev.comment }}</div>
-          </div>
-        </div>
-      </div>
+      <HistoryCard :history="history" />
 
-      <!-- Сводка -->
-      <div v-if="rounds.length" class="detail-card">
-        <div class="detail-card-header">Сводка</div>
-        <table class="round-table">
-          <tbody>
-            <tr><td>Круг</td><td>{{ currentRound?.round_number }} · согласовали {{ progress.done }} из {{ progress.total }}</td></tr>
-            <tr><td>Сейчас решает</td><td>{{ pendingPart ? partLabel(pendingPart) : '—' }}</td></tr>
-            <tr><td>Создан</td><td>{{ fmt(contract.created_at) }}</td></tr>
-            <tr><td>Отправлен</td><td>{{ fmt(contract.approval?.submitted_at) }}</td></tr>
-            <tr><td>Завершён</td><td>{{ fmt(contract.approval?.completed_at) }}</td></tr>
-          </tbody>
-        </table>
-      </div>
+      <SummaryCard
+        v-if="rounds.length"
+        :round-number="currentRound?.round_number ?? null"
+        :progress="progress"
+        :waiting-for="pendingPart ? partLabel(pendingPart) : ''"
+        :created-at="contract.created_at"
+        :submitted-at="contract.approval?.submitted_at"
+        :completed-at="contract.approval?.completed_at"
+      />
 
-      <!-- Документы (с историей версий, как в карточке согласования) -->
-      <div class="detail-card">
-        <div class="detail-card-header">Документы</div>
-        <div v-for="d in contract.documents" :key="d.id" class="doc-item">
-          <div class="doc-name">
-            {{ d.title }}
-            <span class="detail-meta">· актуальная v{{ d.current_version_number }}</span>
-          </div>
-          <div class="doc-actions">
-            <a
-              v-for="v in d.versions" :key="v.id" href="#" class="doc-link" :title="v.change_comment"
-              @click.prevent="dl(v.download_url, `${d.title} v${v.version_number}`)"
-            >v{{ v.version_number }}{{ v.is_current ? ' ✓' : '' }}</a>
-            <button type="button" class="doc-link doc-linkbtn" :disabled="busy" @click="pickVersion(d.id)">
-              ＋ новая версия
-            </button>
-            <button
-              v-if="d.can_edit_online" type="button" class="doc-link doc-linkbtn"
-              @click="editingDocId = d.id"
-            >✏️ Редактировать онлайн</button>
-          </div>
-          <template v-for="v in d.versions" :key="'c' + v.id">
-            <div v-if="v.change_comment" class="detail-meta">v{{ v.version_number }}: {{ v.change_comment }}</div>
-          </template>
-        </div>
-        <p v-if="!contract.documents.length" class="muted" style="margin:0 0 8px">Файлов пока нет.</p>
-        <input ref="fileInput" type="file" style="display:none" @change="uploadFile" />
-        <input ref="versionInput" type="file" style="display:none" @change="uploadVersion" />
-        <button class="btn btn--ghost" :disabled="busy" @click="fileInput?.click()">Прикрепить документ</button>
-        <div v-if="contract.documents.length" class="detail-meta" style="margin-top:6px">
-          Правки: скачайте версию, измените локально и загрузите как «новую версию» — старая
-          останется в истории. Файлы Word/Excel можно править прямо в браузере.
-        </div>
-      </div>
+      <DocumentsCard
+        :docs="contract.documents" :busy="busy"
+        hint="Правки: скачайте версию, измените локально и загрузите как «новую версию» — старая останется в истории. Файлы Word/Excel можно править прямо в браузере."
+        @download="dl" @upload="fileInput?.click()"
+        @add-version="pickVersion" @edit="(id) => (editingDocId = id)"
+      />
+      <input ref="fileInput" type="file" style="display:none" @change="uploadFile" />
+      <input ref="versionInput" type="file" style="display:none" @change="uploadVersion" />
     </template>
 
     <!-- Оверлей онлайн-редактора -->
@@ -610,22 +443,6 @@ onMounted(load)
 </template>
 
 <style scoped>
-/* Документы с версиями и лента истории — визуально как в карточке согласования. */
-.doc-item { background: #fff; border-radius: 8px; border: 1px solid #e0e0e0; padding: 8px 10px; margin-bottom: 8px; }
-.doc-name { font-size: 14px; font-weight: 500; margin-bottom: 4px; overflow-wrap: anywhere; word-break: break-word; }
-.doc-actions { font-size: 12px; display: flex; gap: 14px; flex-wrap: wrap; }
-.doc-link { color: var(--green-main); text-decoration: none; cursor: pointer; }
-.doc-link:hover { text-decoration: underline; }
-.doc-linkbtn { border: none; background: transparent; padding: 0; cursor: pointer; color: var(--green-main); font: inherit; font-size: 12px; }
-.doc-linkbtn:hover { text-decoration: underline; }
-.doc-linkbtn:disabled { opacity: 0.5; cursor: default; text-decoration: none; }
-
-.log-item { font-size: 12px; margin-bottom: 8px; }
-.decision-comment {
-  width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #d0d0d0;
-  border-radius: 6px; font: inherit; font-size: 13px; resize: vertical;
-}
-
 .extras { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--gray-border); }
 .extras-title { font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 8px; }
 .extra-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }

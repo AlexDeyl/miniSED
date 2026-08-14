@@ -1,4 +1,5 @@
 import type { ApprovalDetail } from './approval'
+import type { DocumentVersion } from './document'
 
 export type RequestType = 'poa' | 'mchd' | 'ecp'
 export type RequestStatus =
@@ -30,7 +31,10 @@ export interface RequestDocument {
   title: string
   document_type?: string
   current_version_number: number | null
+  // download_url — актуальная версия; полная история версий — в versions.
   download_url: string | null
+  versions: DocumentVersion[]
+  can_edit_online: boolean
 }
 
 export interface RegulatoryRequestListItem {

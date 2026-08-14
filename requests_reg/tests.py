@@ -203,6 +203,28 @@ class ApiTests(TestCase):
         }, format="json")
         self.assertEqual(r.status_code, 201)
 
+    def test_detail_documents_include_versions(self):
+        """Карточка отдаёт историю версий и признак онлайн-правки."""
+        rid = self._create()
+        r = api(1).post("/api/documents/", {
+            "title": "Образец доверенности.docx",
+            "linked_type": "requests_reg.regulatoryrequest", "linked_id": str(rid),
+            "file": SimpleUploadedFile("f.docx", b"v1", content_type="application/octet-stream"),
+        })
+        self.assertEqual(r.status_code, 201, r.content)
+        doc_id = r.json()["id"]
+        api(1).post(f"/api/documents/{doc_id}/versions/", {
+            "file": SimpleUploadedFile("f.docx", b"v2", content_type="application/octet-stream"),
+            "change_comment": "уточнили полномочия",
+        })
+
+        doc = api(1).get(f"/api/reg/requests/{rid}/").json()["documents"][0]
+        self.assertEqual(doc["current_version_number"], 2)
+        self.assertEqual([v["version_number"] for v in doc["versions"]], [1, 2])
+        self.assertEqual(doc["versions"][1]["change_comment"], "уточнили полномочия")
+        self.assertIn("can_edit_online", doc)
+        self.assertIn(f"/api/documents/{doc_id}/versions/", doc["download_url"])
+
     def test_types_includes_roles(self):
         data = api(1).get("/api/reg/requests/types/").json()
         codes = {r["code"] for r in data["roles"]}
