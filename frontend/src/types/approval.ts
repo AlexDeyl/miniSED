@@ -63,6 +63,7 @@ export interface ApprovalDocument {
   title: string
   current_version_number: number | null
   download_url: string | null
+  can_edit_online: boolean
 }
 
 export interface ApprovalDetail extends ApprovalListItem {

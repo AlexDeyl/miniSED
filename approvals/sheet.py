@@ -69,6 +69,13 @@ def _name_maps(agreement: Agreement):
         for u in UserProfile.objects.filter(email__in=emails)
         if u.fio
     }
+    # Кого нет в матрице (выбран через поиск по Битриксу) — дотягиваем из портала.
+    missing = [b for b in bids if b not in by_bid]
+    if missing:
+        from bitrix.client import profiles_by_ids
+
+        for bid, data in profiles_by_ids(missing).items():
+            by_bid[bid] = data["fio"]
     return by_bid, by_email
 
 

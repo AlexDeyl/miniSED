@@ -179,6 +179,7 @@ class AgreementSerializer(serializers.ModelSerializer):
     def get_documents_v(self, obj):
         """Версионируемые документы (ТЗ п.7.1-7.3) — через приложение documents."""
         from django.contrib.contenttypes.models import ContentType
+        from documents import editing
         from documents.models import Document
 
         ct = ContentType.objects.get_for_model(Agreement)
@@ -204,6 +205,8 @@ class AgreementSerializer(serializers.ModelSerializer):
                 "title": d.title,
                 "current_version_number": d.current_version.version_number if d.current_version else None,
                 "versions": versions,
+                # можно ли редактировать онлайн (фича включена + подходящий формат)
+                "can_edit_online": editing.is_editable(d.current_version),
             })
         return out
         read_only_fields = ["status", "created_at", "author_b24_id"]

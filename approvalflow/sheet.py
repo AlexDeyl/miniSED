@@ -90,6 +90,15 @@ def _name_maps(approval: Approval):
     )
     by_bid = {u.bitrix_id: u.fio for u in profiles if u.fio}
     pos_by_bid = {u.bitrix_id: (u.position.name if u.position else "") for u in profiles}
+    # Участник мог быть выбран поиском по Битриксу и не значиться в матрице —
+    # тогда ФИО/должность берём из портала, иначе в листе будет «USER #id».
+    missing = [b for b in bids if b not in by_bid]
+    if missing:
+        from bitrix.client import profiles_by_ids
+
+        for bid, data in profiles_by_ids(missing).items():
+            by_bid[bid] = data["fio"]
+            pos_by_bid.setdefault(bid, data["position"])
     by_email = {
         u.email.strip().lower(): u.fio
         for u in UserProfile.objects.filter(email__in=emails) if u.fio

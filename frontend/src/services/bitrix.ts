@@ -25,6 +25,18 @@ interface ListResponse<T> {
   results: T[]
 }
 
+// Запись справочника сотрудников (структурно совместима с UserOption
+// из services/contracts.ts и services/requests.ts).
+export interface BitrixUserOption {
+  id: number
+  bitrix_id: number
+  fio: string
+  position_name: string
+}
+
+const usersByIds = (ids: number[]) =>
+  api.get<ListResponse<BitrixUser>>(`/bitrix/users/?ids=${ids.join(',')}`)
+
 export const bitrix = {
   status: () => api.get<{ connected: boolean; domain: string | null }>('/bitrix/status/'),
 
@@ -46,8 +58,23 @@ export const bitrix = {
     api.get<ListResponse<BitrixUser>>(`/bitrix/users/?q=${encodeURIComponent(q)}`),
 
   // Сотрудники по списку b24-id (ФИО/должность) — для показа имён в согласованиях.
-  usersByIds: (ids: number[]) =>
-    api.get<ListResponse<BitrixUser>>(`/bitrix/users/?ids=${ids.join(',')}`),
+  usersByIds,
+
+  // То же, но сразу в формате справочника сотрудников: участник, выбранный
+  // поиском по Битриксу, может отсутствовать в матрице UserProfile — без этой
+  // дозагрузки он показывается как «USER #id».
+  userOptionsByIds: async (ids: number[]): Promise<BitrixUserOption[]> => {
+    if (!ids.length) return []
+    const { results } = await usersByIds(ids)
+    return results
+      .map((u) => ({
+        id: Number(u.ID),
+        bitrix_id: Number(u.ID),
+        fio: [u.LAST_NAME, u.NAME, u.SECOND_NAME].filter(Boolean).join(' '),
+        position_name: u.WORK_POSITION || '',
+      }))
+      .filter((u) => u.bitrix_id && u.fio)
+  },
 
   addTimelineComment: (dealId: number | string, comment: string) =>
     api.post<{ id: unknown }>('/bitrix/timeline/', { deal_id: dealId, comment }),

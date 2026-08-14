@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useSvetoforStore, SVETOFOR_TABS } from '@/stores/svetofor'
 import { useRequestsUiStore, REQUEST_TYPE_TABS } from '@/stores/requestsUi'
 import { useLegalUiStore, LEGAL_TABS } from '@/stores/legalUi'
+import { useContractsUiStore, CONTRACT_TABS } from '@/stores/contractsUi'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -12,6 +13,7 @@ const router = useRouter()
 const svet = useSvetoforStore()
 const reqUi = useRequestsUiStore()
 const legalUi = useLegalUiStore()
+const contractsUi = useContractsUiStore()
 
 const pageTitle = computed(() => (route.meta.title as string) || 'MiniSED')
 const bare = computed(() => route.meta.noShell === true)
@@ -19,12 +21,21 @@ const bare = computed(() => route.meta.noShell === true)
 const onSvetofor = computed(() => route.name === 'svetofor')
 const onRequests = computed(() => route.name === 'requests')
 const onLegal = computed(() => route.name === 'legal')
+const onContracts = computed(() => route.name === 'contracts')
 // Открыто из Битрикса (в iframe) — тогда «Выйти» не нужен (авто-вход портала).
 const inBitrix = window.self !== window.top
 
 async function doLogout() {
   await auth.logout()
   router.push('/login')
+}
+
+// Бейдж-счётчик для под-вкладки согласований (голубой кружок).
+function tabBadge(code: string): number {
+  if (code === 'todo') return svet.todoCount
+  if (code === 'rejected') return svet.rejectedUnseen
+  if (code === 'completed') return svet.completedUnseen
+  return 0
 }
 </script>
 
@@ -39,14 +50,17 @@ async function doLogout() {
         <small>Электронный документооборот</small>
       </div>
       <nav class="sidebar-nav">
-        <RouterLink to="/svetofor"><span>Согласования</span></RouterLink>
+        <RouterLink to="/svetofor">
+          <span>Согласования</span>
+          <span v-if="svet.todoCount" class="nav-badge" title="Требует действия">{{ svet.todoCount }}</span>
+        </RouterLink>
         <!-- под-вкладки согласований — вложенно под своим пунктом -->
         <div v-if="onSvetofor" class="sidebar-subtabs">
           <button
             v-for="t in SVETOFOR_TABS" :key="t.code"
             class="sidebar-subtab" :class="{ active: svet.mode === t.code }"
             @click="svet.mode = t.code"
-          >{{ t.label }}</button>
+          >{{ t.label }}<span v-if="tabBadge(t.code)" class="subtab-badge">{{ tabBadge(t.code) }}</span></button>
         </div>
 
         <RouterLink to="/requests"><span>Регламентные заявки</span></RouterLink>
@@ -57,6 +71,16 @@ async function doLogout() {
             class="sidebar-subtab" :class="{ active: reqUi.typeFilter === t.code }"
             @click="reqUi.typeFilter = t.code"
           >{{ t.label }}</button>
+        </div>
+
+        <RouterLink to="/contracts"><span>Договоры</span></RouterLink>
+        <!-- под-вкладки договоров -->
+        <div v-if="onContracts" class="sidebar-subtabs">
+          <button
+            v-for="t in CONTRACT_TABS" :key="t.code"
+            class="sidebar-subtab" :class="{ active: contractsUi.mode === t.code }"
+            @click="contractsUi.mode = t.code"
+          >{{ t.label }}<span v-if="t.code === 'todo' && contractsUi.todoCount" class="subtab-badge">{{ contractsUi.todoCount }}</span></button>
         </div>
 
         <RouterLink v-if="auth.isLawyer" to="/legal"><span>Работа юристов</span></RouterLink>

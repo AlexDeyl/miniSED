@@ -90,7 +90,14 @@ def build_route(request: RegulatoryRequest) -> list[dict]:
             order += 1
             continue
 
-        assignment = resolve_role(role_code, request)
+        # ГД юрлица (финальный подписант) резолвим ТОЛЬКО по организации заявки,
+        # без глобального фолбэка: у каждого ЮО свой ГД (напр. Невесомость — своя
+        # Синицына). Нет назначения на это ЮО → ручной выбор инициатором, а не
+        # чужой глобальный подписант.
+        if role_code == C.ROLE_FINAL_SIGNER:
+            assignment = _org_final_signer(request)
+        else:
+            assignment = resolve_role(role_code, request)
         route.append(
             {
                 "order": order,
@@ -106,3 +113,16 @@ def build_route(request: RegulatoryRequest) -> list[dict]:
         )
         order += 1
     return route
+
+
+def _org_final_signer(request: RegulatoryRequest) -> RoleAssignment | None:
+    """ГД юрлица — назначение final_signer, привязанное к организации заявки.
+
+    Только org-scoped (без глобального фолбэка): нет ГД для этого ЮО → ручной
+    выбор инициатором."""
+    if not request.organization_id:
+        return None
+    return RoleAssignment.objects.filter(
+        role_code=C.ROLE_FINAL_SIGNER, organization=request.organization,
+        is_active=True,
+    ).first()

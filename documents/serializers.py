@@ -1,5 +1,6 @@
 from rest_framework import serializers
 
+from . import editing
 from .models import Document, DocumentVersion
 
 
@@ -23,6 +24,8 @@ class DocumentSerializer(serializers.ModelSerializer):
     current_version_number = serializers.IntegerField(
         source="current_version.version_number", read_only=True, default=None
     )
+    # Показывать ли кнопку «Редактировать онлайн» (актуальная версия + фича включена).
+    can_edit_online = serializers.SerializerMethodField()
 
     class Meta:
         model = Document
@@ -30,4 +33,8 @@ class DocumentSerializer(serializers.ModelSerializer):
             "id", "title", "document_type", "is_confidential",
             "created_by_b24_id", "created_at", "deleted_at",
             "current_version", "current_version_number", "versions",
+            "can_edit_online",
         ]
+
+    def get_can_edit_online(self, obj) -> bool:
+        return editing.is_editable(obj.current_version)

@@ -5,9 +5,14 @@ Read-only API справочников ядра.
 на этапе авторизации, добавится проверка прав manage_directories и CRUD.
 """
 
+from django.contrib.contenttypes.models import ContentType
 from rest_framework import viewsets
+from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
 
+from .auth import get_current_b24_id
+from . import services
 from .models import (
     CFO,
     Counterparty,
@@ -26,6 +31,31 @@ from .serializers import (
     RoleSerializer,
     UserProfileMiniSerializer,
 )
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def mark_seen(request):
+    """
+    Отметить карточку просмотренной текущим пользователем.
+    Тело: {"linked_type": "app_label.model", "linked_id": <id>}.
+    Универсально — используется всеми модулями для счётчиков непросмотренного.
+    """
+    b24_id = get_current_b24_id(request)
+    if not b24_id:
+        return Response({"detail": "Требуется авторизация."}, status=401)
+    linked_type = request.data.get("linked_type") or ""
+    linked_id = request.data.get("linked_id")
+    try:
+        app_label, model = linked_type.split(".")
+        ct = ContentType.objects.get(app_label=app_label, model=model)
+    except (ValueError, ContentType.DoesNotExist):
+        return Response({"detail": "Неизвестный тип объекта."}, status=400)
+    obj = ct.model_class().objects.filter(pk=linked_id).first()
+    if obj is None:
+        return Response({"detail": "Объект не найден."}, status=404)
+    services.mark_seen(b24_id, obj)
+    return Response({"ok": True})
 
 
 class OrganizationViewSet(viewsets.ReadOnlyModelViewSet):

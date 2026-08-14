@@ -8,6 +8,15 @@ export const agreements = {
   all: () => api.get<Agreement[]>('/agreements/'),
   get: (id: number) => api.get<Agreement>(`/agreements/${id}/`),
 
+  // Счётчики для бейджей вкладок (отклонённые/завершённые — непросмотренные мной).
+  badgeCounts: () =>
+    api.get<{ rejected_unseen: number; completed_unseen: number; in_progress: number }>(
+      '/agreements/badge_counts/',
+    ),
+  // Отметить согласование просмотренным (сбрасывает «непросмотрено»).
+  markSeen: (id: number) =>
+    api.post('/core/seen/', { linked_type: 'approvals.agreement', linked_id: id }),
+
   decide: (id: number, participantId: number, decision: 'approve' | 'reject', comment = '') =>
     api.post<{ status: string }>(`/agreements/${id}/decide/`, {
       participant_id: participantId, decision, comment,

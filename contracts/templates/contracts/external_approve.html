@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Согласование договора {{ contract.number }}</title>
+  <style>
+    body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; background:#f4f6f8; margin:0; color:#1f2d3d; }
+    .wrap { max-width:640px; margin:32px auto; padding:0 16px; }
+    .card { background:#fff; border-radius:10px; box-shadow:0 1px 4px rgba(0,0,0,.08); padding:24px; }
+    h1 { font-size:20px; margin:0 0 4px; }
+    .sub { color:#6b7a8d; font-size:14px; margin-bottom:20px; }
+    .row { display:flex; padding:8px 0; border-bottom:1px solid #eef1f4; font-size:14px; }
+    .row .k { width:180px; color:#6b7a8d; flex:none; }
+    .docs a { display:block; color:#2f8f5b; margin:4px 0; }
+    label.opt { display:block; padding:10px 12px; border:1px solid #d7dee6; border-radius:8px; margin:8px 0; cursor:pointer; }
+    label.opt input { margin-right:8px; }
+    textarea { width:100%; box-sizing:border-box; border:1px solid #d7dee6; border-radius:8px; padding:10px; min-height:80px; font:inherit; }
+    .err { background:#fdecec; color:#c0392b; padding:10px 12px; border-radius:8px; margin:12px 0; font-size:14px; }
+    .btn { background:#2f8f5b; color:#fff; border:0; border-radius:8px; padding:12px 20px; font-size:15px; cursor:pointer; margin-top:14px; }
+    .lead { margin:18px 0 6px; font-weight:600; }
+    a.crm { color:#1976d2; word-break:break-all; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Согласование договора {{ contract.number }}</h1>
+      <div class="sub">{{ contract.title }}</div>
+
+      <div class="row"><div class="k">Юрлицо</div><div>{{ contract.organization.short_name }}</div></div>
+      {% if contract.cfo %}<div class="row"><div class="k">ЦФО</div><div>{{ contract.cfo.name }}</div></div>{% endif %}
+      {% if contract.amount is not None %}<div class="row"><div class="k">Сумма</div><div>{{ contract.amount }}</div></div>{% endif %}
+      {% if contract.is_nonstandard %}<div class="row"><div class="k">Тип</div><div>Нестандартный (не по шаблону)</div></div>{% endif %}
+      {% if contract.has_disagreement_protocol %}<div class="row"><div class="k">Протокол</div><div>С протоколом разногласий</div></div>{% endif %}
+      {% if contract.comment %}<div class="row"><div class="k">Комментарий</div><div>{{ contract.comment }}</div></div>{% endif %}
+      {% if contract.crm_link %}<div class="row"><div class="k">CRM</div><div><a class="crm" href="{{ contract.crm_link }}" target="_blank">{{ contract.crm_link }}</a></div></div>{% endif %}
+
+      {% if documents %}
+        <div class="lead">Документы</div>
+        <div class="docs">{% for d in documents %}<a href="{{ d.url }}" target="_blank">{{ d.name }}</a>{% endfor %}</div>
+      {% endif %}
+
+      {% if already_decided %}
+        <div class="err">Вы уже приняли решение по этому договору.</div>
+      {% else %}
+        {% if error %}<div class="err">{{ error }}</div>{% endif %}
+        <form method="post">
+          <div class="lead">Ваше решение</div>
+          <label class="opt"><input type="radio" name="decision" value="approve" required>Согласовать</label>
+          <label class="opt"><input type="radio" name="decision" value="reject">Отклонить (укажите причину в комментарии)</label>
+          <div class="lead">Комментарий</div>
+          <textarea name="comment" placeholder="Комментарий (обязателен при отклонении)">{{ comment_value }}</textarea>
+          <button class="btn" type="submit">Отправить решение</button>
+        </form>
+      {% endif %}
+    </div>
+  </div>
+</body>
+</html>

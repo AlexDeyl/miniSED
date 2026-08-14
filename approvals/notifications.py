@@ -147,3 +147,45 @@ def notify_participant(agreement, participant, base_url: str) -> None:
     b24_id = _resolve_b24_id(participant)
     if b24_id:
         _bitrix_notify(b24_id, f"{subject}\n{approve_url}")
+
+
+def _resolve_email_by_b24(b24_id: int) -> str:
+    """E-mail сотрудника по b24-id: профиль → B24UserEmail → Битрикс."""
+    prof = UserProfile.objects.filter(bitrix_id=b24_id).first()
+    if prof and prof.email:
+        return prof.email.strip()
+    link = B24UserEmail.objects.filter(b24_user_id=b24_id).first()
+    if link and link.email:
+        return link.email.strip()
+    return _bitrix_email(b24_id)
+
+
+def notify_author_result(agreement, *, approved: bool, by_name: str = "", comment: str = "") -> None:
+    """Инициатору (автору) — итог согласования: согласовано или отклонено.
+
+    Почта + Битрикс-колокольчик, best-effort."""
+    b24 = agreement.author_b24_id
+    if not b24:
+        return
+
+    if approved:
+        subject = f"Согласовано #{agreement.id}: {agreement.title}"
+        lines = ["Ваш документ согласован.", "", f"Название: {agreement.title}"]
+    else:
+        who = f" ({by_name})" if by_name else ""
+        subject = f"Отклонено #{agreement.id}: {agreement.title}"
+        lines = [f"Ваш документ отклонён{who}.", "", f"Название: {agreement.title}"]
+        if comment:
+            lines.append(f"Причина: {comment}")
+    if agreement.crm_link:
+        lines.append(f"CRM: {agreement.crm_link}")
+    body = "\n".join(lines)
+
+    email = _resolve_email_by_b24(b24)
+    if email:
+        try:
+            send_mail(subject, body, getattr(settings, "DEFAULT_FROM_EMAIL", None),
+                      [email], fail_silently=True)
+        except Exception:
+            pass
+    _bitrix_notify(b24, subject)

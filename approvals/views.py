@@ -417,7 +417,8 @@ class AgreementViewSet(viewsets.ModelViewSet):
         from . import notifications
 
         try:
-            base_url = self.request.build_absolute_uri("/")
+            base_url = (getattr(settings, "PUBLIC_BASE_URL", "") or "").rstrip("/") \
+                or self.request.build_absolute_uri("/")
             notifications.notify_participant(agreement, participant, base_url)
         except Exception as e:
             print("NOTIFY ERROR for participant", participant.id, e)
@@ -427,6 +428,21 @@ class AgreementViewSet(viewsets.ModelViewSet):
         qs = self.get_queryset().filter(author_b24_id=self.b24_id)
         serializer = self.get_serializer(qs, many=True)
         return Response(serializer.data)
+
+    @action(detail=False, methods=["get"])
+    def badge_counts(self, request):
+        """Счётчики для вкладок светофора (мои согласования):
+        отклонённые/завершённые — сколько я ЕЩЁ НЕ просмотрел после смены статуса."""
+        from core import services as core_services
+
+        my_qs = Agreement.objects.filter(author_b24_id=self.b24_id)
+        rejected = my_qs.filter(status=Agreement.STATUS_REJECTED)
+        completed = my_qs.filter(status=Agreement.STATUS_COMPLETED)
+        return Response({
+            "rejected_unseen": len(core_services.unseen_pks(self.b24_id, rejected)),
+            "completed_unseen": len(core_services.unseen_pks(self.b24_id, completed)),
+            "in_progress": my_qs.filter(status=Agreement.STATUS_IN_PROGRESS).count(),
+        })
 
     @action(detail=False, methods=["get"])
     def todo(self, request):
@@ -577,6 +593,24 @@ class AgreementViewSet(viewsets.ModelViewSet):
             next_p = self._get_next_waiting(agreement)
             if next_p:
                 self._notify_participant(agreement, next_p)
+
+        # Инициатору — итог: согласовано (все приняли) или отклонено.
+        try:
+            from core.models import UserProfile
+            from . import notifications
+
+            if agreement.status == Agreement.STATUS_COMPLETED:
+                notifications.notify_author_result(agreement, approved=True)
+            elif agreement.status == Agreement.STATUS_REJECTED:
+                by_name = ""
+                if participant.b24_user_id:
+                    prof = UserProfile.objects.filter(bitrix_id=participant.b24_user_id).first()
+                    by_name = prof.fio if prof else ""
+                notifications.notify_author_result(
+                    agreement, approved=False, by_name=by_name, comment=comment
+                )
+        except Exception as e:
+            print("NOTIFY author result error:", e)
 
         return Response({"status": participant.status})
 
@@ -946,6 +980,10 @@ def simple_create_agreement(request):
                 status=400,
             )
 
+    flow_type = request.data.get("flow_type") or Agreement.FLOW_PARALLEL
+    if flow_type not in dict(Agreement.FLOW_CHOICES):
+        flow_type = Agreement.FLOW_PARALLEL
+
     agreement = Agreement.objects.create(
         title=title,
         description=description,
@@ -954,6 +992,7 @@ def simple_create_agreement(request):
         crm_link=crm_link,
         author_b24_id=b24_id,
         status=Agreement.STATUS_IN_PROGRESS,
+        flow_type=flow_type,
     )
 
     files = request.FILES.getlist("files")
@@ -983,63 +1022,31 @@ def simple_create_agreement(request):
             order_index=idx,
         )
     external_raw = request.data.get("external_emails", "") or ""
-    print("DEBUG external_emails raw:", repr(external_raw))
-
     external_list = [x.strip() for x in external_raw.split(",") if x.strip()]
-    print("DEBUG external_emails parsed:", external_list)
-
     for idx, email in enumerate(external_list, start=100):
-        participant = Participant.objects.create(
+        Participant.objects.create(
             agreement=agreement,
             type=Participant.TYPE_EXTERNAL,
             email=email,
             order_index=idx,
         )
 
+    # Уведомления при создании — И внутренним, И внешним участникам, единым
+    # богатым письмом (название, описание, сумма, CRM + ссылка-токен на страницу
+    # согласования без авторизации). Для последовательного маршрута шлём только
+    # первому (остальным — по мере наступления их очереди в decide).
+    from . import notifications
+
+    base_url = (getattr(settings, "PUBLIC_BASE_URL", "") or "").rstrip("/") \
+        or request.build_absolute_uri("/")
+    parts = list(agreement.participants.order_by("order_index"))
+    if agreement.flow_type == Agreement.FLOW_SEQUENTIAL:
+        parts = parts[:1]
+    for p in parts:
         try:
-            approve_url = request.build_absolute_uri(
-                reverse("external_approve", args=[participant.external_token])
-            )
+            notifications.notify_participant(agreement, p, base_url)
         except Exception as e:
-            print("ERROR build approve_url:", e)
-            approve_url = ""
-
-        subject = f"Согласование документа: {agreement.title}"
-
-        message_lines = [
-            "Вам направлен документ на согласование.",
-            "",
-            f"Название: {agreement.title}",
-        ]
-        if agreement.description:
-            message_lines.append(f"Описание: {agreement.description}")
-        if agreement.amount is not None:
-            message_lines.append(f"Сумма: {agreement.amount}")
-        if agreement.deadline:
-            message_lines.append(f"Дедлайн: {agreement.deadline}")
-        message_lines.append("")
-        if approve_url:
-            message_lines.append(
-                "Перейдите по ссылке, чтобы согласовать или отклонить документ:"
-            )
-            message_lines.append(approve_url)
-
-        message = "\n".join(message_lines)
-
-        try:
-            print(
-                f"DEBUG send_mail to {email}: "
-                f"from={getattr(settings, 'DEFAULT_FROM_EMAIL', None)}"
-            )
-            send_mail(
-                subject,
-                message,
-                getattr(settings, "DEFAULT_FROM_EMAIL", None),
-                [email],
-                fail_silently=False,
-            )
-        except Exception as e:
-            print(f"ERROR send_mail to {email}: {e}")
+            print("NOTIFY create error:", e)
 
     serializer = AgreementSerializer(agreement)
     return Response(serializer.data, status=201)

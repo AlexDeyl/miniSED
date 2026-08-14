@@ -3,8 +3,10 @@ DRF API документов и версий. Файлы отдаются тол
 endpoint с проверкой авторизации (ТЗ п.15.6) — не по прямой ссылке.
 """
 
+import json
+
 from django.contrib.contenttypes.models import ContentType
-from django.http import FileResponse, Http404
+from django.http import FileResponse, Http404, JsonResponse
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework import viewsets
@@ -16,8 +18,8 @@ from rest_framework.response import Response
 
 from core.auth import get_current_b24_id
 
-from . import services
-from .models import Document, DocumentVersion
+from . import editing, services
+from .models import Document, DocumentVersion, EditSession
 from .serializers import DocumentSerializer
 
 
@@ -106,8 +108,75 @@ class DocumentViewSet(viewsets.ModelViewSet):
             filename=version.original_filename or f"document_{doc.id}_v{version.version_number}",
         )
 
+    @action(detail=True, methods=["get"], url_path="editor-config")
+    def editor_config(self, request, pk=None):
+        """
+        Конфиг для онлайн-редактора (ТЗ п.7.2-7.3). Открывается редактор всегда
+        по АКТУАЛЬНОЙ версии; результат вернётся отдельной версией через callback.
+        """
+        doc = self.get_object()
+        if not editing.is_enabled():
+            return Response({"detail": "Онлайн-редактор не подключён."}, status=409)
+        if not editing.is_editable(doc.current_version):
+            return Response(
+                {"detail": "Этот документ нельзя редактировать онлайн."}, status=409
+            )
+        profile = getattr(request.user, "minised_profile", None)
+        user_name = getattr(profile, "full_name", "") or ""
+        return Response(
+            editing.build_config(doc, b24_id=self.b24_id, user_name=user_name)
+        )
+
     def destroy(self, request, *args, **kwargs):
         # мягкое удаление вместо физического (ТЗ п.15.6)
         doc = self.get_object()
         services.soft_delete(doc)
         return Response(status=204)
+
+
+# --------------------------------------------------------------------------- #
+# Эндпоинты сервер→сервер (сервер документов ходит без пользовательской сессии,
+# авторизуется нашим одноразовым токеном в URL — в обход b24-гейта вьюсета).
+# --------------------------------------------------------------------------- #
+@csrf_exempt
+def ds_download(request, pk, version_id):
+    """Отдать файл версии серверу документов по подписанному токену `?t=`."""
+    if not editing.is_enabled():
+        raise Http404()
+    payload = editing.jwt_decode(request.GET.get("t", ""))
+    if not payload or payload.get("typ") != "dl" or str(payload.get("vid")) != str(version_id):
+        raise Http404()
+    version = DocumentVersion.objects.filter(id=version_id, document_id=pk).first()
+    if version is None or not version.file:
+        raise Http404()
+    return FileResponse(version.file.open("rb"))
+
+
+@csrf_exempt
+def editor_callback(request, pk):
+    """
+    Приём результата редактирования от сервера документов. Отвечаем строго
+    `{"error": 0}` при успехе — иначе сервер документов повторит доставку.
+    """
+    if not editing.is_enabled():
+        return JsonResponse({"error": 1})
+    payload = editing.jwt_decode(request.GET.get("t", ""))
+    if not payload or payload.get("typ") != "cb":
+        return JsonResponse({"error": 1})
+    session = EditSession.objects.filter(id=payload.get("sid"), document_id=pk).first()
+    if session is None:
+        return JsonResponse({"error": 1})
+
+    try:
+        body = json.loads(request.body or b"{}")
+    except (ValueError, json.JSONDecodeError):
+        return JsonResponse({"error": 1})
+
+    # Если у сервера документов включён JWT — тело тоже подписано (поле `token`).
+    if editing._jwt_secret():  # noqa: SLF001 — общий секрет модуля
+        inner = editing.jwt_decode(body.get("token", ""))
+        if inner is None:
+            return JsonResponse({"error": 1})
+        body = inner.get("payload", inner)
+
+    return JsonResponse(editing.handle_callback(session, body))

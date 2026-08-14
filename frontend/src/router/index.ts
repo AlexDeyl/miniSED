@@ -61,6 +61,25 @@ const router = createRouter({
       meta: { title: 'Заявка' },
     },
     {
+      path: '/contracts',
+      name: 'contracts',
+      component: () => import('@/views/ContractsView.vue'),
+      meta: { title: 'Договоры' },
+    },
+    {
+      path: '/contracts/new',
+      name: 'contract-new',
+      component: () => import('@/views/ContractCreateView.vue'),
+      meta: { title: 'Новый договор' },
+    },
+    {
+      path: '/contracts/:id',
+      name: 'contract-detail',
+      component: () => import('@/views/ContractDetailView.vue'),
+      props: true,
+      meta: { title: 'Договор' },
+    },
+    {
       path: '/legal',
       name: 'legal',
       component: () => import('@/views/LegalQueueView.vue'),

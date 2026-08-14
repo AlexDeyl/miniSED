@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
+import { bitrix } from '@/services/bitrix'
 import { requests, type UserOption } from '@/services/requests'
 import { api, ApiError } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
@@ -61,6 +62,7 @@ async function load() {
         roleNames.value = Object.fromEntries(t.roles?.map((r) => [r.code, r.name]) || [])
       } catch { /* не критично */ }
     }
+    await enrichUnknownUsers()
     if (canSubmit.value) await loadRoute()
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Не удалось загрузить'
@@ -78,6 +80,24 @@ async function loadRoute() {
 function nameByBid(bid: number | null | undefined): string {
   const u = users.value.find((x) => x.bitrix_id === bid)
   return u ? u.fio : ''
+}
+
+// Участника могли выбрать поиском по Битриксу — в матрице сотрудников
+// (/core/users/) его нет, и он показался бы как «USER #id». Дотягиваем ФИО
+// из портала; вне Битрикса — тихий no-op.
+async function enrichUnknownUsers() {
+  const need = new Set<number>()
+  for (const r of req.value?.approval?.rounds || []) {
+    for (const p of r.participants) {
+      if (p.type === 'internal' && p.b24_user_id && !nameByBid(p.b24_user_id)) {
+        need.add(p.b24_user_id)
+      }
+    }
+  }
+  if (!need.size) return
+  try {
+    users.value = users.value.concat(await bitrix.userOptionsByIds([...need]))
+  } catch { /* портал недоступен — останется «USER #id» */ }
 }
 
 const isInitiator = computed(() => req.value?.initiator_b24_id === auth.b24UserId)

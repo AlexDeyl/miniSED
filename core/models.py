@@ -485,3 +485,32 @@ class AuditLog(models.Model):
 
     def __str__(self):
         return f"{self.action} @ {self.created_at:%Y-%m-%d %H:%M}"
+
+
+# ===========================================================================
+#  Отметки «просмотрено» (для счётчиков непросмотренного)
+# ===========================================================================
+class SeenMark(models.Model):
+    """
+    Когда пользователь (по b24-id) последний раз ОТКРЫВАЛ карточку.
+
+    Универсально (ContentType), поэтому переиспользуется всеми модулями.
+    Элемент считается «непросмотренным», если отметки нет ИЛИ она старше
+    updated_at элемента (т.е. после моего просмотра карточка изменилась —
+    например, сменился статус). Обновляется при открытии карточки.
+    """
+
+    user_b24_id = models.IntegerField("Пользователь (ID Б24)", db_index=True)
+    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
+    object_id = models.PositiveIntegerField()
+    target = GenericForeignKey("content_type", "object_id")
+    seen_at = models.DateTimeField("Просмотрено", auto_now=True)
+
+    class Meta:
+        verbose_name = "Отметка просмотра"
+        verbose_name_plural = "Отметки просмотра"
+        unique_together = ("user_b24_id", "content_type", "object_id")
+        indexes = [models.Index(fields=["user_b24_id", "content_type"])]
+
+    def __str__(self):
+        return f"USER#{self.user_b24_id} saw {self.content_type}#{self.object_id}"

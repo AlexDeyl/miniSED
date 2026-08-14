@@ -9,6 +9,25 @@
     <div id="app"></div>
     <!-- SDK Битрикс24: определён только внутри iframe портала (для авто-входа) -->
     <script src="//api.bitrix24.com/api/v1/"></script>
+    <!--
+      Завершение установки приложения в Битрикс24. При установке портал открывает
+      обработчик (/app), и приложение ОБЯЗАНО вызвать BX24.installFinish(), иначе
+      установка остаётся незавершённой и обычные сотрудники видят
+      «Приложение ещё не установлено». Вызываем внутри BX24.init: в install-контексте
+      это завершает установку, при обычном открытии — безвредно. Вне портального
+      iframe BX24.init просто не сработает.
+    -->
+    <script>
+      (function () {
+        try {
+          if (window.BX24 && typeof window.BX24.init === 'function') {
+            window.BX24.init(function () {
+              try { window.BX24.installFinish(); } catch (e) {}
+            });
+          }
+        } catch (e) {}
+      })();
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

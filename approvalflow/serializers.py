@@ -79,6 +79,7 @@ class ApprovalDetailSerializer(ApprovalListSerializer):
     def get_documents(self, obj):
         # несколько документов, привязанных к согласованию (ТЗ п.7.1)
         from django.contrib.contenttypes.models import ContentType
+        from documents import editing
         from documents.models import Document
 
         ct = ContentType.objects.get_for_model(obj.__class__)
@@ -95,6 +96,8 @@ class ApprovalDetailSerializer(ApprovalListSerializer):
                 "download_url": (
                     f"/api/documents/{d.id}/versions/{cur.id}/download/" if cur else None
                 ),
+                # можно ли редактировать онлайн (фича включена + подходящий формат)
+                "can_edit_online": editing.is_editable(cur),
             })
         return out
 

@@ -3,16 +3,32 @@ import { ref } from 'vue'
 
 // Режим списка согласований (вкладки). Вынесен в стор, потому что кнопки
 // живут в сайдбаре (App.vue), а список — в SvetoforView.
-export type SvetoforMode = 'todo' | 'my' | 'all' | 'templates'
+export type SvetoforMode =
+  | 'todo'
+  | 'in_progress'
+  | 'rejected'
+  | 'completed'
+  | 'all'
+  | 'templates'
 
 export const SVETOFOR_TABS: { code: SvetoforMode; label: string }[] = [
   { code: 'todo', label: 'Требуется действие' },
-  { code: 'my', label: 'Созданные мной' },
+  { code: 'in_progress', label: 'В работе' },
+  { code: 'rejected', label: 'Отклонённые' },
+  { code: 'completed', label: 'Завершённые' },
   { code: 'all', label: 'Все' },
   { code: 'templates', label: 'Шаблоны' },
 ]
 
 export const useSvetoforStore = defineStore('svetofor', () => {
   const mode = ref<SvetoforMode>('todo')
-  return { mode }
+  // Счётчики для бейджей в сайдбаре (обновляются в SvetoforView, видны независимо
+  // от активной вкладки):
+  //  - todoCount    — ждут моего решения (согласования + заявки + договоры);
+  //  - rejectedUnseen / completedUnseen — мои согласования, которые я ещё не
+  //    открывал после того, как их отклонили / завершили.
+  const todoCount = ref(0)
+  const rejectedUnseen = ref(0)
+  const completedUnseen = ref(0)
+  return { mode, todoCount, rejectedUnseen, completedUnseen }
 })

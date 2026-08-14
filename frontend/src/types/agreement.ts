@@ -58,6 +58,7 @@ export interface VersionedDoc {
   title: string
   current_version_number: number | null
   versions: DocVersion[]
+  can_edit_online: boolean
 }
 
 export interface Agreement {

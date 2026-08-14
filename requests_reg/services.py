@@ -84,8 +84,10 @@ def _sync_status(request: RegulatoryRequest) -> None:
         _set(request, constants.STATUS_ON_APPROVAL)
     elif approval.status == Approval.STATUS_REJECTED:
         _set(request, constants.STATUS_REJECTED)
+        _notify("notify_initiator_status", request)  # инициатору — отклонена
     elif approval.status == Approval.STATUS_RETURNED:
         _set(request, constants.STATUS_RETURNED)
+        _notify("notify_initiator_status", request)  # инициатору — возвращена
     elif approval.status == Approval.STATUS_COMPLETED:
         if request.status in (
             constants.STATUS_ON_APPROVAL,
@@ -94,6 +96,7 @@ def _sync_status(request: RegulatoryRequest) -> None:
         ):
             # финальное утверждение → согласована → автопередача юристам
             _set(request, constants.STATUS_APPROVED)
+            _notify("notify_initiator_status", request)  # инициатору — согласована
             _set(request, constants.STATUS_TO_LEGAL)
             log_action("request_approved_to_legal", target=request)
             _notify("notify_legal_queue", request)  # юристам — новая на исполнение

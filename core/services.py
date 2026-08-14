@@ -6,7 +6,47 @@ from __future__ import annotations
 
 from django.contrib.contenttypes.models import ContentType
 
-from .models import AuditLog, IntegrationEvent, UserProfile
+from .models import AuditLog, IntegrationEvent, SeenMark, UserProfile
+
+
+def mark_seen(user_b24_id: int, obj) -> None:
+    """Отметить карточку `obj` просмотренной пользователем (upsert, seen_at=now)."""
+    if not user_b24_id or obj is None:
+        return
+    ct = ContentType.objects.get_for_model(obj.__class__)
+    mark, created = SeenMark.objects.get_or_create(
+        user_b24_id=user_b24_id, content_type=ct, object_id=obj.pk
+    )
+    if not created:
+        mark.save(update_fields=["seen_at"])  # auto_now обновит seen_at
+
+
+def unseen_pks(user_b24_id: int, queryset) -> set:
+    """
+    Множество pk из queryset, которые пользователь НЕ видел после последнего
+    изменения (нет отметки ИЛИ отметка старше updated_at элемента).
+
+    Модель queryset должна иметь поле updated_at.
+    """
+    if not user_b24_id:
+        return set()
+    model = queryset.model
+    ct = ContentType.objects.get_for_model(model)
+    items = list(queryset.values_list("pk", "updated_at"))
+    if not items:
+        return set()
+    seen = dict(
+        SeenMark.objects.filter(
+            user_b24_id=user_b24_id, content_type=ct,
+            object_id__in=[pk for pk, _ in items],
+        ).values_list("object_id", "seen_at")
+    )
+    out = set()
+    for pk, updated in items:
+        s = seen.get(pk)
+        if s is None or (updated is not None and s < updated):
+            out.add(pk)
+    return out
 
 
 def _client_meta(request):

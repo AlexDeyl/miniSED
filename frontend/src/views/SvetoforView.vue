@@ -3,8 +3,11 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { agreements } from '@/services/agreements'
 import { requests } from '@/services/requests'
+import { contracts } from '@/services/contracts'
+import type { ContractListItem } from '@/types/contract'
 import { bitrix, type BitrixUser, type BitrixDeal } from '@/services/bitrix'
 import BitrixSearchModal from '@/components/BitrixSearchModal.vue'
+import DocumentEditor from '@/components/DocumentEditor.vue'
 import { api, ApiError } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import { useSvetoforStore, type SvetoforMode as Mode } from '@/stores/svetofor'
@@ -23,6 +26,8 @@ const mode = computed(() => svet.mode)
 const items = ref<Agreement[]>([])
 // Регламентные заявки, ждущие моего решения (показываем во вкладке «Требует действия»).
 const requestTodo = ref<RegulatoryRequestListItem[]>([])
+// Договоры, ждущие моего решения (та же вкладка «Требует действия»).
+const contractTodo = ref<ContractListItem[]>([])
 const templates = ref<AgreementTemplate[]>([])
 const selected = ref<Agreement | null>(null)
 const loading = ref(false)
@@ -73,9 +78,21 @@ async function enrichUsers(ids: (number | null | undefined)[]) {
   } catch { /* вне Битрикса недоступно */ }
 }
 
+// Статусные вкладки показывают СОЗДАННЫЕ МНОЙ согласования, отфильтрованные по
+// статусу (в работе / отклонённые / завершённые).
+const STATUS_BY_MODE: Partial<Record<Mode, string>> = {
+  in_progress: 'in_progress',
+  rejected: 'rejected',
+  completed: 'completed',
+}
+
 async function fetchByMode(m: Mode): Promise<Agreement[]> {
   if (m === 'todo') return agreements.todo()
-  if (m === 'my') return agreements.my()
+  const statusFilter = STATUS_BY_MODE[m]
+  if (statusFilter) {
+    const mine = await agreements.my()
+    return mine.filter((a) => a.status === statusFilter)
+  }
   return agreements.all()
 }
 
@@ -90,8 +107,9 @@ async function loadList() {
       items.value = await fetchByMode(mode.value)
       // подтянуть имена авторов/участников списка
       enrichUsers(items.value.flatMap((a) => [a.author_b24_id, ...a.participants.map((p) => p.b24_user_id)]))
-      // заявки-согласования показываем только во вкладке «Требует действия»
+      // заявки и договоры, ждущие моего решения — только во вкладке «Требует действия»
       requestTodo.value = mode.value === 'todo' ? await requests.todo().catch(() => []) : []
+      contractTodo.value = mode.value === 'todo' ? await contracts.todo().catch(() => []) : []
     }
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Ошибка загрузки'
@@ -106,6 +124,21 @@ function setMode(m: Mode) {
 // Смена вкладки (в т.ч. из сайдбара) перезагружает список.
 watch(() => svet.mode, loadList)
 
+// Счётчики бейджей в сайдбаре: «требует действия» (по всем модулям) +
+// непросмотренные отклонённые/завершённые (мои согласования). Обновляем всегда —
+// бейджи видны независимо от активной вкладки.
+async function refreshBadges() {
+  const [ag, rq, ct, counts] = await Promise.all([
+    agreements.todo().catch(() => []),
+    requests.todo().catch(() => []),
+    contracts.todo().catch(() => []),
+    agreements.badgeCounts().catch(() => ({ rejected_unseen: 0, completed_unseen: 0, in_progress: 0 })),
+  ])
+  svet.todoCount = ag.length + rq.length + ct.length
+  svet.rejectedUnseen = counts.rejected_unseen
+  svet.completedUnseen = counts.completed_unseen
+}
+
 const decisionComment = ref('')
 async function open(id: number) {
   decisionComment.value = ''
@@ -113,6 +146,8 @@ async function open(id: number) {
     const ag = await agreements.get(id)
     selected.value = ag
     enrichUsers([ag.author_b24_id, ...ag.participants.map((p) => p.b24_user_id)])
+    // отметить просмотренным → сбросить «непросмотрено» и обновить бейджи
+    agreements.markSeen(id).then(() => refreshBadges()).catch(() => {})
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Не удалось открыть'
   }
@@ -132,6 +167,7 @@ async function decide(p: AgParticipant, decision: 'approve' | 'reject') {
   }
   await run(() => agreements.decide(selected.value!.id, p.id, decision, comment))
   decisionComment.value = ''
+  void refreshBadges()
 }
 
 // участники ТЕКУЩЕГО круга (ТЗ п.7.4)
@@ -253,6 +289,14 @@ async function uploadVersion(e: Event) {
   await run(() => agreements.addVersion(did, file, comment))
   input.value = ''
   versionDocId.value = null
+}
+
+// --- онлайн-редактирование документа (ТЗ п.7.2-7.3) ---
+const editingDocId = ref<number | null>(null)
+function onEditorClose(changed: boolean) {
+  editingDocId.value = null
+  // если документ правился — перечитать карточку, чтобы показать новую версию
+  if (changed && selected.value) open(selected.value.id)
 }
 
 // --- лист согласования (ТЗ п.7.7) ---
@@ -465,7 +509,7 @@ async function createApproval() {
     externalList.value = []
     formFiles.value = []
     selectedTemplate.value = ''
-    setMode('my')
+    setMode('in_progress')
     await open(created.id)
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Не удалось создать'
@@ -489,7 +533,7 @@ const PART_STATUS_LABEL: Record<string, string> = {
   waiting: 'Ожидаем', approved: 'Согласовано', rejected: 'Отклонено',
 }
 
-onMounted(() => { loadUserDir(); loadList() })
+onMounted(() => { loadUserDir(); loadList(); refreshBadges() })
 </script>
 
 <template>
@@ -506,6 +550,13 @@ onMounted(() => { loadUserDir(); loadList() })
       @pick-user="onPickUser"
       @pick-deal="onPickDeal"
       @close="pickerKind = null"
+    />
+
+    <!-- Оверлей онлайн-редактора документа (ТЗ п.7.2-7.3) -->
+    <DocumentEditor
+      v-if="editingDocId"
+      :doc-id="editingDocId"
+      @close="onEditorClose"
     />
 
     <p v-if="error" class="state state--error" style="margin:8px 0">{{ error }}</p>
@@ -535,7 +586,18 @@ onMounted(() => { loadUserDir(); loadList() })
             <div class="item-sub">{{ r.subject_name || 'Без темы' }} · {{ r.status_display }}</div>
           </RouterLink>
 
-          <p v-if="items.length === 0 && !(mode === 'todo' && requestTodo.length)" class="state">Пусто.</p>
+          <!-- Договоры, ждущие моего решения -->
+          <RouterLink
+            v-for="c in (mode === 'todo' ? contractTodo : [])" :key="'con' + c.id"
+            :to="`/contracts/${c.id}`" class="svet-card svet-card--req">
+            <div class="svet-card-row">
+              <span class="svet-card-title">{{ c.number }} · {{ c.title }}</span>
+              <span class="req-badge">Договор</span>
+            </div>
+            <div class="item-sub">{{ c.organization_name }} · {{ c.status_display }}</div>
+          </RouterLink>
+
+          <p v-if="items.length === 0 && !(mode === 'todo' && (requestTodo.length || contractTodo.length))" class="state">Пусто.</p>
           <div v-for="a in items" :key="a.id" class="svet-card" :class="{ active: selected?.id === a.id }" @click="open(a.id)">
             <div class="svet-card-row">
               <span class="svet-card-title">#{{ a.id }} {{ a.title }}</span>
@@ -593,6 +655,12 @@ onMounted(() => { loadUserDir(); loadList() })
                       v{{ v.version_number }}{{ v.is_current ? ' ✓' : '' }}
                     </a>
                     <button v-if="isAuthor" type="button" class="doc-link doc-linkbtn" @click="pickVersion(d.id)">＋ новая версия</button>
+                    <button
+                      v-if="d.can_edit_online"
+                      type="button"
+                      class="doc-link doc-linkbtn"
+                      @click="editingDocId = d.id"
+                    >✏️ Редактировать онлайн</button>
                   </div>
                   <template v-for="v in d.versions" :key="'c' + v.id">
                     <div v-if="v.change_comment" class="ag-muted" style="margin-top:2px">v{{ v.version_number }}: {{ v.change_comment }}</div>

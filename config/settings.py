@@ -62,6 +62,7 @@ INSTALLED_APPS = [
     "documents",
     "approvalflow",
     "requests_reg",
+    "contracts",
     "approvals",
     "bitrix",
 ]
@@ -253,3 +254,41 @@ BITRIX_OAUTH_TOKEN_URL = env(
     "BITRIX_OAUTH_TOKEN_URL", "https://oauth.bitrix.info/oauth/token"
 )
 BITRIX_OAUTH_REDIRECT_PATH = env("BITRIX_OAUTH_REDIRECT_PATH", "")
+
+
+# ---------------------------------------------------------------------------
+# Онлайн-редактирование документов (ТЗ п.7.2-7.3)
+# ---------------------------------------------------------------------------
+# Интеграция с сервером документов семейства OnlyOffice / Р7-Офис (единый API:
+# DocsAPI на фронте + callback + JWT). Провайдер выбирается на деплое сменой URL
+# (Р7-Офис для импортозамещённого контура либо OnlyOffice) — код одинаков.
+#
+# Пока сервер документов не развёрнут, фича спит: DOCS_EDITOR_ENABLED=False.
+# Модель/эндпоинты присутствуют, но редактор не предлагается и callback закрыт.
+#
+# Так как сервер документов ходит к нам ЗА файлом и ОБРАТНО с результатом сам
+# (сервер→сервер, не через браузер), ему нужен отдельный базовый URL, по которому
+# он видит MiniSED из своей сети — DOCS_EDITOR_CALLBACK_BASE_URL (в проде это
+# внутренний адрес, а не публичный периметр). Фолбэк — PUBLIC_BASE_URL.
+DOCS_EDITOR_ENABLED = env_bool("DOCS_EDITOR_ENABLED", default=False)
+# Информационное поле (onlyoffice | r7). Контракт идентичен, влияет лишь на UI-подписи.
+DOCS_EDITOR_PROVIDER = env("DOCS_EDITOR_PROVIDER", "onlyoffice")
+# Базовый URL сервера документов, откуда фронт грузит api.js (напр. https://docs.internal/).
+DOCS_EDITOR_SERVER_URL = (env("DOCS_EDITOR_SERVER_URL", "") or "").rstrip("/")
+# Общий секрет подписи JWT (тот же в конфиге сервера документов). Пустой → JWT выключен
+# (допустимо только в закрытом dev-контуре).
+DOCS_EDITOR_JWT_SECRET = env("DOCS_EDITOR_JWT_SECRET", "")
+# Базовый URL, по которому СЕРВЕР ДОКУМЕНТОВ достучится до MiniSED (скачивание файла
+# и callback). В проде — внутренний адрес; фолбэк — публичный.
+DOCS_EDITOR_CALLBACK_BASE_URL = (
+    env("DOCS_EDITOR_CALLBACK_BASE_URL", "") or PUBLIC_BASE_URL
+).rstrip("/")
+# Прямой (внутренний) адрес сервера документов, по которому MiniSED СКАЧИВАЕТ
+# результат редактирования, минуя внешний субпуть/self-signed TLS (см.
+# documents.editing.internalize_ds_url). Пусто → скачиваем по ссылке как есть.
+DOCS_EDITOR_INTERNAL_URL = (env("DOCS_EDITOR_INTERNAL_URL", "") or "").rstrip("/")
+# Расширения, для которых предлагается онлайн-редактирование (нижний регистр, без точки).
+DOCS_EDITOR_EDITABLE_EXTS = env_list(
+    "DOCS_EDITOR_EDITABLE_EXTS",
+    default="docx,doc,odt,rtf,txt,xlsx,xls,ods,csv,pptx,ppt,odp",
+)

@@ -197,3 +197,13 @@ def notify_legal_closed(request):
     b24, emails = _recipients(lawyer_b24_ids())
     _dispatch(b24, emails, "Заявка закрыта",
               f"Инициатор подтвердил получение, заявка закрыта: {_label(request)}")
+
+
+def notify_initiator_status(request):
+    """Инициатору — смена статуса заявки (согласована / отклонена / возвращена)."""
+    if not request.initiator_b24_id:
+        return
+    b24, emails = _recipients([request.initiator_b24_id])
+    st = request.get_status_display()
+    _dispatch(b24, emails, f"Заявка: {st}",
+              f"Статус заявки изменился: {_label(request)} — {st}")

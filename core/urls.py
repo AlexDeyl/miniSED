@@ -1,3 +1,4 @@
+from django.urls import path
 from rest_framework.routers import DefaultRouter
 
 from . import views
@@ -13,4 +14,7 @@ router.register("counterparties", views.CounterpartyViewSet, basename="counterpa
 router.register("roles", views.RoleViewSet, basename="role")
 router.register("users", views.UserProfileViewSet, basename="user")
 
-urlpatterns = router.urls
+urlpatterns = [
+    path("seen/", views.mark_seen, name="mark_seen"),
+    *router.urls,
+]

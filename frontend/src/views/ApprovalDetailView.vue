@@ -5,6 +5,7 @@ import { approvalflow } from '@/services/approvalflow'
 import { api, ApiError } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import type { ApprovalDetail, ApprovalParticipant } from '@/types/approval'
+import DocumentEditor from '@/components/DocumentEditor.vue'
 
 const props = defineProps<{ id: string }>()
 const auth = useAuthStore()
@@ -71,6 +72,14 @@ async function generateSheet() {
 
 function dl(url: string | null, name: string) {
   if (url) api.download(url, name).catch((e) => (error.value = e.message))
+}
+
+// Онлайн-редактирование (ТЗ п.7.2-7.3): открываем оверлей редактора по id документа.
+const editingDocId = ref<number | null>(null)
+function onEditorClose(changed: boolean) {
+  editingDocId.value = null
+  // если документ правился — перечитать, чтобы показать новую версию
+  if (changed) load()
 }
 
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -154,6 +163,14 @@ onMounted(load)
         <ul v-if="approval.documents.length" class="item-tags" style="flex-direction:column;align-items:flex-start;gap:6px;margin-bottom:8px">
           <li v-for="d in approval.documents" :key="d.id">
             <a href="#" @click.prevent="dl(d.download_url, d.title)">{{ d.title }} (в{{ d.current_version_number }})</a>
+            <button
+              v-if="d.can_edit_online"
+              class="btn btn--ghost"
+              style="margin-left:8px;font-size:12px;padding:2px 8px"
+              @click="editingDocId = d.id"
+            >
+              ✏️ Онлайн
+            </button>
           </li>
         </ul>
         <p v-else class="muted" style="margin:0 0 8px">Файлов пока нет.</p>
@@ -176,5 +193,12 @@ onMounted(load)
         </button>
       </div>
     </template>
+
+    <!-- Оверлей онлайн-редактора (ТЗ п.7.2-7.3) -->
+    <DocumentEditor
+      v-if="editingDocId"
+      :doc-id="editingDocId"
+      @close="onEditorClose"
+    />
   </section>
 </template>

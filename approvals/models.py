@@ -54,6 +54,7 @@ class Agreement(models.Model):
     )
     current_round = models.PositiveIntegerField("Текущий круг", default=1)
     created_at = models.DateTimeField("Создано", auto_now_add=True)
+    updated_at = models.DateTimeField("Обновлено", auto_now=True)
 
     class Meta:
         ordering = ["-id"]

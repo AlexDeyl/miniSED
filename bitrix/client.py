@@ -234,6 +234,38 @@ def get_users_by_ids(client: BitrixClient, ids: list[int]) -> list[dict]:
     return out
 
 
+def profiles_by_ids(ids) -> dict[int, dict[str, str]]:
+    """{b24_id: {"fio", "position"}} для сотрудников портала — best-effort.
+
+    Нужно для участников, которых нет в матрице UserProfile (их выбрали
+    поиском по Битриксу): без этого они попадают в листы согласования как
+    «USER #id». Без активного портала или при ошибке API — пустой словарь."""
+    bids = [int(x) for x in ids if x]
+    if not bids:
+        return {}
+    try:
+        portal = get_active_portal()
+        if not portal:
+            return {}
+        users = get_users_by_ids(BitrixClient(portal), bids)
+    except Exception:
+        return {}
+    out: dict[int, dict[str, str]] = {}
+    for u in users:
+        try:
+            uid = int(u.get("ID"))
+        except (TypeError, ValueError):
+            continue
+        fio = " ".join(
+            x.strip()
+            for x in (u.get("LAST_NAME"), u.get("NAME"), u.get("SECOND_NAME"))
+            if x and x.strip()
+        )
+        if fio:
+            out[uid] = {"fio": fio, "position": (u.get("WORK_POSITION") or "").strip()}
+    return out
+
+
 def notify_user(client: BitrixClient, user_id, message: str) -> None:
     """Системное уведомление пользователю портала (колокольчик Битрикс24).
     Требует scope `im` у приложения; при отсутствии — вызов бросит ошибку,
