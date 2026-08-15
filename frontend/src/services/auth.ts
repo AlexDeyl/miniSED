@@ -10,6 +10,8 @@ export interface AuthProfile {
   roles?: string[]
   permissions?: string[]
   organizations?: number[]
+  // Исполнитель комплиментов — ему показываем раздел «Заявки для исполнения».
+  is_compliment_executor?: boolean
 }
 
 export interface LoginResult extends AuthProfile {

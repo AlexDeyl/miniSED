@@ -102,6 +102,9 @@ ROLE_RESTAURANT_DIRECTOR = "restaurant_director"
 ROLE_FINANCE_DIRECTOR = "finance_director"
 ROLE_LEGAL_DEPT = "legal_dept"
 ROLE_FINAL_SIGNER = "final_signer"
+# Роли для заявок на комплименты (маршрут по категориям).
+ROLE_CEO_ASSISTANT = "ceo_assistant"
+ROLE_CONFECTIONER = "confectioner"
 
 ROLE_NAMES = {
     ROLE_CFO_HEAD: "Руководитель ЦФО",
@@ -115,6 +118,8 @@ ROLE_NAMES = {
     ROLE_FINANCE_DIRECTOR: "Финансовый директор УК",
     ROLE_LEGAL_DEPT: "Юридический отдел",
     ROLE_FINAL_SIGNER: "Финальный подписант / генеральный директор",
+    ROLE_CEO_ASSISTANT: "Помощник генерального директора",
+    ROLE_CONFECTIONER: "Кондитерский цех",
 }
 
 

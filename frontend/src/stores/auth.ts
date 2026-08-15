@@ -26,6 +26,8 @@ export const useAuthStore = defineStore('auth', () => {
   )
   // Юрист — по праву legal_manage (раздел «Заявки для юристов», групповой юрэтап).
   const isLawyer = computed(() => !!profile.value?.permissions?.includes('legal_manage'))
+  // Исполнитель комплиментов — ему виден раздел «Заявки для исполнения».
+  const isComplimentExecutor = computed(() => !!profile.value?.is_compliment_executor)
 
   function ls(key: string, value?: string | null): string | null {
     try {
@@ -141,6 +143,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   return {
     token, profile, b24UserId, ready, isAuthenticated, displayName, isLawyer,
+    isComplimentExecutor,
     login, bitrixLogin, applyToken, logout, init,
   }
 })

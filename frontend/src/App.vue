@@ -6,6 +6,7 @@ import { useSvetoforStore, SVETOFOR_TABS } from '@/stores/svetofor'
 import { useRequestsUiStore, REQUEST_TYPE_TABS } from '@/stores/requestsUi'
 import { useLegalUiStore, LEGAL_TABS } from '@/stores/legalUi'
 import { useContractsUiStore, CONTRACT_TABS } from '@/stores/contractsUi'
+import { useComplimentsUiStore, COMPLIMENT_TABS, EXECUTION_TABS } from '@/stores/complimentsUi'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -14,6 +15,7 @@ const svet = useSvetoforStore()
 const reqUi = useRequestsUiStore()
 const legalUi = useLegalUiStore()
 const contractsUi = useContractsUiStore()
+const complimentsUi = useComplimentsUiStore()
 
 const pageTitle = computed(() => (route.meta.title as string) || 'MiniSED')
 const bare = computed(() => route.meta.noShell === true)
@@ -22,6 +24,8 @@ const onSvetofor = computed(() => route.name === 'svetofor')
 const onRequests = computed(() => route.name === 'requests')
 const onLegal = computed(() => route.name === 'legal')
 const onContracts = computed(() => route.name === 'contracts')
+const onCompliments = computed(() => route.name === 'compliments')
+const onExecution = computed(() => route.name === 'execution')
 // Открыто из Битрикса (в iframe) — тогда «Выйти» не нужен (авто-вход портала).
 const inBitrix = window.self !== window.top
 
@@ -81,6 +85,32 @@ function tabBadge(code: string): number {
             class="sidebar-subtab" :class="{ active: contractsUi.mode === t.code }"
             @click="contractsUi.mode = t.code"
           >{{ t.label }}<span v-if="t.code === 'todo' && contractsUi.todoCount" class="subtab-badge">{{ contractsUi.todoCount }}</span></button>
+        </div>
+
+        <RouterLink to="/compliments">
+          <span>Комплименты</span>
+          <span v-if="complimentsUi.todoCount" class="nav-badge" title="Требует действия">{{ complimentsUi.todoCount }}</span>
+        </RouterLink>
+        <!-- под-вкладки комплиментов -->
+        <div v-if="onCompliments" class="sidebar-subtabs">
+          <button
+            v-for="t in COMPLIMENT_TABS" :key="t.code"
+            class="sidebar-subtab" :class="{ active: complimentsUi.mode === t.code }"
+            @click="complimentsUi.mode = t.code"
+          >{{ t.label }}<span v-if="t.code === 'todo' && complimentsUi.todoCount" class="subtab-badge">{{ complimentsUi.todoCount }}</span></button>
+        </div>
+
+        <!-- Раздел исполнителя: согласованные заявки не уходят письмом, а падают сюда -->
+        <RouterLink v-if="auth.isComplimentExecutor" to="/execution">
+          <span>Заявки для исполнения</span>
+          <span v-if="complimentsUi.executionCount" class="nav-badge" title="Ждут исполнения">{{ complimentsUi.executionCount }}</span>
+        </RouterLink>
+        <div v-if="onExecution" class="sidebar-subtabs">
+          <button
+            v-for="t in EXECUTION_TABS" :key="t.code"
+            class="sidebar-subtab" :class="{ active: complimentsUi.executionMode === t.code }"
+            @click="complimentsUi.executionMode = t.code"
+          >{{ t.label }}<span v-if="t.code === 'new' && complimentsUi.executionCount" class="subtab-badge">{{ complimentsUi.executionCount }}</span></button>
         </div>
 
         <RouterLink v-if="auth.isLawyer" to="/legal"><span>Работа юристов</span></RouterLink>

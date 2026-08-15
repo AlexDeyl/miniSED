@@ -125,16 +125,13 @@ def _pos(p: ApprovalParticipant, pos_by_bid: dict) -> str:
     return ""
 
 
-def render_pdf(approval: Approval, *, role_names: dict | None = None) -> bytes:
+def build_story(approval: Approval, *, role_names: dict | None = None) -> list:
+    """Флоуаблы листа согласования.
+
+    Вынесено отдельно, чтобы лист можно было подшить к другому документу
+    (например, к бланку заявки на комплимент) одним PDF, без склейки файлов."""
     role_names = role_names or {}
     font = _ensure_font()
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buffer, pagesize=A4,
-        leftMargin=18 * mm, rightMargin=18 * mm,
-        topMargin=16 * mm, bottomMargin=16 * mm,
-        title=f"Лист согласования #{approval.pk}",
-    )
 
     styles = getSampleStyleSheet()
     base = ParagraphStyle("base", parent=styles["Normal"], fontName=font, fontSize=9, leading=12)
@@ -210,8 +207,19 @@ def render_pdf(approval: Approval, *, role_names: dict | None = None) -> bytes:
         ParagraphStyle("total", parent=base, fontSize=11),
     ))
     story.append(Paragraph(f"Сформировано: {_fmt(timezone.now())}", label))
+    return story
 
-    doc.build(story)
+
+def render_pdf(approval: Approval, *, role_names: dict | None = None) -> bytes:
+    """Лист согласования отдельным PDF."""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=A4,
+        leftMargin=18 * mm, rightMargin=18 * mm,
+        topMargin=16 * mm, bottomMargin=16 * mm,
+        title=f"Лист согласования #{approval.pk}",
+    )
+    doc.build(build_story(approval, role_names=role_names))
     return buffer.getvalue()
 
 

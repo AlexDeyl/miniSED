@@ -72,6 +72,7 @@ urlpatterns = [
     path("api/approvalflow/", include("approvalflow.urls")),
     path("api/reg/", include("requests_reg.urls")),
     path("api/", include("contracts.urls")),
+    path("api/", include("compliments.urls")),
     path("api/", include("documents.urls")),
     path("api/", include(router.urls)),
 ]

@@ -46,7 +46,22 @@ def profile_payload(profile: UserProfile | None, user=None) -> dict:
         "roles": role_codes,
         "permissions": perm_codes,
         "organizations": list(profile.organizations.values_list("id", flat=True)),
+        # Показывать ли раздел «Заявки для исполнения» (комплименты).
+        "is_compliment_executor": _is_compliment_executor(profile.bitrix_id),
     }
+
+
+def _is_compliment_executor(b24_id) -> bool:
+    """Назначен ли человек исполнителем хотя бы одной категории комплиментов."""
+    if not b24_id:
+        return False
+    from compliments import constants as K
+    from requests_reg.models import RoleAssignment
+
+    executor_roles = {plan["executor"] for plan in K.CATEGORY_ROUTES.values()}
+    return RoleAssignment.objects.filter(
+        role_code__in=executor_roles, user_b24_id=b24_id, is_active=True
+    ).exists()
 
 
 @api_view(["POST"])

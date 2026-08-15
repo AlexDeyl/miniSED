@@ -4,7 +4,9 @@ import { RouterLink } from 'vue-router'
 import { agreements } from '@/services/agreements'
 import { requests } from '@/services/requests'
 import { contracts } from '@/services/contracts'
+import { compliments } from '@/services/compliments'
 import type { ContractListItem } from '@/types/contract'
+import type { ComplimentListItem } from '@/types/compliment'
 import { bitrix, type BitrixUser, type BitrixDeal } from '@/services/bitrix'
 import BitrixSearchModal from '@/components/BitrixSearchModal.vue'
 import DocumentEditor from '@/components/DocumentEditor.vue'
@@ -28,6 +30,8 @@ const items = ref<Agreement[]>([])
 const requestTodo = ref<RegulatoryRequestListItem[]>([])
 // Договоры, ждущие моего решения (та же вкладка «Требует действия»).
 const contractTodo = ref<ContractListItem[]>([])
+// Заявки на комплименты, ждущие моего решения.
+const complimentTodo = ref<ComplimentListItem[]>([])
 const templates = ref<AgreementTemplate[]>([])
 const selected = ref<Agreement | null>(null)
 const loading = ref(false)
@@ -110,6 +114,7 @@ async function loadList() {
       // заявки и договоры, ждущие моего решения — только во вкладке «Требует действия»
       requestTodo.value = mode.value === 'todo' ? await requests.todo().catch(() => []) : []
       contractTodo.value = mode.value === 'todo' ? await contracts.todo().catch(() => []) : []
+      complimentTodo.value = mode.value === 'todo' ? await compliments.todo().catch(() => []) : []
     }
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Ошибка загрузки'
@@ -128,13 +133,14 @@ watch(() => svet.mode, loadList)
 // непросмотренные отклонённые/завершённые (мои согласования). Обновляем всегда —
 // бейджи видны независимо от активной вкладки.
 async function refreshBadges() {
-  const [ag, rq, ct, counts] = await Promise.all([
+  const [ag, rq, ct, cm, counts] = await Promise.all([
     agreements.todo().catch(() => []),
     requests.todo().catch(() => []),
     contracts.todo().catch(() => []),
+    compliments.todo().catch(() => []),
     agreements.badgeCounts().catch(() => ({ rejected_unseen: 0, completed_unseen: 0, in_progress: 0 })),
   ])
-  svet.todoCount = ag.length + rq.length + ct.length
+  svet.todoCount = ag.length + rq.length + ct.length + cm.length
   svet.rejectedUnseen = counts.rejected_unseen
   svet.completedUnseen = counts.completed_unseen
 }
@@ -597,7 +603,21 @@ onMounted(() => { loadUserDir(); loadList(); refreshBadges() })
             <div class="item-sub">{{ c.organization_name }} · {{ c.status_display }}</div>
           </RouterLink>
 
-          <p v-if="items.length === 0 && !(mode === 'todo' && (requestTodo.length || contractTodo.length))" class="state">Пусто.</p>
+          <!-- Заявки на комплименты, ждущие моего решения -->
+          <RouterLink
+            v-for="c in (mode === 'todo' ? complimentTodo : [])" :key="'cmp' + c.id"
+            :to="`/compliments/${c.id}`" class="svet-card svet-card--req">
+            <div class="svet-card-row">
+              <span class="svet-card-title">{{ c.number }} · {{ c.title }}</span>
+              <span class="req-badge">Комплимент</span>
+            </div>
+            <div class="item-sub">{{ c.category_display }} · {{ c.company }}</div>
+          </RouterLink>
+
+          <p
+            v-if="items.length === 0 && !(mode === 'todo' && (requestTodo.length || contractTodo.length || complimentTodo.length))"
+            class="state"
+          >Пусто.</p>
           <div v-for="a in items" :key="a.id" class="svet-card" :class="{ active: selected?.id === a.id }" @click="open(a.id)">
             <div class="svet-card-row">
               <span class="svet-card-title">#{{ a.id }} {{ a.title }}</span>

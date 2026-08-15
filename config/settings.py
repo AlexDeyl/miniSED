@@ -63,6 +63,7 @@ INSTALLED_APPS = [
     "approvalflow",
     "requests_reg",
     "contracts",
+    "compliments",
     "approvals",
     "bitrix",
 ]

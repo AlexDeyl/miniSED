@@ -80,6 +80,31 @@ const router = createRouter({
       meta: { title: 'Договор' },
     },
     {
+      path: '/compliments',
+      name: 'compliments',
+      component: () => import('@/views/ComplimentsView.vue'),
+      meta: { title: 'Комплименты' },
+    },
+    {
+      path: '/compliments/new',
+      name: 'compliment-new',
+      component: () => import('@/views/ComplimentCreateView.vue'),
+      meta: { title: 'Новая заявка на комплимент' },
+    },
+    {
+      path: '/compliments/:id',
+      name: 'compliment-detail',
+      component: () => import('@/views/ComplimentDetailView.vue'),
+      props: true,
+      meta: { title: 'Заявка на комплимент' },
+    },
+    {
+      path: '/execution',
+      name: 'execution',
+      component: () => import('@/views/ExecutionQueueView.vue'),
+      meta: { title: 'Заявки для исполнения' },
+    },
+    {
       path: '/legal',
       name: 'legal',
       component: () => import('@/views/LegalQueueView.vue'),
