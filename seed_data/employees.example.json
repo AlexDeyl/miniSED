@@ -13,6 +13,7 @@
     "email": "petrov@example.com",
     "position": "Юрисконсульт",
     "organization": "ООО \"Пример\"",
-    "roles": ["approver", "lawyer"]
+    "roles": ["approver", "lawyer"],
+    "access_all": true
   }
 ]

@@ -15,6 +15,7 @@
   "role_assignments": [
     {"role_code": "cfo_head", "cfo": "Отдел продаж", "user_b24_id": 1, "user_name": "Иванов Иван Иванович"},
     {"role_code": "finance_director", "user_b24_id": 2, "user_name": "Петров Пётр Петрович"},
-    {"role_code": "final_signer", "user_b24_id": 3, "user_name": "Сидоров Сидор Сидорович"}
+    {"role_code": "final_signer", "user_b24_id": 3, "user_name": "Сидоров Сидор Сидорович"},
+    {"role_code": "final_signer", "organization": "АО \"Пример Отель\"", "user_b24_id": 4, "user_name": "Сергеев Сергей Сергеевич"}
   ]
 }
