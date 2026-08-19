@@ -192,6 +192,8 @@ class AgreementSerializer(serializers.ModelSerializer):
                 {
                     "id": v.id,
                     "version_number": v.version_number,
+                    # нужно фронту, чтобы имя скачиваемого файла сохраняло расширение
+                    "original_filename": v.original_filename,
                     "uploaded_at": v.uploaded_at,
                     "uploaded_by_b24_id": v.uploaded_by_b24_id,
                     "change_comment": v.change_comment,

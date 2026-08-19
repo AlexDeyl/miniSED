@@ -46,6 +46,7 @@ export interface DecisionLog {
 export interface DocVersion {
   id: number
   version_number: number
+  original_filename: string
   uploaded_at: string
   uploaded_by_b24_id: number | null
   change_comment: string

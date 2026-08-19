@@ -11,6 +11,7 @@ import { bitrix, type BitrixUser, type BitrixDeal } from '@/services/bitrix'
 import BitrixSearchModal from '@/components/BitrixSearchModal.vue'
 import DocumentEditor from '@/components/DocumentEditor.vue'
 import { api, ApiError } from '@/services/api'
+import { versionFileName } from '@/utils/filename'
 import { useAuthStore } from '@/stores/auth'
 import { useSvetoforStore, type SvetoforMode as Mode } from '@/stores/svetofor'
 import {
@@ -671,7 +672,7 @@ onMounted(() => { loadUserDir(); loadList(); refreshBadges() })
                   <div class="doc-name">{{ d.title }} <span class="ag-muted">· актуальная v{{ d.current_version_number }}</span></div>
                   <div class="doc-actions">
                     <a v-for="v in d.versions" :key="v.id" href="#" class="doc-link" :title="v.change_comment"
-                       @click.prevent="dl(v.download_url, `${d.title} v${v.version_number}`)">
+                       @click.prevent="dl(v.download_url, versionFileName(d.title, v))">
                       v{{ v.version_number }}{{ v.is_current ? ' ✓' : '' }}
                     </a>
                     <button v-if="isAuthor" type="button" class="doc-link doc-linkbtn" @click="pickVersion(d.id)">＋ новая версия</button>

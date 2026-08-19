@@ -2,6 +2,7 @@
 // Документы карточки: история версий, загрузка новой версии, онлайн-правка.
 // Общий блок для договоров, регламентных заявок и будущих модулей.
 import type { DocumentVersion } from '@/types/document'
+import { versionFileName } from '@/utils/filename'
 
 export interface CardDocument {
   id: number
@@ -35,6 +36,11 @@ defineEmits<{
   addVersion: [docId: number]
   edit: [docId: number]
 }>()
+
+// Имя скачиваемой версии (номер перед расширением) — см. utils/filename.
+function versionName(d: CardDocument, v: DocumentVersion): string {
+  return versionFileName(d.title, v)
+}
 </script>
 
 <template>
@@ -49,7 +55,7 @@ defineEmits<{
       <div class="doc-actions">
         <a
           v-for="v in d.versions" :key="v.id" href="#" class="doc-link" :title="v.change_comment"
-          @click.prevent="$emit('download', v.download_url, `${d.title} v${v.version_number}`)"
+          @click.prevent="$emit('download', v.download_url, versionName(d, v))"
         >v{{ v.version_number }}{{ v.is_current ? ' ✓' : '' }}</a>
         <button
           v-if="canAddVersion" type="button" class="doc-link doc-linkbtn"
