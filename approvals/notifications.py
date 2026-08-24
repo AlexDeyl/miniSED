@@ -18,6 +18,7 @@ from django.core.mail import send_mail
 from django.urls import reverse
 from django.utils.crypto import get_random_string
 
+from core.formatting import money
 from core.links import agreement_route, app_link
 from core.models import UserProfile
 
@@ -150,7 +151,7 @@ def _details(agreement, round_number=None) -> list[str]:
     if agreement.description:
         lines.append(f"Описание: {agreement.description}")
     if agreement.amount is not None:
-        lines.append(f"Сумма: {agreement.amount}")
+        lines.append(f"Сумма: {money(agreement.amount)}")
     if agreement.deadline:
         lines.append(f"Срок: {agreement.deadline:%d.%m.%Y}")
     if round_number and round_number > 1:

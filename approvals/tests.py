@@ -484,7 +484,9 @@ class RoundsTests(TestCase):
             notifications.notify_participant(a, p, "https://msed.example.ru")
 
         msg = bell.call_args[0][1]
-        for part in ("Скидка 15%", "Иванов Иван", "Гостю за задержку заселения", "90000"):
+        nbsp = " "
+        for part in ("Скидка 15%", "Иванов Иван", "Гостю за задержку заселения",
+                     f"90{nbsp}000 ₽"):
             self.assertIn(part, msg)
         # ссылка на карточку идёт отдельным параметром — её оформляет notify_user
         self.assertTrue(bell.call_args.kwargs["link"])

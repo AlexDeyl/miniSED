@@ -21,6 +21,7 @@ from django.utils.crypto import get_random_string
 
 from approvalflow import services as flow
 from approvalflow.models import ApprovalParticipant
+from core.formatting import money
 from core.links import app_link, contract_route
 from requests_reg import notifications as rn
 
@@ -41,7 +42,7 @@ def _details(contract) -> list[str]:
     if contract.cfo_id:
         lines.append(f"ЦФО: {contract.cfo.name}")
     if contract.amount is not None:
-        lines.append(f"Сумма: {contract.amount}")
+        lines.append(f"Сумма: {money(contract.amount)}")
     flags = []
     if contract.is_nonstandard:
         flags.append("нестандартный")

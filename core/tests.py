@@ -302,3 +302,22 @@ class DeepLinkRouteTests(TestCase):
         """Чужой домен параметром не подсунуть."""
         for bad in ("//evil.example.com", "https://evil.example.com", "contracts/5"):
             self.assertEqual(self._boot(bad), "", bad)
+
+
+class MoneyFormatTests(TestCase):
+    """Сумма в уведомлениях — как в интерфейсе, а не «100000.00»."""
+
+    def test_formats_like_ui(self):
+        from core.formatting import money
+
+        nbsp = " "
+        self.assertEqual(money("100000.00"), f"100{nbsp}000 ₽")
+        self.assertEqual(money("1234.50"), f"1{nbsp}234,50 ₽")
+        self.assertEqual(money(0), "0 ₽")
+
+    def test_empty_and_garbage(self):
+        from core.formatting import money
+
+        self.assertEqual(money(None), "")
+        self.assertEqual(money(""), "")
+        self.assertEqual(money("не число"), "не число")
