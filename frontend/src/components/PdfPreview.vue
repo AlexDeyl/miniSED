@@ -10,6 +10,12 @@ const props = withDefaults(
   { title: 'Просмотр', filename: 'document.pdf', height: 'calc(100vh - 190px)' },
 )
 
+// Параметры встроенной смотрелки браузера (Chrome/Edge читают их из #-части):
+// navpanes=0 убирает панель миниатюр слева — она съедала половину ширины,
+// view=FitH подгоняет страницу по ширине, чтобы не было горизонтальной
+// прокрутки. Панель инструментов оставляем: в ней зум и печать.
+const VIEWER_PARAMS = '#toolbar=1&navpanes=0&scrollbar=1&pagemode=none&view=FitH'
+
 const url = ref('')
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -17,7 +23,8 @@ const collapsed = ref(false)
 
 function release() {
   if (url.value) {
-    URL.revokeObjectURL(url.value)
+    // revokeObjectURL ждёт ЧИСТЫЙ blob-адрес — с #-хвостом объект не освободится.
+    URL.revokeObjectURL(url.value.split('#')[0])
     url.value = ''
   }
 }
@@ -28,7 +35,7 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    url.value = await api.blobUrl(props.src)
+    url.value = (await api.blobUrl(props.src)) + VIEWER_PARAMS
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Не удалось загрузить документ'
   } finally {
@@ -42,7 +49,9 @@ function download() {
 
 // Открыть крупно: blob-URL живёт, пока открыта эта вкладка приложения.
 function openFull() {
-  if (url.value) window.open(url.value, '_blank', 'noopener')
+  // В отдельной вкладке открываем без наших параметров: там места много,
+  // пусть работает полная смотрелка со всеми панелями.
+  if (url.value) window.open(url.value.split('#')[0], '_blank', 'noopener')
 }
 
 watch(() => props.src, load, { immediate: true })

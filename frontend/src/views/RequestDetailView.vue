@@ -486,7 +486,9 @@ onMounted(load)
 .req-preview { order: 2; }
 .req-cards { order: 1; min-width: 0; }
 @media (min-width: 1180px) {
-  .req-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 620px); align-items: start; }
+  /* Документу — вся оставшаяся ширина, карточкам хватает 520px:
+     анкета плотная, читать её в узкой колонке неудобно. */
+  .req-layout { grid-template-columns: minmax(0, 1fr) minmax(320px, 520px); align-items: start; }
   .req-preview { order: 0; position: sticky; top: 0; }
   .req-cards { order: 0; }
 }
