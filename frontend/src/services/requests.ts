@@ -15,8 +15,14 @@ export interface Cfo { id: number; name: string; code: string; organization: num
 export interface UserOption { id: number; fio: string; bitrix_id: number; position_name?: string }
 
 export const requests = {
-  list: (type?: string) =>
-    api.get<RegulatoryRequestListItem[]>(`${BASE}/${type ? `?type=${type}` : ''}`),
+  // q — поиск по номеру, ФИО, организации и анкете доверенности.
+  list: (type?: string, q?: string) => {
+    const p = new URLSearchParams()
+    if (type) p.set('type', type)
+    if (q) p.set('q', q)
+    const qs = p.toString()
+    return api.get<RegulatoryRequestListItem[]>(`${BASE}/${qs ? `?${qs}` : ''}`)
+  },
   // Заявки, ждущие моего решения — для общего списка «Требует действия».
   todo: () => api.get<RegulatoryRequestListItem[]>(`${BASE}/todo/`),
   get: (id: number | string) => api.get<RegulatoryRequestDetail>(`${BASE}/${id}/`),
@@ -37,8 +43,14 @@ export const requests = {
       participant_id: participantId, decision, comment,
     }),
 
-  legalQueue: (scope?: string) =>
-    api.get<RegulatoryRequestListItem[]>(`${BASE}/legal_queue/${scope ? `?scope=${scope}` : ''}`),
+  // При непустом q сервер ищет по ВСЕМ статусам, игнорируя вкладку (ищут дубли).
+  legalQueue: (scope?: string, q?: string) => {
+    const p = new URLSearchParams()
+    if (scope) p.set('scope', scope)
+    if (q) p.set('q', q)
+    const qs = p.toString()
+    return api.get<RegulatoryRequestListItem[]>(`${BASE}/legal_queue/${qs ? `?${qs}` : ''}`)
+  },
   take: (id: number | string) => api.post<RegulatoryRequestDetail>(`${BASE}/${id}/take/`),
   toSigning: (id: number | string) => api.post<RegulatoryRequestDetail>(`${BASE}/${id}/to_signing/`),
   execute: (id: number | string, deliveryMethod: string, deliveryComment = '') =>

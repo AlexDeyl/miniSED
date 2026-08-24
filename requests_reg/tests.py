@@ -4,8 +4,10 @@
 """
 
 from unittest import mock
+from unittest import skipUnless
 
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import connection
 from django.test import TestCase
 from rest_framework.test import APIClient
 
@@ -341,6 +343,92 @@ class ApiTests(TestCase):
         self.assertEqual(ok.status_code, 200)
         from approvalflow.models import ApprovalParticipant
         self.assertEqual(ApprovalParticipant.objects.get(id=pid).b24_user_id, 30)
+
+    # --- поиск ---
+    def _mk_poa(self, subject, number, status="to_legal", **data):
+        req = RegulatoryRequest.objects.create(
+            request_type="poa", organization=self.org, initiator_b24_id=1,
+            subject_name=subject, status=status, data=data,
+        )
+        req.number = number
+        req.save(update_fields=["number"])
+        return req
+
+    def test_search_by_fio_number_and_anketa(self):
+        """Ищем так, как помнят заявку: ФИО, номер, паспорт из анкеты."""
+        petrov = self._mk_poa("Петров Пётр Петрович", "ДОВ-000001",
+                              rep={"passport": "4011 123456", "position": "Курьер"})
+        self._mk_poa("Сидоров Сидор", "ДОВ-000002")
+
+        def found(q):
+            r = api(30).get(f"/api/reg/requests/legal_queue/?q={q}")
+            self.assertEqual(r.status_code, 200, r.content)
+            return {x["id"] for x in r.json()}
+
+        self.assertEqual(found("Петров"), {petrov.id})
+        self.assertEqual(found("ДОВ-000001"), {petrov.id})
+        self.assertEqual(found("123456"), {petrov.id})        # паспорт из анкеты
+        self.assertEqual(found("Ленин"), set())
+
+    @skipUnless(
+        connection.vendor == "postgresql",
+        "LIKE в SQLite регистронезависим только для ASCII; в бою Postgres (ILIKE)",
+    )
+    def test_search_cyrillic_case_and_anketa(self):
+        r"""На Postgres (боевая СУБД) кириллица ищется без учёта регистра, в том
+        числе внутри анкеты: ILIKE + jsonb::text отдают настоящий UTF-8.
+
+        В SQLite оба сценария не работают в принципе: LIKE регистронезависим
+        только для ASCII, а JSON хранится с \uXXXX-экранированием."""
+        petrov = self._mk_poa("Петров Пётр", "ДОВ-000050",
+                              rep={"position": "Курьер"})
+
+        def found(q):
+            return {x["id"] for x in api(30).get(
+                f"/api/reg/requests/legal_queue/?q={q}").json()}
+
+        self.assertEqual(found("петров"), {petrov.id})   # регистр не важен
+        self.assertEqual(found("ПЕТРОВ"), {petrov.id})
+        self.assertEqual(found("курьер"), {petrov.id})   # должность из анкеты
+
+    def test_search_terms_are_and(self):
+        """Несколько слов сужают выборку, а не расширяют."""
+        a = self._mk_poa("Петров Пётр", "ДОВ-000010")
+        self._mk_poa("Петров Иван", "ДОВ-000011")
+
+        r = api(30).get("/api/reg/requests/legal_queue/?q=Петров Пётр")
+        self.assertEqual({x["id"] for x in r.json()}, {a.id})
+
+    def test_search_ignores_tab_but_not_drafts(self):
+        """Дубль ищут не зная статуса: поиск идёт по всем статусам, кроме
+        черновиков (чужой черновик — ещё не заявка)."""
+        closed = self._mk_poa("Петров", "ДОВ-000020", status="closed")
+        draft = self._mk_poa("Петров", "ДОВ-000021", status="draft")
+
+        # вкладка «Новые», а находим закрытую
+        r = api(30).get("/api/reg/requests/legal_queue/?scope=new&q=Петров")
+        ids = {x["id"] for x in r.json()}
+        self.assertIn(closed.id, ids)
+        self.assertNotIn(draft.id, ids)
+
+    def test_search_survives_cp1251_from_perimeter(self):
+        """Периметр перекодирует кириллицу в query в CP1251 — поиск обязан
+        пережить это (тот же гоча, что у подсказок адреса)."""
+        petrov = self._mk_poa("Петров Пётр", "ДОВ-000030")
+        cp1251 = "".join(f"%{b:02X}" for b in "Петров".encode("cp1251"))
+
+        r = api(30).get(f"/api/reg/requests/legal_queue/?q={cp1251}")
+        self.assertEqual({x["id"] for x in r.json()}, {petrov.id})
+
+    def test_search_in_own_requests_section(self):
+        """В разделе «Регламентные заявки» ищем среди своих."""
+        mine = self._mk_poa("Петров", "ДОВ-000040", status="on_approval")
+        RegulatoryRequest.objects.create(
+            request_type="poa", organization=self.org, initiator_b24_id=777,
+            subject_name="Петров", status="on_approval",
+        )
+        r = api(1).get("/api/reg/requests/?q=Петров")
+        self.assertEqual({x["id"] for x in r.json()}, {mine.id})
 
     # --- ссылка в уведомлении ---
     def test_notification_carries_card_link(self):

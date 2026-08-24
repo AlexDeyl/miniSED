@@ -15,12 +15,20 @@ def _query_param(request, name, default=""):
     Периметр (openresty) перекодирует кириллицу в query-строке из UTF-8 в CP1251,
     поэтому читаем СЫРЫЕ байты query и пробуем UTF-8, затем CP1251 (иначе Django
     декодирует cp1251-байты как UTF-8 и получается мусор).
+
+    QUERY_STRING по WSGI — это байты, декодированные как latin-1, поэтому перед
+    раскодированием %XX возвращаем строку в байты тем же latin-1. Иначе клиент,
+    приславший кириллицу в query БЕЗ процентного кодирования, доезжал мусором.
     """
     qs = request.META.get("QUERY_STRING", "") or ""
     prefix = name + "="
     for part in qs.split("&"):
         if part.startswith(prefix):
-            raw = unquote_to_bytes(part[len(prefix):].replace("+", " "))
+            value = part[len(prefix):].replace("+", " ")
+            try:
+                raw = unquote_to_bytes(value.encode("latin-1"))
+            except UnicodeEncodeError:  # не из WSGI (тесты, внутренние вызовы)
+                raw = unquote_to_bytes(value)
             for enc in ("utf-8", "cp1251"):
                 try:
                     return raw.decode(enc)
@@ -44,6 +52,7 @@ from core.auth import get_current_b24_id, is_lawyer
 
 from . import constants, services
 from .models import PowerTemplate, RegulatoryRequest
+from .search import search
 from .serializers import (
     RegulatoryRequestDetailSerializer,
     RegulatoryRequestListSerializer,
@@ -161,6 +170,8 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
         status_f = self.request.query_params.get("status")
         if status_f:
             qs = qs.filter(status=status_f)
+        if self.action == "list":
+            qs = search(qs, _query_param(self.request, "q"))
         return qs
 
     def _is_participant(self, req) -> bool:
@@ -293,14 +304,22 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["get"], url_path="legal_queue")
     def legal_queue(self, request):
         self._require_lawyer()
-        # scope: new (новые) / work (в работе) / archive (закрытые); по умолчанию — активные
+        # scope: new (новые) / work (в работе) / archive (закрытые) / all;
+        # по умолчанию — активные
         scope = (request.query_params.get("scope") or "").strip()
-        statuses = constants.LEGAL_SCOPES.get(scope, constants.LEGAL_QUEUE_STATUSES)
+        query = _query_param(request, "q").strip()
+        # При поиске вкладка не сужает выборку: ищут дубли, а в каком статусе
+        # лежит найденное — заранее неизвестно. Фронт об этом предупреждает.
+        statuses = (
+            constants.LEGAL_ALL_STATUSES if query
+            else constants.LEGAL_SCOPES.get(scope, constants.LEGAL_QUEUE_STATUSES)
+        )
         qs = (
             RegulatoryRequest.objects.select_related("organization")
             .filter(status__in=statuses)
             .order_by("-id")
         )
+        qs = search(qs, query)
         return Response(RegulatoryRequestListSerializer(qs, many=True).data)
 
     @action(detail=True, methods=["post"], url_path="take")

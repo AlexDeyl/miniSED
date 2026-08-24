@@ -4,8 +4,13 @@ import { RouterLink } from 'vue-router'
 import { requests } from '@/services/requests'
 import { ApiError } from '@/services/api'
 import { useLegalUiStore } from '@/stores/legalUi'
+import SearchBox from '@/components/SearchBox.vue'
 import type { RegulatoryRequestListItem } from '@/types/request'
 
+// Поиск по номеру, ФИО, паспорту, организации и анкете доверенности.
+// При непустом запросе сервер ищет по ВСЕМ статусам, а не только по вкладке:
+// когда ищут дубль, статус заранее неизвестен.
+const query = ref('')
 const items = ref<RegulatoryRequestListItem[]>([])
 const loading = ref(true)
 const error = ref<string | null>(null)
@@ -23,7 +28,7 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    items.value = await requests.legalQueue(legalUi.scope)
+    items.value = await requests.legalQueue(legalUi.scope, query.value || undefined)
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Не удалось загрузить'
   } finally {
@@ -31,15 +36,22 @@ async function load() {
   }
 }
 
-watch(() => legalUi.scope, load)
+watch([() => legalUi.scope, query], load)
 onMounted(load)
 </script>
 
 <template>
   <section>
+    <SearchBox v-model="query" placeholder="Поиск: номер, ФИО, паспорт, организация" />
+    <p v-if="query && !loading && !error" class="state" style="margin-bottom:8px">
+      Поиск идёт по всем заявкам юротдела, независимо от вкладки. Найдено: {{ items.length }}.
+    </p>
+
     <p v-if="loading" class="state">Загрузка…</p>
     <p v-else-if="error" class="state state--error">{{ error }}</p>
-    <p v-else-if="items.length === 0" class="state">{{ emptyText }}</p>
+    <p v-else-if="items.length === 0" class="state">
+      {{ query ? 'Ничего не найдено.' : emptyText }}
+    </p>
 
     <ul v-else class="item-list">
       <li v-for="r in items" :key="r.id">
