@@ -74,12 +74,14 @@ class ContractViewSet(viewsets.ModelViewSet):
     def _participant_contract_ids(self):
         """ID договоров, где я согласующий (в любом круге).
 
-        Юристу засчитываем и групповой юр-этап (participant без b24_user_id —
-        его может согласовать любой сотрудник юротдела)."""
+        Юристу засчитываем ВЕСЬ групповой юр-этап — и ещё не согласованный
+        (b24_user_id пуст), и уже закрытый другим юристом (после решения в
+        participant проставляется id решавшего). Иначе договор, согласованный
+        коллегой, пропадал из вкладок остальных сотрудников юротдела."""
         ct = ContentType.objects.get_for_model(Contract)
         cond = Q(b24_user_id=self.b24_id)
         if is_lawyer(self.b24_id):
-            cond |= Q(role=constants.roles.ROLE_LEGAL_DEPT, b24_user_id__isnull=True)
+            cond |= Q(role=constants.roles.ROLE_LEGAL_DEPT)
         return (
             ApprovalParticipant.objects
             .filter(Q(round__approval__content_type=ct) & cond)
@@ -99,7 +101,14 @@ class ContractViewSet(viewsets.ModelViewSet):
             if scope == "participant":
                 qs = qs.filter(participant)
             elif scope == "all":
-                qs = qs.filter(mine | participant)
+                if is_lawyer(self.b24_id):
+                    # Юротделу во вкладке «Все» показываем все договоры, кроме
+                    # чужих черновиков: юрист и так вправе открыть любую карточку
+                    # (_can_view), а без общего списка невозможно ловить дубли —
+                    # типовые договоры вообще не проходят через юр-этап маршрута.
+                    qs = qs.filter(mine | ~Q(status=constants.STATUS_DRAFT))
+                else:
+                    qs = qs.filter(mine | participant)
             else:
                 qs = qs.filter(mine)
         status_f = self.request.query_params.get("status")

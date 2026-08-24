@@ -52,15 +52,22 @@ CANCELABLE_STATUSES = [STATUS_DRAFT, STATUS_ON_APPROVAL, STATUS_RETURNED, STATUS
 # статусы, попадающие в раздел юристов (активные)
 LEGAL_QUEUE_STATUSES = [STATUS_TO_LEGAL, STATUS_LEGAL_WORK, STATUS_SIGNING]
 
-# разбивка раздела юристов: Новые / В работе / Архив
+# разбивка раздела юристов: Новые / В работе / Архив / Все
 LEGAL_NEW_STATUSES = [STATUS_TO_LEGAL]
 LEGAL_WORK_STATUSES = [STATUS_LEGAL_WORK, STATUS_SIGNING, STATUS_EXECUTED]
-LEGAL_ARCHIVE_STATUSES = [STATUS_CLOSED]
+# Архив = всё, что отработано и больше не движется: закрытые + отклонённые и
+# отменённые (последние до юротдела не доходят, но нужны для контроля дублей).
+LEGAL_ARCHIVE_STATUSES = [STATUS_CLOSED, STATUS_REJECTED, STATUS_CANCELED]
+# «Все» — любая отправленная заявка, включая те, что ещё на согласовании и до
+# юротдела не дошли: юрист должен видеть заявки коллег целиком, иначе дубли
+# ловятся вслепую. Черновики чужие не показываем — это ещё не заявка.
+LEGAL_ALL_STATUSES = [c for c, _n in STATUS_CHOICES if c != STATUS_DRAFT]
 
 LEGAL_SCOPES = {
     "new": LEGAL_NEW_STATUSES,
     "work": LEGAL_WORK_STATUSES,
     "archive": LEGAL_ARCHIVE_STATUSES,
+    "all": LEGAL_ALL_STATUSES,
 }
 
 # --- Способ передачи готового документа -------------------------------------

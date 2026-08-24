@@ -7,7 +7,7 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from approvalflow.models import Approval
-from core.models import CFO, Organization
+from core.models import CFO, Organization, Role, UserProfile
 from requests_reg import constants as R
 from requests_reg.models import RoleAssignment
 
@@ -253,6 +253,51 @@ class ApiTests(TestCase):
 
         # инициатор видит свой договор и в mine, и в all (без дублей)
         self.assertEqual(len(api(1).get("/api/contracts/?scope=all").json()), 1)
+
+    def test_lawyers_see_each_others_contracts(self):
+        """Юрист видит договоры, юр-этап которых закрыл другой юрист.
+
+        Раньше решение по групповому юр-этапу проставляло b24_user_id решавшего,
+        и договор исчезал из вкладок остальных сотрудников юротдела — из-за
+        этого не отлавливались дубли."""
+        lawyer_role = Role.objects.get(code="lawyer")
+        for uid, fio in ((30, "Юрист Первый"), (31, "Юрист Второй")):
+            p = UserProfile.objects.create(fio=fio, bitrix_id=uid, is_active=True)
+            p.roles.add(lawyer_role)
+
+        contract = services.create_contract(
+            organization=self.org, cfo=self.cfo, title="Нетиповой", initiator_b24_id=1,
+            is_nonstandard=True,
+        )
+        services.submit(contract, [
+            {"type": "internal", "b24_user_id": None, "role": R.ROLE_LEGAL_DEPT, "order": 0},
+        ], actor_b24_id=1)
+        # юр-этап закрывает юрист 30
+        participant = services.current_pending_participant(services.get_approval(contract))
+        services.decide(contract, participant.id, "approve", actor_b24_id=30)
+
+        def ids(uid, scope):
+            return [c["id"] for c in api(uid).get(f"/api/contracts/?scope={scope}").json()]
+
+        # оба юриста видят договор и как «свой» юр-этап, и во вкладке «Все»
+        for uid in (30, 31):
+            self.assertEqual(ids(uid, "participant"), [contract.id])
+            self.assertEqual(ids(uid, "all"), [contract.id])
+
+    def test_lawyer_sees_contracts_without_legal_stage(self):
+        """Типовой договор юр-этапа не имеет, но юрист видит его во вкладке «Все»
+        (иначе дубли по типовым договорам не найти). Чужой черновик — не видит."""
+        p = UserProfile.objects.create(fio="Юрист", bitrix_id=30, is_active=True)
+        p.roles.add(Role.objects.get(code="lawyer"))
+
+        draft = services.create_contract(
+            organization=self.org, cfo=self.cfo, title="Черновик", initiator_b24_id=1,
+        )
+        sent = self._submitted_contract(approver=502)
+
+        ids = [c["id"] for c in api(30).get("/api/contracts/?scope=all").json()]
+        self.assertIn(sent.id, ids)
+        self.assertNotIn(draft.id, ids)
 
     def test_detail_documents_include_versions(self):
         """Карточка отдаёт историю версий — на ней строится блок документов."""

@@ -16,6 +16,7 @@ const emptyText = computed(() => ({
   new: 'Нет новых заявок.',
   work: 'Нет заявок в работе.',
   archive: 'Архив пуст.',
+  all: 'Заявок пока нет.',
 }[legalUi.scope]))
 
 async function load() {

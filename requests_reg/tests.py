@@ -355,6 +355,9 @@ class ApiTests(TestCase):
         new_id, work_id, exec_id, closed_id = (
             mk("to_legal"), mk("legal_work"), mk("executed"), mk("closed"),
         )
+        rejected_id, canceled_id, draft_id, appr_id = (
+            mk("rejected"), mk("canceled"), mk("draft"), mk("on_approval"),
+        )
 
         def ids(scope):
             return {r["id"] for r in api(30).get(
@@ -362,7 +365,13 @@ class ApiTests(TestCase):
 
         self.assertEqual(ids("new"), {new_id})
         self.assertEqual(ids("work"), {work_id, exec_id})
-        self.assertEqual(ids("archive"), {closed_id})
+        # архив — всё отработанное, включая отклонённые/отменённые
+        self.assertEqual(ids("archive"), {closed_id, rejected_id, canceled_id})
+        # «Все» — весь поток юротдела, кроме черновиков
+        self.assertEqual(ids("all"), {
+            new_id, work_id, exec_id, closed_id, rejected_id, canceled_id, appr_id,
+        })
+        self.assertNotIn(draft_id, ids("all"))
 
     # --- отмена и удаление ---
     def test_cancel_then_delete(self):
