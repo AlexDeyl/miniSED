@@ -8,6 +8,14 @@ import { bitrix } from '@/services/bitrix'
 const router = useRouter()
 const auth = useAuthStore()
 
+// Куда вести после входа: ?next из guard-а (ссылка из уведомления на карточку)
+// либо главная. Иначе deep link терялся на экране входа.
+function afterLogin(): string {
+  const next = router.currentRoute.value.query.next
+  const raw = typeof next === 'string' ? next : ''
+  return raw.startsWith('/') && !raw.startsWith('//') ? raw : '/svetofor'
+}
+
 const email = ref('')
 const password = ref('')
 const busy = ref(false)
@@ -33,7 +41,7 @@ async function submit() {
   busy.value = true
   try {
     await auth.login(email.value.trim(), password.value)
-    router.push('/svetofor')
+    router.push(afterLogin())
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Не удалось войти'
   } finally {
@@ -43,7 +51,11 @@ async function submit() {
 
 // OAuth-редирект: Битрикс вернёт код на обработчик /app (там выпустится токен).
 function oauthRedirect() {
-  window.location.href = `/api/auth/bitrix/start/?next=${encodeURIComponent(window.location.origin + '/login')}`
+  // next тащим с собой через OAuth: после возврата попадём в нужную карточку.
+  const back = new URL(window.location.origin + '/login')
+  const target = afterLogin()
+  if (target !== '/svetofor') back.searchParams.set('next', target)
+  window.location.href = `/api/auth/bitrix/start/?next=${encodeURIComponent(back.toString())}`
 }
 
 // Вход через Битрикс24: внутри портала — BX24.getAuth(); иначе — OAuth-редирект.
@@ -70,7 +82,7 @@ function loginViaBitrix() {
           } catch {
             /* не критично для входа */
           }
-          router.push('/svetofor')
+          router.push(afterLogin())
         } else {
           // SDK есть, но контекст портала недоступен — уходим на OAuth
           oauthRedirect()
@@ -93,7 +105,7 @@ onMounted(async () => {
       await auth.applyToken(t)
       // чистим URL от токена
       window.history.replaceState({}, '', window.location.pathname)
-      router.push('/svetofor')
+      router.push(afterLogin())
     } catch (e) {
       error.value = e instanceof ApiError ? e.message : 'Не удалось войти через Битрикс24'
     } finally {

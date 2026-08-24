@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import { agreements } from '@/services/agreements'
 import { requests } from '@/services/requests'
 import { contracts } from '@/services/contracts'
@@ -550,7 +550,19 @@ const PART_STATUS_LABEL: Record<string, string> = {
   waiting: 'Ожидаем', approved: 'Согласовано', rejected: 'Отклонено',
 }
 
-onMounted(() => { loadUserDir(); loadList(); refreshBadges() })
+// Ссылка из уведомления ведёт на /svetofor?open=<id> — сразу раскрываем эту
+// карточку (в старом модуле карточка живёт внутри списка, отдельного роута нет).
+const route = useRoute()
+onMounted(async () => {
+  loadUserDir()
+  refreshBadges()
+  const raw = route.query.open
+  const id = parseInt(typeof raw === 'string' ? raw : '', 10)
+  await loadList()
+  // Карточка открывается поверх списка — вкладку не переключаем: loadList
+  // сбрасывает selected, поэтому open идёт строго после него.
+  if (!Number.isNaN(id)) await open(id)
+})
 </script>
 
 <template>

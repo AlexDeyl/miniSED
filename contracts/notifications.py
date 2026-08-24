@@ -21,7 +21,13 @@ from django.utils.crypto import get_random_string
 
 from approvalflow import services as flow
 from approvalflow.models import ApprovalParticipant
+from core.links import app_link, contract_route
 from requests_reg import notifications as rn
+
+
+def _card_link(contract) -> str:
+    """Ссылка на карточку договора в приложении (для колокольчика и письма)."""
+    return app_link(contract_route(contract.id))
 
 
 def _label(contract) -> str:
@@ -77,7 +83,7 @@ def notify_current_approver(contract):
         if note:
             lines += ["", note]
         rn._dispatch(b24, emails, f"Договор {contract.number}: требуется юротдел",
-                     "\n".join(lines))
+                     "\n".join(lines), link=_card_link(contract))
         return
 
     approve_url = _approve_url(p)
@@ -91,10 +97,11 @@ def notify_current_approver(contract):
 
     if p.type == ApprovalParticipant.TYPE_INTERNAL and p.b24_user_id:
         b24, emails = rn._recipients([p.b24_user_id])
-        rn._dispatch(b24, emails, subject, body)
+        rn._dispatch(b24, emails, subject, body, link=_card_link(contract))
     elif p.email:
         bid = rn._b24_by_email(p.email)
-        rn._dispatch([bid] if bid else [], [p.email], subject, body)
+        rn._dispatch([bid] if bid else [], [p.email], subject, body,
+                     link=_card_link(contract))
 
 
 def notify_initiator_result(contract):
@@ -104,4 +111,5 @@ def notify_initiator_result(contract):
     b24, emails = rn._recipients([contract.initiator_b24_id])
     st = contract.status_label
     body = f"Статус договора изменился: {st}.\n\n" + "\n".join(_details(contract))
-    rn._dispatch(b24, emails, f"Договор {contract.number}: {st}", body)
+    rn._dispatch(b24, emails, f"Договор {contract.number}: {st}", body,
+                 link=_card_link(contract), link_text="Открыть договор")

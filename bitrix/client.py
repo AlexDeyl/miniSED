@@ -266,10 +266,21 @@ def profiles_by_ids(ids) -> dict[int, dict[str, str]]:
     return out
 
 
-def notify_user(client: BitrixClient, user_id, message: str) -> None:
+def notify_user(
+    client: BitrixClient, user_id, message: str, *,
+    link: str = "", link_text: str = "Перейти к согласованию",
+) -> None:
     """Системное уведомление пользователю портала (колокольчик Битрикс24).
+
     Требует scope `im` у приложения; при отсутствии — вызов бросит ошибку,
-    которую вызывающая сторона гасит (уведомления best-effort)."""
+    которую вызывающая сторона гасит (уведомления best-effort).
+
+    link — куда вести из уведомления. Оформляем BB-кодом [URL]: в колокольчике
+    видна подпись («Перейти к согласованию»), а не голый адрес. Кнопок как
+    таковых у уведомлений нет — KEYBOARD доступен только сообщениям чат-ботов,
+    поэтому ссылка-подпись это максимум, что даёт im.notify.system.add."""
+    if link:
+        message = f"{message}\n\n[URL={link}]{link_text}[/URL]"
     client.call("im.notify.system.add", {"USER_ID": user_id, "MESSAGE": message})
 
 

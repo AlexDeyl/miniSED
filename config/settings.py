@@ -175,6 +175,12 @@ PUBLIC_BASE_URL = (env("PUBLIC_BASE_URL", "") or "").rstrip("/")
 if not PUBLIC_BASE_URL and CSRF_TRUSTED_ORIGINS:
     PUBLIC_BASE_URL = CSRF_TRUSTED_ORIGINS[0].rstrip("/")
 
+# Страница приложения ВНУТРИ портала Битрикс24 (вида
+# https://<портал>.bitrix24.ru/marketplace/app/<ID>/). Если задана — ссылки в
+# уведомлениях-колокольчиках ведут туда: человек попадает в карточку, не
+# выходя из Битрикса. Пусто → ссылки ведут на сам MiniSED (см. core.links).
+BITRIX_APP_URL = (env("BITRIX_APP_URL", "") or "").strip()
+
 # DaData — подсказки для кода подразделения ФМС (→ «кем выдан» в анкете
 # доверенности). Ключ необязателен: без него подсказки просто не работают.
 DADATA_API_KEY = env("DADATA_API_KEY", "")

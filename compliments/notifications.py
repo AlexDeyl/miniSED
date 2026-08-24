@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from approvalflow import services as flow
 from approvalflow.models import ApprovalParticipant
+from core.links import app_link, compliment_route
 from requests_reg import notifications as rn
 from requests_reg.models import RoleAssignment
 
@@ -40,6 +41,11 @@ def _details(compliment) -> list[str]:
     return lines
 
 
+def _card_link(compliment) -> str:
+    """Ссылка на карточку заявки в приложении (для колокольчика и письма)."""
+    return app_link(compliment_route(compliment.id))
+
+
 def notify_current_approver(compliment):
     """Тому, чья сейчас очередь согласовать."""
     from . import services
@@ -53,7 +59,7 @@ def notify_current_approver(compliment):
     if note:
         lines += ["", note]
     rn._dispatch(b24, emails, f"Комплимент {compliment.number}: требуется согласование",
-                 "\n".join(lines))
+                 "\n".join(lines), link=_card_link(compliment))
 
 
 def notify_initiator_result(compliment):
@@ -63,7 +69,8 @@ def notify_initiator_result(compliment):
     b24, emails = rn._recipients([compliment.initiator_b24_id])
     st = compliment.status_label
     body = f"Статус заявки на комплимент изменился: {st}.\n\n" + "\n".join(_details(compliment))
-    rn._dispatch(b24, emails, f"Комплимент {compliment.number}: {st}", body)
+    rn._dispatch(b24, emails, f"Комплимент {compliment.number}: {st}", body,
+                 link=_card_link(compliment), link_text="Открыть заявку")
 
 
 def _executor_ids(compliment) -> list[int]:
@@ -90,7 +97,8 @@ def notify_executor(compliment):
         "Заявка на комплимент согласована и ждёт исполнения.\n\n"
         + "\n".join(_details(compliment))
     )
-    rn._dispatch(b24, emails, f"Комплимент {compliment.number}: к исполнению", body)
+    rn._dispatch(b24, emails, f"Комплимент {compliment.number}: к исполнению", body,
+                 link=_card_link(compliment), link_text="Открыть заявку")
 
 
 def notify_initiator_execution(compliment):
@@ -103,4 +111,5 @@ def notify_initiator_execution(compliment):
     if compliment.execution_comment:
         lines.append(f"Комментарий исполнителя: {compliment.execution_comment}")
     lines += _details(compliment)
-    rn._dispatch(b24, emails, f"Комплимент {compliment.number}: {st}", "\n".join(lines))
+    rn._dispatch(b24, emails, f"Комплимент {compliment.number}: {st}", "\n".join(lines),
+                 link=_card_link(compliment), link_text="Открыть заявку")

@@ -342,6 +342,30 @@ class ApiTests(TestCase):
         from approvalflow.models import ApprovalParticipant
         self.assertEqual(ApprovalParticipant.objects.get(id=pid).b24_user_id, 30)
 
+    # --- ссылка в уведомлении ---
+    def test_notification_carries_card_link(self):
+        """Колокольчик Битрикса ведёт в карточку: ссылка спрятана за подписью
+        «Перейти к согласованию», а не показана голым адресом."""
+        from unittest import mock
+
+        from django.test import override_settings
+
+        from . import notifications
+
+        req = RegulatoryRequest.objects.create(
+            request_type="poa", organization=self.org, initiator_b24_id=1,
+            status="to_legal",
+        )
+        with override_settings(BITRIX_APP_URL="https://portal.bitrix24.ru/marketplace/app/150/"):
+            with mock.patch.object(notifications, "_bitrix_notify") as bell,                  mock.patch.object(notifications, "_email") as email:
+                notifications.notify_legal_queue(req)
+
+        link = f"https://portal.bitrix24.ru/marketplace/app/150/?to=%2Frequests%2F{req.id}"
+        self.assertEqual(bell.call_args.kwargs["link"], link)
+        self.assertEqual(bell.call_args.kwargs["link_text"], "Открыть заявку")
+        # в письме ссылка идёт строкой — там BB-коды не работают
+        self.assertIn(link, email.call_args[0][2])
+
     # --- права юр-очереди ---
     def test_legal_queue_requires_lawyer(self):
         self.assertEqual(api(21).get("/api/reg/requests/legal_queue/").status_code, 403)

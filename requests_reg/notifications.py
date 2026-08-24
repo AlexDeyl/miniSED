@@ -22,7 +22,16 @@ from django.utils.crypto import get_random_string
 from approvalflow import services as flow
 from approvalflow.models import ApprovalParticipant
 from core import auth as core_auth
+from core.links import app_link, request_route
 from core.models import UserProfile
+
+# Подпись, за которой прячется ссылка в колокольчике Битрикса.
+DEFAULT_LINK_TEXT = "Перейти к согласованию"
+
+
+def _card_link(request) -> str:
+    """Ссылка на карточку заявки в приложении."""
+    return app_link(request_route(request.id))
 
 
 def _approve_url(participant) -> str:
@@ -101,7 +110,7 @@ def _b24_by_email(email: str) -> int | None:
     return None
 
 
-def _bitrix_notify(b24_ids, message):
+def _bitrix_notify(b24_ids, message, *, link="", link_text=DEFAULT_LINK_TEXT):
     try:
         from bitrix.client import BitrixClient, get_active_portal, notify_user
 
@@ -111,7 +120,7 @@ def _bitrix_notify(b24_ids, message):
         client = BitrixClient(portal)
         for uid in b24_ids:
             try:
-                notify_user(client, uid, message)
+                notify_user(client, uid, message, link=link, link_text=link_text)
             except Exception:
                 continue
     except Exception:
@@ -131,9 +140,18 @@ def _email(emails, subject, body):
         pass
 
 
-def _dispatch(b24_ids, emails, subject, message):
-    _bitrix_notify(b24_ids, message)
-    _email(emails, subject, message)
+def _dispatch(b24_ids, emails, subject, message, *, link="", link_text=DEFAULT_LINK_TEXT,
+              email_message=None):
+    """Колокольчик + письмо. link — ссылка на карточку в приложении: в Битриксе
+    она прячется за подписью, в письме идёт отдельной строкой.
+
+    email_message — если у письма свой текст (например с токен-ссылкой на
+    одноклик-согласование, которая в колокольчике не нужна)."""
+    _bitrix_notify(b24_ids, message, link=link, link_text=link_text)
+    body = email_message if email_message is not None else message
+    if link:
+        body = f"{body}\n\n{link_text}: {link}"
+    _email(emails, subject, body)
 
 
 def _label(request) -> str:
@@ -158,45 +176,51 @@ def notify_current_approver(request):
         msg = f"Требуется согласование юридического отдела: {label}"
         if note:
             msg += f"\n\n{note}"
-        _dispatch(b24, emails, "Требуется согласование юротдела", msg)
+        _dispatch(b24, emails, "Требуется согласование юротдела", msg,
+                  link=_card_link(request))
         return
 
-    # Конкретный согласующий (внутренний или внешний) — даём ссылку-токен,
-    # по которой можно согласовать прямо из письма/уведомления.
+    # Конкретный согласующий (внутренний или внешний). В письме — токен-ссылка
+    # на одноклик-согласование, в колокольчике — карточка в приложении (там
+    # человек уже авторизован и видит документы целиком).
     url = _approve_url(p)
     msg = f"Требуется ваше согласование: {label}"
     if note:
         msg += f"\n\n{note}"
-    if url:
-        msg += f"\nПерейти к согласованию: {url}"
+    email_msg = f"{msg}\nСогласовать по ссылке: {url}" if url else None
     if p.type == ApprovalParticipant.TYPE_INTERNAL and p.b24_user_id:
         b24, emails = _recipients([p.b24_user_id])
-        _dispatch(b24, emails, "Требуется ваше согласование", msg)
+        _dispatch(b24, emails, "Требуется ваше согласование", msg,
+                  link=_card_link(request), email_message=email_msg)
     elif p.email:
         b24_id = _b24_by_email(p.email)
         _dispatch([b24_id] if b24_id else [], [p.email],
-                  "Требуется ваше согласование", msg)
+                  "Требуется ваше согласование", msg,
+                  link=_card_link(request), email_message=email_msg)
 
 
 def notify_legal_queue(request):
     """Юристам — заявка передана на исполнение (раздел «Новые»)."""
     b24, emails = _recipients(lawyer_b24_ids())
     _dispatch(b24, emails, "Новая заявка на исполнение",
-              f"Заявка передана юристам на исполнение: {_label(request)}")
+              f"Заявка передана юристам на исполнение: {_label(request)}",
+              link=_card_link(request), link_text="Открыть заявку")
 
 
 def notify_initiator_executed(request):
     """Инициатору — заявка исполнена, нужно подтвердить получение."""
     b24, emails = _recipients([request.initiator_b24_id])
     _dispatch(b24, emails, "Заявка исполнена",
-              f"Заявка исполнена, подтвердите получение: {_label(request)}")
+              f"Заявка исполнена, подтвердите получение: {_label(request)}",
+              link=_card_link(request), link_text="Открыть заявку")
 
 
 def notify_legal_closed(request):
     """Юристам — инициатор подтвердил получение, заявка закрыта."""
     b24, emails = _recipients(lawyer_b24_ids())
     _dispatch(b24, emails, "Заявка закрыта",
-              f"Инициатор подтвердил получение, заявка закрыта: {_label(request)}")
+              f"Инициатор подтвердил получение, заявка закрыта: {_label(request)}",
+              link=_card_link(request), link_text="Открыть заявку")
 
 
 def notify_initiator_status(request):
@@ -206,4 +230,5 @@ def notify_initiator_status(request):
     b24, emails = _recipients([request.initiator_b24_id])
     st = request.get_status_display()
     _dispatch(b24, emails, f"Заявка: {st}",
-              f"Статус заявки изменился: {_label(request)} — {st}")
+              f"Статус заявки изменился: {_label(request)} — {st}",
+              link=_card_link(request), link_text="Открыть заявку")

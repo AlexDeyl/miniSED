@@ -181,3 +181,32 @@ class SearchEndpointTests(TestCase):
         )
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["id"], 123)
+
+
+class NotifyUserTests(TestCase):
+    """Уведомление-колокольчик: ссылка оформляется BB-кодом."""
+
+    def test_link_wrapped_in_bbcode(self):
+        from .client import notify_user
+
+        portal = make_portal()
+        client = BitrixClient(portal)
+        with patch.object(client, "call") as call:
+            notify_user(client, 42, "Требуется согласование",
+                        link="https://portal.bitrix24.ru/marketplace/app/150/?to=%2Fcontracts%2F5")
+        method, params = call.call_args[0]
+        self.assertEqual(method, "im.notify.system.add")
+        self.assertEqual(params["USER_ID"], 42)
+        self.assertIn(
+            "[URL=https://portal.bitrix24.ru/marketplace/app/150/?to=%2Fcontracts%2F5]"
+            "Перейти к согласованию[/URL]",
+            params["MESSAGE"],
+        )
+
+    def test_without_link_message_unchanged(self):
+        from .client import notify_user
+
+        client = BitrixClient(make_portal())
+        with patch.object(client, "call") as call:
+            notify_user(client, 42, "Просто текст")
+        self.assertEqual(call.call_args[0][1]["MESSAGE"], "Просто текст")

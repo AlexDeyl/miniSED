@@ -248,3 +248,57 @@ class BitrixLoginTests(TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertTrue(UserProfile.objects.filter(bitrix_id=3333).exists())
         self.assertIn("token", r.json())
+
+
+class AppLinkTests(TestCase):
+    """Ссылки из уведомлений: куда ведёт «Перейти к согласованию»."""
+
+    from django.test import override_settings as _os  # локальный алиас
+
+    @_os(BITRIX_APP_URL="https://portal.bitrix24.ru/marketplace/app/150/",
+         PUBLIC_BASE_URL="https://msed.example.ru")
+    def test_prefers_portal_app_page(self):
+        """Когда приложение прописано в портале — ведём внутрь Битрикса."""
+        from core.links import app_link, contract_route
+
+        self.assertEqual(
+            app_link(contract_route(5)),
+            "https://portal.bitrix24.ru/marketplace/app/150/?to=%2Fcontracts%2F5",
+        )
+
+    @_os(BITRIX_APP_URL="", PUBLIC_BASE_URL="https://msed.example.ru")
+    def test_falls_back_to_minised(self):
+        from core.links import agreement_route, app_link
+
+        self.assertEqual(
+            app_link(agreement_route(7)),
+            "https://msed.example.ru/app/?to=%2Fsvetofor%3Fopen%3D7",
+        )
+
+    @_os(BITRIX_APP_URL="", PUBLIC_BASE_URL="")
+    def test_no_base_no_link(self):
+        """Без настроек ссылки нет — уведомление уходит без неё, а не с битой."""
+        from core.links import app_link, request_route
+
+        self.assertEqual(app_link(request_route(1)), "")
+
+
+class DeepLinkRouteTests(TestCase):
+    """Приложение открывается сразу на нужной карточке (?to=...)."""
+
+    def _boot(self, to):
+        """Тег с window.__MINISED_BOOT__ из отданного SPA (или пустая строка).
+
+        Проверяем именно его: слово route встречается и внутри бандла Vue."""
+        html = self.client.get(f"/app/?to={to}").content.decode()
+        marker = "window.__MINISED_BOOT__="
+        i = html.find(marker)
+        return html[i:html.find("</script>", i)] if i >= 0 else ""
+
+    def test_boot_route_injected(self):
+        self.assertIn('"route": "/contracts/5"', self._boot("/contracts/5"))
+
+    def test_external_target_rejected(self):
+        """Чужой домен параметром не подсунуть."""
+        for bad in ("//evil.example.com", "https://evil.example.com", "contracts/5"):
+            self.assertEqual(self._boot(bad), "", bad)

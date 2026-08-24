@@ -18,6 +18,7 @@ from django.core.mail import send_mail
 from django.urls import reverse
 from django.utils.crypto import get_random_string
 
+from core.links import agreement_route, app_link
 from core.models import UserProfile
 
 from .models import B24UserEmail
@@ -94,16 +95,23 @@ def _resolve_b24_id(participant) -> int | None:
     return None
 
 
-def _bitrix_notify(b24_id: int, message: str) -> None:
+def _bitrix_notify(b24_id: int, message: str, *, link: str = "",
+                   link_text: str = "Перейти к согласованию") -> None:
     try:
         from bitrix.client import BitrixClient, get_active_portal, notify_user
 
         portal = get_active_portal()
         if not portal:
             return
-        notify_user(BitrixClient(portal), int(b24_id), message)
+        notify_user(BitrixClient(portal), int(b24_id), message,
+                    link=link, link_text=link_text)
     except Exception:
         pass
+
+
+def _card_link(agreement) -> str:
+    """Ссылка на карточку согласования в приложении."""
+    return app_link(agreement_route(agreement.id))
 
 
 def _approve_url(participant, base_url: str) -> str:
@@ -171,7 +179,9 @@ def notify_participant(agreement, participant, base_url: str) -> None:
 
     b24_id = _resolve_b24_id(participant)
     if b24_id:
-        _bitrix_notify(b24_id, f"{subject}\n{approve_url}")
+        # В колокольчике — карточка в приложении (ссылка спрятана за подписью);
+        # токен-ссылка на одноклик-согласование остаётся в письме.
+        _bitrix_notify(b24_id, subject, link=_card_link(agreement) or approve_url)
 
 
 def _resolve_email_by_b24(b24_id: int) -> str:
@@ -213,4 +223,5 @@ def notify_author_result(agreement, *, approved: bool, by_name: str = "", commen
                       [email], fail_silently=True)
         except Exception:
             pass
-    _bitrix_notify(b24, subject)
+    _bitrix_notify(b24, subject, link=_card_link(agreement),
+                   link_text="Открыть согласование")

@@ -56,6 +56,20 @@ def _store_bitrix_portal_token(domain, member_id, token_data):
         print("[Bitrix] portal token store error:", e)
 
 
+def _deep_link_route(request) -> str:
+    """Маршрут SPA из параметра `to` — куда открыть приложение.
+
+    Так работают ссылки из уведомлений («Перейти к согласованию»): человек
+    попадает сразу в карточку, а не на главную. Берём и из query, и из тела:
+    Битрикс открывает обработчик POST-ом, query при этом сохраняется, но
+    подстраховываемся. Пускаем только внутренние пути (/...), без «//» —
+    иначе параметром можно было бы увести на чужой домен."""
+    raw = (request.GET.get("to") or request.POST.get("to") or "").strip()
+    if not raw.startswith("/") or raw.startswith("//"):
+        return ""
+    return raw[:200]
+
+
 def _serve_spa(request, boot_token=None):
     """Отдаёт собранный Vue SPA (frontend/dist/index.html).
 
@@ -72,10 +86,14 @@ def _serve_spa(request, boot_token=None):
             {"session_b24_id": request.session.get("b24_user_id")},
         )
     html = dist_index.read_text(encoding="utf-8")
+    boot_data = {}
     if boot_token:
-        boot = "<script>window.__MINISED_BOOT__=%s;</script>" % json.dumps(
-            {"token": boot_token}
-        )
+        boot_data["token"] = boot_token
+    route = _deep_link_route(request)
+    if route:
+        boot_data["route"] = route
+    if boot_data:
+        boot = "<script>window.__MINISED_BOOT__=%s;</script>" % json.dumps(boot_data)
         html = html.replace("</head>", boot + "</head>", 1)
     resp = HttpResponse(html, content_type="text/html; charset=utf-8")
     # Не кэшировать оболочку SPA, иначе iframe Битрикса держит старый билд.
