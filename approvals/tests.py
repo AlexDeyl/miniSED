@@ -464,6 +464,31 @@ class RoundsTests(TestCase):
         self.assertIn("Приложили новую редакцию", mail.outbox[0].body)
         self.assertIn("при повторном направлении", mail.outbox[0].body)
 
+    def test_bell_carries_same_details_as_email(self):
+        """Колокольчик Битрикса должен нести то же, что письмо: раньше туда
+        уходил один заголовок, и по уведомлению было не понять, что согласуют."""
+        from unittest.mock import patch
+
+        from core.models import UserProfile
+
+        from . import notifications
+
+        UserProfile.objects.create(fio="Иванов Иван", bitrix_id=AUTHOR, is_active=True)
+        a = Factory.agreement(
+            author=AUTHOR, title="Скидка 15%",
+            description="Гостю за задержку заселения", amount="90000",
+        )
+        p = Factory.internal(a, APPROVER_A)
+
+        with patch.object(notifications, "_bitrix_notify") as bell:
+            notifications.notify_participant(a, p, "https://msed.example.ru")
+
+        msg = bell.call_args[0][1]
+        for part in ("Скидка 15%", "Иванов Иван", "Гостю за задержку заселения", "90000"):
+            self.assertIn(part, msg)
+        # ссылка на карточку идёт отдельным параметром — её оформляет notify_user
+        self.assertTrue(bell.call_args.kwargs["link"])
+
     def test_resubmit_with_edited_route(self):
         a = Factory.agreement(author=AUTHOR)
         p1 = Factory.internal(a, APPROVER_A)

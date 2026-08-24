@@ -114,6 +114,50 @@ def _card_link(agreement) -> str:
     return app_link(agreement_route(agreement.id))
 
 
+def _person_name(b24_id) -> str:
+    """ФИО сотрудника: профиль → Битрикс. Пусто, если не нашли — строку с
+    «USER #123» в уведомление лучше не класть."""
+    if not b24_id:
+        return ""
+    prof = UserProfile.objects.filter(bitrix_id=b24_id).first()
+    if prof and prof.fio:
+        return prof.fio
+    try:
+        from bitrix.client import BitrixClient, get_active_portal, get_users_by_ids
+
+        portal = get_active_portal()
+        if not portal:
+            return ""
+        users = get_users_by_ids(BitrixClient(portal), [int(b24_id)])
+        if users:
+            u = users[0]
+            return " ".join(
+                x for x in (u.get("LAST_NAME"), u.get("NAME"), u.get("SECOND_NAME")) if x
+            ).strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _details(agreement, round_number=None) -> list[str]:
+    """Наполнение уведомления — то же, что в письме: суть документа без
+    перехода в карточку. Без CRM-ссылки: в письме она строкой, в колокольчике
+    прячется за подписью (BB-код), поэтому её добавляют вызывающие."""
+    lines = [f"Название: {agreement.title}"]
+    author = _person_name(agreement.author_b24_id)
+    if author:
+        lines.append(f"Инициатор: {author}")
+    if agreement.description:
+        lines.append(f"Описание: {agreement.description}")
+    if agreement.amount is not None:
+        lines.append(f"Сумма: {agreement.amount}")
+    if agreement.deadline:
+        lines.append(f"Срок: {agreement.deadline:%d.%m.%Y}")
+    if round_number and round_number > 1:
+        lines.append(f"Круг согласования: {round_number}")
+    return lines
+
+
 def _approve_url(participant, base_url: str) -> str:
     if not participant.external_token:
         participant.external_token = get_random_string(24)
@@ -149,18 +193,12 @@ def notify_participant(agreement, participant, base_url: str) -> None:
     approve_url = _approve_url(participant, base_url)
 
     subject = f"Согласование #{agreement.id}: {agreement.title}"
-    lines = [
-        "Вам отправлен документ на согласование.",
-        "",
-        f"Название: {agreement.title}",
-    ]
-    if agreement.description:
-        lines.append(f"Описание: {agreement.description}")
-    if agreement.amount is not None:
-        lines.append(f"Сумма: {agreement.amount}")
+    details = _details(agreement, participant.round_number)
+    note = _round_note(agreement, participant.round_number)
+
+    lines = ["Вам отправлен документ на согласование.", "", *details]
     if agreement.crm_link:
         lines.append(f"CRM: {agreement.crm_link}")
-    note = _round_note(agreement, participant.round_number)
     if note:
         lines += ["", note]
     lines += ["", f"Перейти к согласованию: {approve_url}"]
@@ -179,9 +217,18 @@ def notify_participant(agreement, participant, base_url: str) -> None:
 
     b24_id = _resolve_b24_id(participant)
     if b24_id:
-        # В колокольчике — карточка в приложении (ссылка спрятана за подписью);
-        # токен-ссылка на одноклик-согласование остаётся в письме.
-        _bitrix_notify(b24_id, subject, link=_card_link(agreement) or approve_url)
+        # Колокольчик получает то же наполнение, что и письмо (раньше уходил
+        # один заголовок). Отличия: ссылки прячем за подписями BB-кодом, а
+        # токен-ссылку на одноклик-согласование не даём — в приложении человек
+        # и так авторизован, решение принимается в карточке.
+        bell = [f"[B]{agreement.title}[/B]", *details[1:]]
+        if note:
+            bell += ["", note]
+        if agreement.crm_link:
+            bell += ["", f"[URL={agreement.crm_link}]Сделка в CRM[/URL]"]
+        _bitrix_notify(
+            b24_id, "\n".join(bell), link=_card_link(agreement) or approve_url,
+        )
 
 
 def _resolve_email_by_b24(b24_id: int) -> str:
@@ -203,15 +250,18 @@ def notify_author_result(agreement, *, approved: bool, by_name: str = "", commen
     if not b24:
         return
 
+    details = _details(agreement, agreement.current_round)
     if approved:
         subject = f"Согласовано #{agreement.id}: {agreement.title}"
-        lines = ["Ваш документ согласован.", "", f"Название: {agreement.title}"]
+        head = "Ваш документ согласован."
     else:
         who = f" ({by_name})" if by_name else ""
         subject = f"Отклонено #{agreement.id}: {agreement.title}"
-        lines = [f"Ваш документ отклонён{who}.", "", f"Название: {agreement.title}"]
-        if comment:
-            lines.append(f"Причина: {comment}")
+        head = f"Ваш документ отклонён{who}."
+
+    lines = [head, "", *details]
+    if not approved and comment:
+        lines.append(f"Причина: {comment}")
     if agreement.crm_link:
         lines.append(f"CRM: {agreement.crm_link}")
     body = "\n".join(lines)
@@ -223,5 +273,12 @@ def notify_author_result(agreement, *, approved: bool, by_name: str = "", commen
                       [email], fail_silently=True)
         except Exception:
             pass
-    _bitrix_notify(b24, subject, link=_card_link(agreement),
+
+    # Колокольчик — то же наполнение, что в письме; CRM прячем за подписью.
+    bell = [f"[B]{head}[/B]", "", *details]
+    if not approved and comment:
+        bell.append(f"Причина: {comment}")
+    if agreement.crm_link:
+        bell += ["", f"[URL={agreement.crm_link}]Сделка в CRM[/URL]"]
+    _bitrix_notify(b24, "\n".join(bell), link=_card_link(agreement),
                    link_text="Открыть согласование")
