@@ -111,9 +111,26 @@ async function download(path: string, filename?: string): Promise<void> {
   URL.revokeObjectURL(url)
 }
 
+/**
+ * Скачивает файл и отдаёт blob-URL для показа на странице (просмотр PDF без
+ * скачивания). Обычным <iframe src> не обойтись: запрос уходит без наших
+ * заголовков авторизации. URL освобождает вызывающий — URL.revokeObjectURL.
+ */
+async function blobUrl(path: string): Promise<string> {
+  const auth = useAuthStore()
+  const headers: Record<string, string> = { 'ngrok-skip-browser-warning': 'true' }
+  if (auth.token) headers['Authorization'] = `Token ${auth.token}`
+  if (auth.b24UserId) headers['X-B24-User'] = String(auth.b24UserId)
+
+  const resp = await fetch(path, { headers })
+  if (!resp.ok) throw new ApiError('Не удалось загрузить файл', resp.status)
+  return URL.createObjectURL(await resp.blob())
+}
+
 export const api = {
   get: <T>(path: string) => request<T>(path),
   download,
+  blobUrl,
   post: <T>(path: string, body?: unknown) => request<T>(path, { method: 'POST', body }),
   postForm: <T>(path: string, form: FormData) =>
     request<T>(path, { method: 'POST', form }),

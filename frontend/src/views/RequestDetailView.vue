@@ -10,6 +10,7 @@ import type { RegulatoryRequestDetail, RouteSlot } from '@/types/request'
 import type { ApprovalParticipant, ParticipantInput } from '@/types/approval'
 import { fmtDateTime, isGroupLegal, useApprovalCard } from '@/composables/useApprovalCard'
 import DocumentEditor from '@/components/DocumentEditor.vue'
+import PdfPreview from '@/components/PdfPreview.vue'
 import DocumentsCard from '@/components/DocumentsCard.vue'
 import DecisionCard from '@/components/approval/DecisionCard.vue'
 import HistoryCard from '@/components/approval/HistoryCard.vue'
@@ -220,6 +221,9 @@ const doverennostDocs = computed(
   () => (req.value?.documents || []).filter((d) => d.document_type !== 'anketa' && d.download_url),
 )
 const isAnketaType = computed(() => req.value && (req.value.request_type === 'poa' || req.value.request_type === 'mchd'))
+// Тот же адрес, что у кнопки «Скачать заявление» — PDF собирается на лету,
+// поэтому просмотр всегда показывает актуальную анкету.
+const anketaUrl = computed(() => (req.value ? requests.anketaPdfUrl(req.value.id) : ''))
 
 async function uploadFile(e: Event) {
   const input = e.target as HTMLInputElement
@@ -291,6 +295,16 @@ onMounted(load)
 
       <p v-if="error" class="state state--error">{{ error }}</p>
 
+      <div class="req-layout">
+        <!-- Заявление (анкета) прямо на странице: раньше её приходилось
+             скачивать каждый раз, чтобы просто посмотреть. -->
+        <PdfPreview
+          v-if="isAnketaType" class="req-preview"
+          :src="anketaUrl" title="Заявление (анкета)"
+          :filename="`Заявление_${req.number}.pdf`"
+        />
+
+        <div class="req-cards">
       <!-- Суть заявки: основание и комментарий инициатора -->
       <div v-if="req.basis || req.comment || req.position || req.department" class="detail-card">
         <div class="detail-card-header">Заявка</div>
@@ -455,6 +469,8 @@ onMounted(load)
           </button>
         </div>
       </div>
+        </div>
+      </div>
     </template>
 
     <!-- Оверлей онлайн-редактора -->
@@ -463,6 +479,18 @@ onMounted(load)
 </template>
 
 <style scoped>
+/* Две колонки на широком экране: слева анкета, справа карточки заявки.
+   Узкий экран (в т.ч. iframe Битрикса) — одна колонка, анкета уходит вниз:
+   сначала суть заявки и действия, просмотр — следом. */
+.req-layout { display: grid; grid-template-columns: 1fr; gap: 14px; }
+.req-preview { order: 2; }
+.req-cards { order: 1; min-width: 0; }
+@media (min-width: 1180px) {
+  .req-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 620px); align-items: start; }
+  .req-preview { order: 0; position: sticky; top: 0; }
+  .req-cards { order: 0; }
+}
+
 .submit-comment {
   width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #d0d0d0;
   border-radius: 6px; font: inherit; font-size: 13px; resize: vertical;

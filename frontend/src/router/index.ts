@@ -58,7 +58,8 @@ const router = createRouter({
       name: 'request-detail',
       component: () => import('@/views/RequestDetailView.vue'),
       props: true,
-      meta: { title: 'Заявка' },
+      // широкая раскладка: слева просмотр анкеты, справа карточки заявки
+      meta: { title: 'Заявка', wide: true },
     },
     {
       path: '/contracts',
