@@ -113,7 +113,7 @@ function tabBadge(code: string): number {
           >{{ t.label }}<span v-if="t.code === 'new' && complimentsUi.executionCount" class="subtab-badge">{{ complimentsUi.executionCount }}</span></button>
         </div>
 
-        <RouterLink v-if="auth.isLawyer" to="/legal"><span>Работа юристов</span></RouterLink>
+        <RouterLink v-if="auth.isLawyer || auth.canViewAll" to="/legal"><span>Работа юристов</span></RouterLink>
         <!-- под-вкладки работы юристов -->
         <div v-if="onLegal" class="sidebar-subtabs">
           <button

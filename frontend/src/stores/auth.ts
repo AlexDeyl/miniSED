@@ -26,6 +26,9 @@ export const useAuthStore = defineStore('auth', () => {
   )
   // Юрист — по праву legal_manage (раздел «Заявки для юристов», групповой юрэтап).
   const isLawyer = computed(() => !!profile.value?.permissions?.includes('legal_manage'))
+  // Сквозной просмотр (администратор): видит все согласования, заявки,
+  // договоры и комплименты — но действует только там, где он в маршруте.
+  const canViewAll = computed(() => !!profile.value?.permissions?.includes('view_all'))
   // Исполнитель комплиментов — ему виден раздел «Заявки для исполнения».
   const isComplimentExecutor = computed(() => !!profile.value?.is_compliment_executor)
 
@@ -143,7 +146,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   return {
     token, profile, b24UserId, ready, isAuthenticated, displayName, isLawyer,
-    isComplimentExecutor,
+    canViewAll, isComplimentExecutor,
     login, bitrixLogin, applyToken, logout, init,
   }
 })

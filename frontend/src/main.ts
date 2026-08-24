@@ -19,8 +19,8 @@ router.beforeEach((to) => {
   if (to.name === 'login' && auth.isAuthenticated) {
     return { path: '/svetofor' }
   }
-  // Раздел юристов — только для юристов.
-  if (to.meta.lawyerOnly && !auth.isLawyer) {
+  // Раздел юристов — юристам и администратору со сквозным просмотром.
+  if (to.meta.lawyerOnly && !auth.isLawyer && !auth.canViewAll) {
     return { path: '/svetofor' }
   }
   return true

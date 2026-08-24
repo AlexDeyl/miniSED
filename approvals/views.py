@@ -38,7 +38,7 @@ from django.core.mail import send_mail
 from django.conf import settings
 from django.db.models import F, Q
 from core.services import log_action
-from core.auth import get_current_profile, is_lawyer, lawyer_b24_ids
+from core.auth import can_view_all, get_current_profile, is_lawyer, lawyer_b24_ids
 from urllib.parse import urlencode
 
 
@@ -390,6 +390,15 @@ class AgreementViewSet(viewsets.ModelViewSet):
         user_id = get_current_b24_id(request)
         if not user_id:
             return base_qs.none()
+
+        # Сквозной просмотр (системный администратор) — видит всё, без отбора.
+        if can_view_all(user_id):
+            status_all = (
+                request.query_params.get("status")
+                if getattr(self, "action", None) == "list" else None
+            )
+            return base_qs.filter(status=status_all) if status_all else base_qs
+
         emails = getattr(self, "b24_emails", None)
         if emails is None:
             emails = user_emails(user_id)

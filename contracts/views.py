@@ -23,7 +23,7 @@ from rest_framework.response import Response
 
 from approvalflow import sheet as flow_sheet
 from approvalflow.models import ApprovalParticipant
-from core.auth import get_current_b24_id, is_lawyer
+from core.auth import can_view_all, get_current_b24_id, is_lawyer
 
 from . import constants, services
 from .models import Contract
@@ -101,7 +101,9 @@ class ContractViewSet(viewsets.ModelViewSet):
             if scope == "participant":
                 qs = qs.filter(participant)
             elif scope == "all":
-                if is_lawyer(self.b24_id):
+                if can_view_all(self.b24_id):
+                    pass  # сквозной просмотр: все договоры, включая черновики
+                elif is_lawyer(self.b24_id):
                     # Юротделу во вкладке «Все» показываем все договоры, кроме
                     # чужих черновиков: юрист и так вправе открыть любую карточку
                     # (_can_view), а без общего списка невозможно ловить дубли —
@@ -130,6 +132,7 @@ class ContractViewSet(viewsets.ModelViewSet):
             contract.initiator_b24_id == self.b24_id
             or self._is_participant(contract)
             or is_lawyer(self.b24_id)
+            or can_view_all(self.b24_id)
         )
 
     def get_object(self):

@@ -55,6 +55,21 @@ def is_lawyer(b24_id) -> bool:
     return bool(profile and profile.has_perm("legal_manage"))
 
 
+def can_view_all(b24_id) -> bool:
+    """Есть ли у сотрудника право сквозного просмотра (view_all).
+
+    Такой сотрудник (системный администратор) видит любые согласования,
+    заявки, договоры и комплименты — даже те, где он не инициатор и не
+    участник. Право только на ЧТЕНИЕ: решать, исполнять и править
+    по-прежнему может лишь тот, кто в маршруте."""
+    if not b24_id:
+        return False
+    from .models import UserProfile
+
+    profile = UserProfile.objects.filter(bitrix_id=b24_id, is_active=True).first()
+    return bool(profile and profile.has_perm("view_all"))
+
+
 def lawyer_b24_ids() -> list[int]:
     """b24-id всех активных сотрудников с правом юриста (legal_manage).
 

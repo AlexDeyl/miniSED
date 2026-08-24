@@ -26,7 +26,7 @@ from rest_framework.response import Response
 
 from approvalflow import sheet as flow_sheet
 from approvalflow.models import ApprovalParticipant
-from core.auth import get_current_b24_id
+from core.auth import can_view_all, get_current_b24_id
 from requests_reg.models import RoleAssignment
 
 from . import constants, form_pdf, services
@@ -95,7 +95,9 @@ class ComplimentViewSet(viewsets.ModelViewSet):
         qs = Compliment.objects.select_related("facility", "organization")
         if self.action == "list":
             scope = self.request.query_params.get("scope") or "mine"
-            if self._is_sales_head() and scope == "all":
+            if can_view_all(self.b24_id) and scope == "all":
+                pass  # сквозной просмотр (администратор) — все заявки
+            elif self._is_sales_head() and scope == "all":
                 pass  # руководитель продаж видит всё
             elif scope == "participant":
                 qs = qs.filter(id__in=self._participant_ids())
@@ -120,6 +122,8 @@ class ComplimentViewSet(viewsets.ModelViewSet):
         ).exists()
 
     def _can_view(self, compliment) -> bool:
+        if can_view_all(self.b24_id):
+            return True
         if compliment.initiator_b24_id == self.b24_id:
             return True
         if compliment.executor_b24_id == self.b24_id:

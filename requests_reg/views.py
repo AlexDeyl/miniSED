@@ -48,7 +48,7 @@ from rest_framework.response import Response
 from rest_framework.exceptions import NotFound, PermissionDenied
 
 from approvalflow.models import ApprovalParticipant
-from core.auth import get_current_b24_id, is_lawyer
+from core.auth import can_view_all, get_current_b24_id, is_lawyer
 
 from . import constants, services
 from .models import PowerTemplate, RegulatoryRequest
@@ -161,8 +161,9 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = RegulatoryRequest.objects.select_related("organization")
-        # Раздел «Регламентные заявки» = только СВОИ (созданные мной).
-        if self.action == "list":
+        # Раздел «Регламентные заявки» = только СВОИ (созданные мной);
+        # сотрудник с правом сквозного просмотра видит все.
+        if self.action == "list" and not can_view_all(self.b24_id):
             qs = qs.filter(initiator_b24_id=self.b24_id)
         rtype = self.request.query_params.get("type")
         if rtype:
@@ -188,6 +189,7 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
             req.initiator_b24_id == self.b24_id
             or self._is_participant(req)
             or is_lawyer(self.b24_id)
+            or can_view_all(self.b24_id)
         )
 
     def get_object(self):
@@ -229,9 +231,14 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
         if req.initiator_b24_id != self.b24_id:
             raise PermissionDenied("Действие доступно только инициатору заявки.")
 
-    def _require_lawyer(self):
-        if not is_lawyer(self.b24_id):
-            raise PermissionDenied("Раздел доступен только сотрудникам юридического отдела.")
+    def _require_lawyer(self, *, read_only=False):
+        """Действия юротдела — только юристам. Для чтения очереди пускаем и
+        сотрудника со сквозным просмотром (администратора)."""
+        if is_lawyer(self.b24_id):
+            return
+        if read_only and can_view_all(self.b24_id):
+            return
+        raise PermissionDenied("Раздел доступен только сотрудникам юридического отдела.")
 
     # --- инбокс: заявки, ждущие моего решения (для общего «Требует действия») ---
     @action(detail=False, methods=["get"])
@@ -303,7 +310,7 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
     # --- исполнение юротделом (только юристы) ---
     @action(detail=False, methods=["get"], url_path="legal_queue")
     def legal_queue(self, request):
-        self._require_lawyer()
+        self._require_lawyer(read_only=True)
         # scope: new (новые) / work (в работе) / archive (закрытые) / all;
         # по умолчанию — активные
         scope = (request.query_params.get("scope") or "").strip()

@@ -321,3 +321,85 @@ class MoneyFormatTests(TestCase):
         self.assertEqual(money(None), "")
         self.assertEqual(money(""), "")
         self.assertEqual(money("не число"), "не число")
+
+
+class ViewAllPermissionTests(TestCase):
+    """Право сквозного просмотра: администратор видит чужие карточки во всех
+    модулях, но остаётся читателем — решать может только участник маршрута."""
+
+    ADMIN = 4242
+    STRANGER = 4243
+
+    def setUp(self):
+        from approvals.models import Participant
+
+        self.admin = UserProfile.objects.create(
+            fio="Администратор", bitrix_id=self.ADMIN, is_active=True,
+        )
+        self.admin.roles.add(Role.objects.get(code="sys_admin"))
+        UserProfile.objects.create(
+            fio="Посторонний", bitrix_id=self.STRANGER, is_active=True,
+        )
+        # чужое согласование: админ ему никто
+        self.agreement = Agreement.objects.create(
+            title="Чужое", author_b24_id=1, flow_type="parallel", status="in_progress",
+        )
+        self.participant = Participant.objects.create(
+            agreement=self.agreement, type="internal", b24_user_id=2, order_index=0,
+        )
+
+    def _api(self, uid):
+        c = APIClient()
+        c.credentials(HTTP_X_B24_USER=str(uid))
+        return c
+
+    def test_permission_seeded_on_sys_admin(self):
+        self.assertTrue(self.admin.has_perm("view_all"))
+        self.assertIn("view_all", [p.code for p in Permission.objects.all()])
+
+    def test_admin_sees_foreign_agreements(self):
+        ids = [a["id"] for a in self._api(self.ADMIN).get("/api/agreements/").json()]
+        self.assertEqual(ids, [self.agreement.id])
+        # посторонний без права — по-прежнему ничего
+        self.assertEqual(self._api(self.STRANGER).get("/api/agreements/").json(), [])
+
+    def test_admin_cannot_decide_for_others(self):
+        """Право на чтение не делает администратора согласующим."""
+        r = self._api(self.ADMIN).post(
+            f"/api/agreements/{self.agreement.id}/decide/",
+            {"participant_id": self.participant.id, "decision": "approve"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 403)
+
+    def test_admin_sees_foreign_requests_and_contracts(self):
+        from contracts.models import Contract
+        from requests_reg.models import RegulatoryRequest
+
+        org = Organization.objects.create(short_name="УК Норд")
+        req = RegulatoryRequest.objects.create(
+            request_type="poa", organization=org, initiator_b24_id=1, status="on_approval",
+        )
+        contract = Contract.objects.create(
+            organization=org, title="Чужой договор", initiator_b24_id=1,
+            status="on_approval",
+        )
+
+        reqs = self._api(self.ADMIN).get("/api/reg/requests/").json()
+        self.assertEqual([x["id"] for x in reqs], [req.id])
+        self.assertEqual(
+            self._api(self.ADMIN).get(f"/api/reg/requests/{req.id}/").status_code, 200,
+        )
+
+        contracts = self._api(self.ADMIN).get("/api/contracts/?scope=all").json()
+        self.assertEqual([x["id"] for x in contracts], [contract.id])
+        self.assertEqual(
+            self._api(self.ADMIN).get(f"/api/contracts/{contract.id}/").status_code, 200,
+        )
+
+    def test_admin_may_read_legal_queue(self):
+        """Очередь юротдела администратору видна (чтение), юристом он не стал."""
+        r = self._api(self.ADMIN).get("/api/reg/requests/legal_queue/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(self._api(self.STRANGER).get(
+            "/api/reg/requests/legal_queue/").status_code, 403)
