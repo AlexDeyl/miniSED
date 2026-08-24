@@ -25,8 +25,9 @@ export const requests = {
 
   routePreview: (id: number | string) =>
     api.get<{ route: RouteSlot[] }>(`${BASE}/${id}/route_preview/`),
-  submit: (id: number | string, participants: ParticipantInput[]) =>
-    api.post<RegulatoryRequestDetail>(`${BASE}/${id}/submit/`, { participants }),
+  // comment — пояснение инициатора согласующим (что изменилось после доработки).
+  submit: (id: number | string, participants: ParticipantInput[], comment = '') =>
+    api.post<RegulatoryRequestDetail>(`${BASE}/${id}/submit/`, { participants, comment }),
   cancel: (id: number | string) => api.post<RegulatoryRequestDetail>(`${BASE}/${id}/cancel/`),
   returnForRevision: (id: number | string, comment: string) =>
     api.post<RegulatoryRequestDetail>(`${BASE}/${id}/return/`, { comment }),

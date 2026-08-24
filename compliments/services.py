@@ -103,7 +103,8 @@ def _sync_status(compliment: Compliment) -> None:
 
 
 @transaction.atomic
-def submit(compliment: Compliment, participants: list[dict], *, actor_b24_id=None) -> Approval:
+def submit(compliment: Compliment, participants: list[dict], *, actor_b24_id=None,
+           comment: str = "") -> Approval:
     """Отправка на согласование (последовательный маршрут).
 
     Исполнителя в участники НЕ добавляем: исполнение — не решение, оно живёт
@@ -133,9 +134,11 @@ def submit(compliment: Compliment, participants: list[dict], *, actor_b24_id=Non
             initiator_b24_id=compliment.initiator_b24_id,
             linked_object=compliment,
         )
-        flow.submit(approval, participants)
+        flow.submit(approval, participants, comment=comment)
     else:
-        flow.start_new_round(approval, participants)
+        # Новый круг после доработки: пояснение инициатора, что изменилось,
+        # остаётся на круге и попадает согласующим в историю и в письмо.
+        flow.start_new_round(approval, participants, comment=comment)
 
     _sync_status(compliment)
     _notify("notify_current_approver", compliment)

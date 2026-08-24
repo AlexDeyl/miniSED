@@ -19,6 +19,7 @@ from django.conf import settings
 from django.urls import reverse
 from django.utils.crypto import get_random_string
 
+from approvalflow import services as flow
 from approvalflow.models import ApprovalParticipant
 from requests_reg import notifications as rn
 
@@ -67,15 +68,22 @@ def notify_current_approver(contract):
     if p is None:
         return
 
+    # что инициатор написал, направляя этот круг (например после доработки)
+    note = flow.opening_note(p)
     if services.is_group_legal(p):
         # Групповой юр-этап: согласует любой юрист в приложении — без токен-ссылки.
         b24, emails = rn._recipients(rn.lawyer_b24_ids())
-        body = "Требуется согласование юридического отдела.\n\n" + "\n".join(_details(contract))
-        rn._dispatch(b24, emails, f"Договор {contract.number}: требуется юротдел", body)
+        lines = ["Требуется согласование юридического отдела.", "", *_details(contract)]
+        if note:
+            lines += ["", note]
+        rn._dispatch(b24, emails, f"Договор {contract.number}: требуется юротдел",
+                     "\n".join(lines))
         return
 
     approve_url = _approve_url(p)
     lines = ["Требуется ваше согласование договора.", "", *_details(contract)]
+    if note:
+        lines += ["", note]
     if approve_url:
         lines += ["", f"Перейти к согласованию: {approve_url}"]
     body = "\n".join(lines)

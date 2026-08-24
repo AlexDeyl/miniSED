@@ -248,8 +248,10 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
         req = self.get_object()
         self._require_initiator(req)
         flow_type = request.data.get("flow_type")
+        comment = (request.data.get("comment") or "").strip()
         err = self._run(lambda: services.submit(
-            req, _participants(request.data), flow_type=flow_type, actor_b24_id=self.b24_id,
+            req, _participants(request.data), flow_type=flow_type,
+            actor_b24_id=self.b24_id, comment=comment,
         ))
         return err or self._detail(req)
 

@@ -78,6 +78,16 @@ export interface Agreement {
   documents_v: VersionedDoc[]
   participants: AgParticipant[]
   decision_logs: DecisionLog[]
+  round_notes: RoundNote[]
+}
+
+// Комментарий инициатора при направлении круга (что изменилось после доработки).
+export interface RoundNote {
+  id: number
+  round_number: number
+  author_b24_id: number | null
+  comment: string
+  created_at: string
 }
 
 export interface AgreementTemplate {

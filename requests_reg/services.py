@@ -104,7 +104,7 @@ def _sync_status(request: RegulatoryRequest) -> None:
 
 @transaction.atomic
 def submit(request: RegulatoryRequest, participants: list[dict], *, flow_type=None,
-           actor_b24_id=None):
+           actor_b24_id=None, comment: str = ""):
     """Отправляет заявку на согласование (последовательный маршрут по умолчанию).
 
     Допускается и перезапуск после отклонения (новый круг)."""
@@ -144,9 +144,11 @@ def submit(request: RegulatoryRequest, participants: list[dict], *, flow_type=No
             initiator_b24_id=request.initiator_b24_id,
             linked_object=request,
         )
-        flow.submit(approval, participants)
+        flow.submit(approval, participants, comment=comment)
     else:
-        flow.start_new_round(approval, participants)
+        # Новый круг после доработки: пояснение инициатора, что изменилось,
+        # остаётся на круге и попадает согласующим в историю и в письмо.
+        flow.start_new_round(approval, participants, comment=comment)
 
     _sync_status(request)
     _notify("notify_current_approver", request)  # тому, чья очередь

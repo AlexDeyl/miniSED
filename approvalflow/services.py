@@ -40,11 +40,15 @@ def _add_participants(round: ApprovalRound, participants: list[dict]) -> None:
         )
 
 
-def _open_round(approval: Approval, participants: list[dict]) -> ApprovalRound:
+def _open_round(
+    approval: Approval, participants: list[dict], comment: str = ""
+) -> ApprovalRound:
     if not participants:
         raise ApprovalError("Нельзя открыть круг без участников.")
     number = approval.current_round + 1
-    round = ApprovalRound.objects.create(approval=approval, round_number=number)
+    round = ApprovalRound.objects.create(
+        approval=approval, round_number=number, opening_comment=(comment or "").strip(),
+    )
     _add_participants(round, participants)
     approval.current_round = number
     approval.status = Approval.STATUS_IN_PROGRESS
@@ -62,26 +66,49 @@ def get_current_round(approval: Approval) -> ApprovalRound | None:
 
 
 @transaction.atomic
-def submit(approval: Approval, participants: list[dict]) -> ApprovalRound:
+def submit(
+    approval: Approval, participants: list[dict], *, comment: str = ""
+) -> ApprovalRound:
     """Первичная отправка на согласование: открывает круг №1."""
     if approval.current_round != 0:
         raise ApprovalError("Согласование уже отправлено; используйте start_new_round.")
-    return _open_round(approval, participants)
+    return _open_round(approval, participants, comment)
 
 
 @transaction.atomic
 def start_new_round(
-    approval: Approval, participants: list[dict], *, reason: str = ""
+    approval: Approval, participants: list[dict], *, comment: str = ""
 ) -> ApprovalRound:
     """
     Повторная отправка после доработки (ТЗ п.7.5): новый круг со связью с
     предыдущими (по round_number). История прошлых кругов не затирается.
+
+    comment — пояснение инициатора согласующим, что изменилось после доработки
+    (необязательное); хранится на круге, который им открыт.
     """
     if approval.status not in (Approval.STATUS_RETURNED, Approval.STATUS_REJECTED):
         raise ApprovalError(
             "Новый круг можно открыть только после возврата или отклонения."
         )
-    return _open_round(approval, participants)
+    return _open_round(approval, participants, comment)
+
+
+def opening_note(participant: ApprovalParticipant) -> str:
+    """Пояснение инициатора к кругу, в котором ждут решения этого участника.
+
+    Пустая строка, если пояснения нет, — вызывающему достаточно `if note:`.
+    Нужна уведомлениям всех модулей: согласующий должен видеть, что изменилось
+    после доработки, прямо в письме, а не только в карточке."""
+    round = participant.round
+    text = (round.opening_comment or "").strip()
+    if not text:
+        return ""
+    prefix = (
+        "Комментарий инициатора при повторном направлении"
+        if round.round_number > 1
+        else "Комментарий инициатора"
+    )
+    return f"{prefix}: {text}"
 
 
 def _is_turn(round: ApprovalRound, participant: ApprovalParticipant) -> bool:

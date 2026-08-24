@@ -413,6 +413,57 @@ class RoundsTests(TestCase):
         self.assertEqual(a.participants.filter(round_number=2, status="waiting").count(), 1)
         self.assertEqual(a.participants.filter(round_number=1, status="rejected").count(), 1)
 
+    def test_resubmit_comment_saved_and_returned(self):
+        """Инициатор поясняет, что изменилось: комментарий живёт на новом круге
+        и виден согласующим в карточке."""
+        a = Factory.agreement(author=AUTHOR)
+        p1 = Factory.internal(a, APPROVER_A)
+        self._decide(APPROVER_A, a, p1, "reject", "сумма великовата")
+
+        r = api(AUTHOR).post(
+            f"/api/agreements/{a.id}/resubmit/",
+            {"comment": "  Снизили сумму до 90 000  "}, format="json",
+        )
+        self.assertEqual(r.status_code, 200)
+        notes = r.json()["round_notes"]
+        self.assertEqual(len(notes), 1)
+        self.assertEqual(notes[0]["round_number"], 2)
+        self.assertEqual(notes[0]["comment"], "Снизили сумму до 90 000")
+        self.assertEqual(notes[0]["author_b24_id"], AUTHOR)
+
+        # согласующий видит комментарий в своей карточке
+        seen = api(APPROVER_A).get(f"/api/agreements/{a.id}/").json()["round_notes"]
+        self.assertEqual(seen[0]["comment"], "Снизили сумму до 90 000")
+
+    def test_resubmit_without_comment_creates_no_note(self):
+        """Комментарий необязателен — перезапуск в один клик работает как раньше."""
+        a = Factory.agreement(author=AUTHOR)
+        p1 = Factory.internal(a, APPROVER_A)
+        self._decide(APPROVER_A, a, p1, "reject", "нет")
+
+        r = api(AUTHOR).post(f"/api/agreements/{a.id}/resubmit/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["round_notes"], [])
+
+    def test_resubmit_comment_goes_into_email(self):
+        """Комментарий уходит согласующему письмом — иначе его увидят, только
+        если сами откроют карточку."""
+        from django.core import mail
+
+        a = Factory.agreement(author=AUTHOR)
+        p1 = Factory.internal(a, APPROVER_A)
+        B24UserEmail.objects.create(b24_user_id=APPROVER_A, email="approver@nordhotels.ru")
+        self._decide(APPROVER_A, a, p1, "reject", "нет")
+        mail.outbox = []
+
+        api(AUTHOR).post(
+            f"/api/agreements/{a.id}/resubmit/",
+            {"comment": "Приложили новую редакцию"}, format="json",
+        )
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("Приложили новую редакцию", mail.outbox[0].body)
+        self.assertIn("при повторном направлении", mail.outbox[0].body)
+
     def test_resubmit_with_edited_route(self):
         a = Factory.agreement(author=AUTHOR)
         p1 = Factory.internal(a, APPROVER_A)

@@ -191,8 +191,10 @@ class ComplimentViewSet(viewsets.ModelViewSet):
     def submit(self, request, pk=None):
         compliment = self.get_object()
         self._require_initiator(compliment)
+        comment = (request.data.get("comment") or "").strip()
         err = self._run(lambda: services.submit(
             compliment, _participants(request.data), actor_b24_id=self.b24_id,
+            comment=comment,
         ))
         return err or self._detail(compliment)
 

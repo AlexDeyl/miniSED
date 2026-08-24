@@ -19,6 +19,7 @@ from django.core.mail import send_mail
 from django.urls import reverse
 from django.utils.crypto import get_random_string
 
+from approvalflow import services as flow
 from approvalflow.models import ApprovalParticipant
 from core import auth as core_auth
 from core.models import UserProfile
@@ -149,17 +150,23 @@ def notify_current_approver(request):
     if p is None:
         return
     label = _label(request)
+    # что инициатор написал, направляя этот круг (например после доработки)
+    note = flow.opening_note(p)
     if services.is_group_legal(p):
         # Групповой юрэтап: согласует любой юрист в приложении — без токен-ссылки.
         b24, emails = _recipients(lawyer_b24_ids())
-        _dispatch(b24, emails, "Требуется согласование юротдела",
-                  f"Требуется согласование юридического отдела: {label}")
+        msg = f"Требуется согласование юридического отдела: {label}"
+        if note:
+            msg += f"\n\n{note}"
+        _dispatch(b24, emails, "Требуется согласование юротдела", msg)
         return
 
     # Конкретный согласующий (внутренний или внешний) — даём ссылку-токен,
     # по которой можно согласовать прямо из письма/уведомления.
     url = _approve_url(p)
     msg = f"Требуется ваше согласование: {label}"
+    if note:
+        msg += f"\n\n{note}"
     if url:
         msg += f"\nПерейти к согласованию: {url}"
     if p.type == ApprovalParticipant.TYPE_INTERNAL and p.b24_user_id:

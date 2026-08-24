@@ -97,7 +97,13 @@ class ApprovalRound(models.Model):
     result = models.CharField(
         "Итог", max_length=16, choices=RESULT_CHOICES, default=RESULT_PENDING
     )
+    # comment — чем круг ЗАКРЫЛИ (причина возврата на доработку),
+    # opening_comment — с чем инициатор круг ОТКРЫЛ (что изменилось после
+    # доработки). Два разных момента жизни круга, поэтому два поля.
     comment = models.TextField("Комментарий", blank=True)
+    opening_comment = models.TextField(
+        "Комментарий инициатора при направлении", blank=True
+    )
     started_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField("Завершён", null=True, blank=True)
 

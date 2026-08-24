@@ -114,6 +114,28 @@ def _approve_url(participant, base_url: str) -> str:
     return base_url.rstrip("/") + path
 
 
+def _round_note(agreement, round_number: int) -> str:
+    """Комментарий инициатора к этому кругу (пусто, если его нет).
+
+    Согласующий должен видеть, что изменилось после доработки, прямо в письме —
+    не только в карточке."""
+    from .models import RoundNote
+
+    note = (
+        RoundNote.objects.filter(agreement=agreement, round_number=round_number)
+        .order_by("-id")
+        .first()
+    )
+    if not note or not note.comment.strip():
+        return ""
+    prefix = (
+        "Комментарий инициатора при повторном направлении"
+        if round_number > 1
+        else "Комментарий инициатора"
+    )
+    return f"{prefix}: {note.comment.strip()}"
+
+
 def notify_participant(agreement, participant, base_url: str) -> None:
     """Шлёт участнику письмо со ссылкой + Битрикс-колокольчик (если он в Б24)."""
     approve_url = _approve_url(participant, base_url)
@@ -130,6 +152,9 @@ def notify_participant(agreement, participant, base_url: str) -> None:
         lines.append(f"Сумма: {agreement.amount}")
     if agreement.crm_link:
         lines.append(f"CRM: {agreement.crm_link}")
+    note = _round_note(agreement, participant.round_number)
+    if note:
+        lines += ["", note]
     lines += ["", f"Перейти к согласованию: {approve_url}"]
     body = "\n".join(lines)
 

@@ -226,6 +226,30 @@ class DecisionLog(models.Model):
         ordering = ["decided_at"]
 
 
+class RoundNote(models.Model):
+    """Комментарий инициатора при направлении круга на согласование.
+
+    Пишется в момент открытия круга (обычно повторного — «что изменилось после
+    доработки»). Не решение участника, поэтому в DecisionLog не помещается: там
+    обязателен participant, а автор круга участником не является."""
+
+    agreement = models.ForeignKey(
+        Agreement, related_name="round_notes", on_delete=models.CASCADE
+    )
+    round_number = models.PositiveIntegerField("Круг")
+    author_b24_id = models.IntegerField("Автор (Б24)", null=True, blank=True)
+    comment = models.TextField("Комментарий")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["round_number", "id"]
+        verbose_name = "Комментарий к кругу"
+        verbose_name_plural = "Комментарии к кругам"
+
+    def __str__(self):
+        return f"#{self.agreement_id} круг {self.round_number}"
+
+
 class B24Identity(models.Model):
     b24_user_id = models.IntegerField("ID пользователя Б24", unique=True)
     email = models.EmailField("Корпоративный email")

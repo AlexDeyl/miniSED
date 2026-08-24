@@ -10,6 +10,7 @@ from .models import (
     ApprovalTemplate,
     ApprovalTemplateParticipant,
     ApprovalTemplateAccess,
+    RoundNote,
 )
 
 
@@ -150,10 +151,18 @@ class DecisionLogSerializer(serializers.ModelSerializer):
         fields = ["id", "participant", "status", "comment", "round_number", "decided_at"]
 
 
+class RoundNoteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RoundNote
+        fields = ["id", "round_number", "author_b24_id", "comment", "created_at"]
+
+
 class AgreementSerializer(serializers.ModelSerializer):
     documents = AgreementDocumentSerializer(many=True, required=False)
     participants = ParticipantSerializer(many=True, required=False)
     decision_logs = DecisionLogSerializer(many=True, read_only=True)
+    # комментарии инициатора при направлении кругов (в т.ч. повторном)
+    round_notes = RoundNoteSerializer(many=True, read_only=True)
     documents_v = serializers.SerializerMethodField()
 
     class Meta:
@@ -174,6 +183,7 @@ class AgreementSerializer(serializers.ModelSerializer):
             "documents_v",
             "participants",
             "decision_logs",
+            "round_notes",
         ]
 
     def get_documents_v(self, obj):

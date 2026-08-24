@@ -46,6 +46,33 @@ class SubmitTests(TestCase):
         self.assertEqual(rnd.participants.count(), 2)
         self.assertIsNotNone(ap.submitted_at)
 
+    def test_opening_comment_and_note(self):
+        """Пояснение инициатора хранится на круге, который он открыл, и
+        подписывается по-разному для первого и повторного круга."""
+        ap = make_approval()
+        services.submit(ap, [internal(10)], comment="Первичная отправка")
+        rnd = services.get_current_round(ap)
+        self.assertEqual(rnd.opening_comment, "Первичная отправка")
+        self.assertEqual(
+            services.opening_note(rnd.participants.first()),
+            "Комментарий инициатора: Первичная отправка",
+        )
+
+        services.decide(rnd.participants.first(), "reject", "нет")
+        services.start_new_round(ap, [internal(10)], comment="  Снизили сумму  ")
+        rnd2 = services.get_current_round(ap)
+        self.assertEqual(rnd2.round_number, 2)
+        self.assertEqual(rnd2.opening_comment, "Снизили сумму")
+        self.assertEqual(
+            services.opening_note(rnd2.participants.first()),
+            "Комментарий инициатора при повторном направлении: Снизили сумму",
+        )
+        # круг без пояснения — пустая строка, вызывающему достаточно `if note:`
+        services.decide(rnd2.participants.first(), "reject", "нет")
+        services.start_new_round(ap, [internal(10)])
+        rnd3 = services.get_current_round(ap)
+        self.assertEqual(services.opening_note(rnd3.participants.first()), "")
+
     def test_submit_twice_forbidden(self):
         ap = make_approval()
         services.submit(ap, [internal(10)])

@@ -89,7 +89,7 @@ def _sync_status(contract: Contract) -> None:
 
 @transaction.atomic
 def submit(contract: Contract, participants: list[dict], *, flow_type=None,
-           actor_b24_id=None) -> Approval:
+           actor_b24_id=None, comment: str = "") -> Approval:
     """Отправляет договор на согласование (последовательный маршрут).
 
     Допускается перезапуск после возврата/отклонения (новый круг)."""
@@ -122,9 +122,11 @@ def submit(contract: Contract, participants: list[dict], *, flow_type=None,
             initiator_b24_id=contract.initiator_b24_id,
             linked_object=contract,
         )
-        flow.submit(approval, participants)
+        flow.submit(approval, participants, comment=comment)
     else:
-        flow.start_new_round(approval, participants)
+        # Новый круг после доработки: пояснение инициатора, что изменилось,
+        # остаётся на круге и попадает согласующим в историю и в письмо.
+        flow.start_new_round(approval, participants, comment=comment)
 
     _sync_status(contract)
     _notify("notify_current_approver", contract)  # тому, чья очередь

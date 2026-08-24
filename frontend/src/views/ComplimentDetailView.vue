@@ -178,13 +178,17 @@ function buildParticipants(): ParticipantInput[] | null {
   }))
 }
 
+// Пояснение инициатора согласующим при направлении круга (в т.ч. повторном).
+const submitComment = ref('')
+
 function submit() {
   const participants = buildParticipants()
   if (!participants) return
   run(async () => {
-    const r = await compliments.submit(props.id, participants)
+    const r = await compliments.submit(props.id, participants, submitComment.value.trim())
     route.value = []
     extras.value = []
+    submitComment.value = ''
     return r
   })
 }
@@ -418,6 +422,20 @@ onMounted(load)
           </button>
         </div>
 
+        <!-- Пояснение согласующим: с чем направляем круг (что изменилось
+             после доработки). Необязательное — перезапуск в один клик сохранён. -->
+        <div style="margin-top:12px">
+          <div class="detail-meta" style="margin-bottom:4px">
+            {{ rounds.length
+              ? 'Комментарий согласующим — что изменилось после доработки (необязательно)'
+              : 'Комментарий согласующим (необязательно)' }}
+          </div>
+          <textarea
+            v-model="submitComment" rows="2" class="submit-comment"
+            placeholder="Например: снизили сумму, приложена новая редакция"
+          ></textarea>
+        </div>
+
         <div style="margin-top:12px">
           <button class="btn btn--primary" :disabled="busy" @click="submit">
             {{ compliment.status === 'rejected' ? 'Перезапустить согласование (новый круг)' : 'Отправить на согласование' }}
@@ -515,6 +533,10 @@ onMounted(load)
 </template>
 
 <style scoped>
+.submit-comment {
+  width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #d0d0d0;
+  border-radius: 6px; font: inherit; font-size: 13px; resize: vertical;
+}
 .exec-comment {
   width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #d0d0d0;
   border-radius: 6px; font: inherit; font-size: 13px;

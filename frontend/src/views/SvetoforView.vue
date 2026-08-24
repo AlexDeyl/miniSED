@@ -191,7 +191,8 @@ const myPart = computed(() => {
       (p.type === 'external' && !!myEmail && p.email?.toLowerCase() === myEmail),
   ) ?? null
 })
-// история по кругам (ТЗ п.7.4)
+// история по кругам (ТЗ п.7.4). Круг попадает в ленту и без решений — если
+// инициатор направил его с комментарием, этот комментарий видно сразу.
 const roundsHistory = computed(() => {
   if (!selected.value) return []
   const byRound = new Map<number, DecisionLog[]>()
@@ -199,7 +200,14 @@ const roundsHistory = computed(() => {
     if (!byRound.has(log.round_number)) byRound.set(log.round_number, [])
     byRound.get(log.round_number)!.push(log)
   }
-  return [...byRound.entries()].sort((a, b) => a[0] - b[0]).map(([round, logs]) => ({ round, logs }))
+  const notes = new Map<number, string>()
+  for (const n of selected.value.round_notes || []) {
+    notes.set(n.round_number, n.comment)
+    if (!byRound.has(n.round_number)) byRound.set(n.round_number, [])
+  }
+  return [...byRound.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([round, logs]) => ({ round, logs, note: notes.get(round) || '' }))
 })
 // маршрут текущего круга можно менять, пока никто не принял решение
 const noneDecided = computed(() => currentParts.value.length > 0 && currentParts.value.every((p) => p.status === 'waiting'))
@@ -250,10 +258,13 @@ async function saveRoute() {
   await run(() => agreements.setRoute(selected.value!.id, parts))
   routeEdit.value = false
 }
+// Пояснение инициатора согласующим при отправке нового круга (необязательное).
+const resubmitComment = ref('')
 async function resubmit(withEditedRoute: boolean) {
   const parts = withEditedRoute ? buildRoute() : undefined
   if (withEditedRoute && (!parts || !parts.length)) { error.value = 'Маршрут пуст.'; return }
-  await run(() => agreements.resubmit(selected.value!.id, parts))
+  await run(() => agreements.resubmit(selected.value!.id, parts, resubmitComment.value.trim()))
+  resubmitComment.value = ''
   routeEdit.value = false
 }
 function cancel() {
@@ -715,6 +726,11 @@ onMounted(() => { loadUserDir(); loadList(); refreshBadges() })
                   <div style="font-weight:600;font-size:12px;margin-bottom:4px">
                     Круг {{ grp.round }}<span v-if="grp.round === selected.current_round" class="ag-muted"> · текущий</span>
                   </div>
+                  <div v-if="grp.note" class="log-item">
+                    <b>Инициатор</b>
+                    — {{ grp.round > 1 ? 'направил(а) повторно' : 'направил(а) на согласование' }}
+                    <div class="ag-muted">{{ grp.note }}</div>
+                  </div>
                   <div v-for="log in grp.logs" :key="log.id" class="log-item">
                     <b>{{ partLabel(log.participant) }}</b>
                     — <span :style="{ color: log.status === 'approved' ? 'var(--green-main)' : 'var(--red-main)' }">
@@ -788,6 +804,15 @@ onMounted(() => { loadUserDir(); loadList(); refreshBadges() })
                     <div v-if="routeExternal.length" class="chips" style="margin-top:6px">
                       <span v-for="(em, i) in routeExternal" :key="i" class="chip chip--ext">{{ em }} <button class="chip-x" @click="routeExternal.splice(i, 1)">×</button></span>
                     </div>
+                    <!-- Пояснение согласующим: что изменилось после доработки.
+                         Необязательное — перезапуск в один клик сохранён. -->
+                    <template v-if="selected.status === 'rejected' || selected.status === 'canceled'">
+                      <div class="ag-muted" style="margin:8px 0 4px">
+                        Комментарий согласующим — что изменилось (необязательно)
+                      </div>
+                      <textarea v-model="resubmitComment" rows="2" class="ag-textarea"
+                                placeholder="Например: снизили сумму, приложена новая редакция"></textarea>
+                    </template>
                     <div style="display:grid;gap:6px;margin-top:10px">
                       <button v-if="noneDecided && selected.status === 'in_progress'" class="ag-btn ag-btn--soft" :disabled="busy" @click="saveRoute">
                         Сохранить маршрут (текущий круг)

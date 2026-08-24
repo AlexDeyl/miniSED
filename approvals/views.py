@@ -21,6 +21,7 @@ from .models import (
     ApprovalTemplate,
     B24Identity,
     B24UserEmail,
+    RoundNote,
 )
 from .models import (
     Agreement as AgreementModel,
@@ -766,7 +767,8 @@ class AgreementViewSet(viewsets.ModelViewSet):
         Повторное согласование новым кругом (ТЗ п.7.4, 7.5).
         Автор после доработки отправляет заново: создаётся новый круг с
         (возможно изменённым) маршрутом; история прошлых кругов сохраняется.
-        Body (опц.): participants=[{type,b24_user_id,email,order_index}].
+        Body (опц.): participants=[{type,b24_user_id,email,order_index}],
+        comment — пояснение согласующим, что изменилось после доработки.
         """
         b24_id = get_current_b24_id(request)
         agreement = self.get_object()
@@ -783,6 +785,8 @@ class AgreementViewSet(viewsets.ModelViewSet):
         if not specs:
             return Response({"detail": "Маршрут пуст — некого назначить."}, status=400)
 
+        comment = (request.data.get("comment") or "").strip()
+
         internal_to_notify: list[int] = []
         with transaction.atomic():
             new_round = agreement.current_round + 1
@@ -790,19 +794,26 @@ class AgreementViewSet(viewsets.ModelViewSet):
             agreement.current_round = new_round
             agreement.status = Agreement.STATUS_IN_PROGRESS
             agreement.save(update_fields=["current_round", "status"])
+            # Пояснение инициатора живёт на круге: согласующие увидят его в
+            # истории и получат в письме вместе с приглашением согласовать.
+            if comment:
+                RoundNote.objects.create(
+                    agreement=agreement, round_number=new_round,
+                    author_b24_id=b24_id, comment=comment,
+                )
 
+            # Уведомляем ВСЕХ, кому предстоит решать в новом круге, — и внешних,
+            # и внутренних. Раньше внутренним не уходило ничего: их id лишь
+            # возвращались фронту в internal_to_notify, а фронт их не использует.
+            # Список в ответе оставлен для совместимости.
             if agreement.flow_type == Agreement.FLOW_SEQUENTIAL:
-                first = self._get_next_waiting(agreement)
-                if first and first.type == Participant.TYPE_INTERNAL and first.b24_user_id:
-                    internal_to_notify.append(first.b24_user_id)
-                elif first:
-                    self._notify_participant(agreement, first)
+                to_notify = [p for p in [self._get_next_waiting(agreement)] if p]
             else:
-                for p in new_parts:
-                    if p.type == Participant.TYPE_INTERNAL and p.b24_user_id:
-                        internal_to_notify.append(p.b24_user_id)
-                    else:
-                        self._notify_participant(agreement, p)
+                to_notify = list(new_parts)
+            for p in to_notify:
+                if p.type == Participant.TYPE_INTERNAL and p.b24_user_id:
+                    internal_to_notify.append(p.b24_user_id)
+                self._notify_participant(agreement, p)
 
         try:
             log_action("agreement_resubmitted", target=agreement,

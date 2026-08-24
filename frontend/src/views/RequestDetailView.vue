@@ -146,6 +146,9 @@ async function run(fn: () => Promise<RegulatoryRequestDetail>) {
   }
 }
 
+// Пояснение инициатора согласующим при направлении круга (в т.ч. повторном).
+const submitComment = ref('')
+
 function submit() {
   const participants: ParticipantInput[] = []
   for (const [i, s] of route.value.entries()) {
@@ -157,8 +160,9 @@ function submit() {
     participants.push({ type: 'internal', b24_user_id: uid, role: s.role_code, order: i })
   }
   run(async () => {
-    const r = await requests.submit(props.id, participants)
+    const r = await requests.submit(props.id, participants, submitComment.value.trim())
     route.value = []
+    submitComment.value = ''
     return r
   })
 }
@@ -329,6 +333,20 @@ onMounted(load)
             </tr>
           </tbody>
         </table>
+        <!-- Пояснение согласующим: с чем направляем круг (что изменилось
+             после доработки). Необязательное — перезапуск в один клик сохранён. -->
+        <div style="margin-top:12px">
+          <div class="detail-meta" style="margin-bottom:4px">
+            {{ rounds.length
+              ? 'Комментарий согласующим — что изменилось после доработки (необязательно)'
+              : 'Комментарий согласующим (необязательно)' }}
+          </div>
+          <textarea
+            v-model="submitComment" rows="2" class="submit-comment"
+            placeholder="Например: снизили сумму, приложена новая редакция"
+          ></textarea>
+        </div>
+
         <div style="margin-top:10px">
           <button class="btn btn--primary" :disabled="busy" @click="submit">
             {{ req.status === 'rejected' ? 'Перезапустить согласование (новый круг)' : 'Отправить на согласование' }}
@@ -443,3 +461,10 @@ onMounted(load)
     <DocumentEditor v-if="editingDocId" :doc-id="editingDocId" @close="onEditorClose" />
   </section>
 </template>
+
+<style scoped>
+.submit-comment {
+  width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #d0d0d0;
+  border-radius: 6px; font: inherit; font-size: 13px; resize: vertical;
+}
+</style>

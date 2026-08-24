@@ -26,8 +26,9 @@ export const compliments = {
 
   routePreview: (id: number | string) =>
     api.get<{ route: ComplimentRouteSlot[] }>(`${BASE}/${id}/route_preview/`),
-  submit: (id: number | string, participants: ParticipantInput[]) =>
-    api.post<ComplimentDetail>(`${BASE}/${id}/submit/`, { participants }),
+  // comment — пояснение инициатора согласующим (что изменилось после доработки).
+  submit: (id: number | string, participants: ParticipantInput[], comment = '') =>
+    api.post<ComplimentDetail>(`${BASE}/${id}/submit/`, { participants, comment }),
   decide: (id: number | string, participantId: number, decision: 'approve' | 'reject', comment = '') =>
     api.post<ComplimentDetail>(`${BASE}/${id}/decide/`, {
       participant_id: participantId, decision, comment,

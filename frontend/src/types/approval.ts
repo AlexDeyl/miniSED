@@ -32,7 +32,9 @@ export interface ApprovalRound {
   id: number
   round_number: number
   result: RoundResult
+  // чем круг закрыли (причина возврата) и с чем инициатор его открыл
   comment: string
+  opening_comment: string
   started_at: string
   completed_at: string | null
   participants: ApprovalParticipant[]

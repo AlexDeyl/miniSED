@@ -30,8 +30,9 @@ export const contracts = {
 
   routePreview: (id: number | string) =>
     api.get<{ route: ContractRouteSlot[] }>(`${BASE}/${id}/route_preview/`),
-  submit: (id: number | string, participants: ParticipantInput[]) =>
-    api.post<ContractDetail>(`${BASE}/${id}/submit/`, { participants }),
+  // comment — пояснение инициатора согласующим (что изменилось после доработки).
+  submit: (id: number | string, participants: ParticipantInput[], comment = '') =>
+    api.post<ContractDetail>(`${BASE}/${id}/submit/`, { participants, comment }),
   decide: (id: number | string, participantId: number, decision: 'approve' | 'reject', comment = '') =>
     api.post<ContractDetail>(`${BASE}/${id}/decide/`, {
       participant_id: participantId, decision, comment,

@@ -13,6 +13,7 @@ requests_reg.notifications, не дублируем.
 
 from __future__ import annotations
 
+from approvalflow import services as flow
 from approvalflow.models import ApprovalParticipant
 from requests_reg import notifications as rn
 from requests_reg.models import RoleAssignment
@@ -47,8 +48,12 @@ def notify_current_approver(compliment):
     if p is None or p.type != ApprovalParticipant.TYPE_INTERNAL or not p.b24_user_id:
         return
     b24, emails = rn._recipients([p.b24_user_id])
-    body = "Требуется ваше согласование заявки на комплимент.\n\n" + "\n".join(_details(compliment))
-    rn._dispatch(b24, emails, f"Комплимент {compliment.number}: требуется согласование", body)
+    lines = ["Требуется ваше согласование заявки на комплимент.", "", *_details(compliment)]
+    note = flow.opening_note(p)  # пояснение инициатора к этому кругу
+    if note:
+        lines += ["", note]
+    rn._dispatch(b24, emails, f"Комплимент {compliment.number}: требуется согласование",
+                 "\n".join(lines))
 
 
 def notify_initiator_result(compliment):

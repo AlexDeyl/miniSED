@@ -24,7 +24,7 @@ class RoundSerializer(serializers.ModelSerializer):
     class Meta:
         model = ApprovalRound
         fields = [
-            "id", "round_number", "result", "comment",
+            "id", "round_number", "result", "comment", "opening_comment",
             "started_at", "completed_at", "participants",
         ]
 

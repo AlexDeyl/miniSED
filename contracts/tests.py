@@ -254,6 +254,40 @@ class ApiTests(TestCase):
         # инициатор видит свой договор и в mine, и в all (без дублей)
         self.assertEqual(len(api(1).get("/api/contracts/?scope=all").json()), 1)
 
+    def test_submit_comment_saved_on_round(self):
+        """Инициатор поясняет согласующим, что изменилось: комментарий ложится
+        на круг, который он открыл, и виден в карточке."""
+        r = api(1).post("/api/contracts/", {
+            "title": "Договор", "organization": self.org.id, "cfo": self.cfo.id,
+        }, format="json")
+        cid = r.json()["id"]
+        participants = [{"type": "internal", "b24_user_id": 502,
+                         "role": R.ROLE_SALES_HEAD, "order": 0}]
+
+        api(1).post(f"/api/contracts/{cid}/submit/",
+                    {"participants": participants, "comment": "  Первый круг  "},
+                    format="json")
+        rounds = api(1).get(f"/api/contracts/{cid}/").json()["approval"]["rounds"]
+        self.assertEqual(rounds[0]["opening_comment"], "Первый круг")
+
+        # отклоняем и отправляем повторно — новый круг со своим комментарием
+        pid = rounds[0]["participants"][0]["id"]
+        api(502).post(f"/api/contracts/{cid}/decide/",
+                      {"participant_id": pid, "decision": "reject", "comment": "нет"},
+                      format="json")
+        api(1).post(f"/api/contracts/{cid}/submit/",
+                    {"participants": participants, "comment": "Снизили сумму"},
+                    format="json")
+        rounds = api(1).get(f"/api/contracts/{cid}/").json()["approval"]["rounds"]
+        self.assertEqual([rd["opening_comment"] for rd in rounds],
+                         ["Первый круг", "Снизили сумму"])
+
+    def test_submit_without_comment_leaves_round_clean(self):
+        """Комментарий необязателен — отправка в один клик работает как раньше."""
+        contract = self._submitted_contract()
+        rounds = api(1).get(f"/api/contracts/{contract.id}/").json()["approval"]["rounds"]
+        self.assertEqual(rounds[0]["opening_comment"], "")
+
     def test_lawyers_see_each_others_contracts(self):
         """Юрист видит договоры, юр-этап которых закрыл другой юрист.
 

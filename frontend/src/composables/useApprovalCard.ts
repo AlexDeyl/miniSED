@@ -82,6 +82,15 @@ export function useApprovalCard(
           comment: p.decision_comment,
         }))
         .sort((a, b) => a.when.localeCompare(b.when))
+      // Чем инициатор открыл круг: пояснение согласующим, что изменилось после
+      // доработки. Идёт первым событием — это начало круга.
+      if (rnd.opening_comment) {
+        events.unshift({
+          key: `o${rnd.id}`, when: rnd.started_at, who: 'Инициатор',
+          what: rnd.round_number > 1 ? 'направил(а) повторно' : 'направил(а) на согласование',
+          ok: null, comment: rnd.opening_comment,
+        })
+      }
       if (rnd.result === 'returned' && rnd.completed_at) {
         events.push({
           key: `r${rnd.id}`, when: rnd.completed_at, who: 'Инициатор',
