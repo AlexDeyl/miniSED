@@ -11,6 +11,8 @@ from django.test import TestCase, Client
 from django.urls import reverse
 from rest_framework.test import APIClient
 
+from core.models import Role, UserProfile
+
 from .models import (
     Agreement,
     Participant,
@@ -195,6 +197,87 @@ class PermissionTests(TestCase):
         r = api(AUTHOR).delete(f"/api/agreements/{a.id}/")
         self.assertIn(r.status_code, (200, 204))
         self.assertFalse(Agreement.objects.filter(id=a.id).exists())
+
+
+class LegalTeamVisibilityTests(TestCase):
+    """Юротдел как единый получатель: согласование с участием юристов видят все
+    юристы, а согласования без них — по-прежнему нет."""
+
+    LAWYER_A = 929   # почта отдела привязана
+    LAWYER_B = 1071  # привязки нет — раньше ничего не видел
+    SHARED = "legal@nordhotels.ru"  # общий ящик юротдела
+
+    def setUp(self):
+        lawyer_role = Role.objects.get(code="lawyer")
+        for uid, fio, email in (
+            (self.LAWYER_A, "Юрист А", "lawyer.a@nordhotels.ru"),
+            (self.LAWYER_B, "Юрист Б", "lawyer.b@nordhotels.ru"),
+        ):
+            p = UserProfile.objects.create(fio=fio, bitrix_id=uid, email=email, is_active=True)
+            p.roles.add(lawyer_role)
+        # общий ящик исторически привязан только к одному юристу
+        B24UserEmail.objects.create(b24_user_id=self.LAWYER_A, email=self.SHARED)
+
+    def _ids(self, uid, query=""):
+        return {a["id"] for a in api(uid).get(f"/api/agreements/{query}").json()}
+
+    def test_shared_mailbox_visible_to_whole_legal_team(self):
+        a = Factory.agreement(author=AUTHOR, title="на общий ящик")
+        Factory.external(a, self.SHARED)
+
+        self.assertIn(a.id, self._ids(self.LAWYER_A))
+        self.assertIn(a.id, self._ids(self.LAWYER_B))
+        self.assertNotIn(a.id, self._ids(OUTSIDER))
+
+    def test_personal_lawyer_address_visible_to_team(self):
+        """Согласование на личную почту одного юриста — тоже дело отдела."""
+        a = Factory.agreement(author=AUTHOR)
+        Factory.external(a, "lawyer.a@nordhotels.ru")
+        self.assertIn(a.id, self._ids(self.LAWYER_B))
+
+    def test_internal_lawyer_participant_visible_to_team(self):
+        a = Factory.agreement(author=AUTHOR)
+        Factory.internal(a, self.LAWYER_A)
+        self.assertIn(a.id, self._ids(self.LAWYER_B))
+
+    def test_agreement_without_legal_stays_hidden(self):
+        """Согласований без юристов в маршруте отдел не видит — их и не нужно."""
+        a = Factory.agreement(author=AUTHOR)
+        Factory.external(a, "sales@nordhotels.ru")
+        Factory.internal(a, APPROVER_A)
+        self.assertNotIn(a.id, self._ids(self.LAWYER_B))
+
+    def test_email_match_is_case_insensitive(self):
+        """В перенесённых данных попадаются «Legal@…» — регистр не должен
+        прятать согласование от адресата."""
+        a = Factory.agreement(author=AUTHOR)
+        Factory.external(a, self.SHARED.capitalize())
+        self.assertIn(a.id, self._ids(self.LAWYER_A))
+        self.assertIn(a.id, self._ids(self.LAWYER_B))
+
+    def test_completed_agreement_reaches_archive_tab(self):
+        """Архивные вкладки (?status=) показывают и чужие согласования, где я
+        участник, — раньше там были только созданные мной."""
+        a = Factory.agreement(author=AUTHOR, title="завершённое")
+        a.status = Agreement.STATUS_COMPLETED
+        a.save(update_fields=["status"])
+        Factory.external(a, self.SHARED)
+
+        self.assertIn(a.id, self._ids(self.LAWYER_B, "?status=completed"))
+        self.assertNotIn(a.id, self._ids(self.LAWYER_B, "?status=rejected"))
+        # у автора архив тоже работает
+        self.assertIn(a.id, self._ids(AUTHOR, "?status=completed"))
+
+    def test_todo_not_widened_to_whole_team(self):
+        """Видимость — общая, а «требует действия» остаётся адресным: решать за
+        коллегу без привязки к ящику никто не обязан."""
+        a = Factory.agreement(author=AUTHOR)
+        Factory.external(a, self.SHARED)
+
+        todo_a = {x["id"] for x in api(self.LAWYER_A).get("/api/agreements/todo/").json()}
+        todo_b = {x["id"] for x in api(self.LAWYER_B).get("/api/agreements/todo/").json()}
+        self.assertIn(a.id, todo_a)
+        self.assertNotIn(a.id, todo_b)
 
 
 class RegistryTests(TestCase):

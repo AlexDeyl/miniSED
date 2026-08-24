@@ -83,8 +83,10 @@ async function enrichUsers(ids: (number | null | undefined)[]) {
   } catch { /* вне Битрикса недоступно */ }
 }
 
-// Статусные вкладки показывают СОЗДАННЫЕ МНОЙ согласования, отфильтрованные по
-// статусу (в работе / отклонённые / завершённые).
+// Статусные вкладки — архив по статусу (в работе / отклонённые / завершённые)
+// по ВСЕМ доступным мне согласованиям: не только созданным мной, но и тем, где
+// я согласующий. Иначе завершённое согласование, где я был участником, не
+// попадало никуда, кроме вкладки «Все».
 const STATUS_BY_MODE: Partial<Record<Mode, string>> = {
   in_progress: 'in_progress',
   rejected: 'rejected',
@@ -94,10 +96,7 @@ const STATUS_BY_MODE: Partial<Record<Mode, string>> = {
 async function fetchByMode(m: Mode): Promise<Agreement[]> {
   if (m === 'todo') return agreements.todo()
   const statusFilter = STATUS_BY_MODE[m]
-  if (statusFilter) {
-    const mine = await agreements.my()
-    return mine.filter((a) => a.status === statusFilter)
-  }
+  if (statusFilter) return agreements.all(statusFilter)
   return agreements.all()
 }
 

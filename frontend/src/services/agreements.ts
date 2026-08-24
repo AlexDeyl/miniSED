@@ -5,7 +5,10 @@ import type { Agreement, AgreementTemplate } from '@/types/agreement'
 export const agreements = {
   todo: () => api.get<Agreement[]>('/agreements/todo/'),
   my: () => api.get<Agreement[]>('/agreements/my/'),
-  all: () => api.get<Agreement[]>('/agreements/'),
+  // Всё, к чему я имею отношение (автор, участник, юр-дела своего отдела).
+  // status — фильтр вкладок, чтобы не тянуть весь архив на каждую.
+  all: (status?: string) =>
+    api.get<Agreement[]>(`/agreements/${status ? `?status=${status}` : ''}`),
   get: (id: number) => api.get<Agreement>(`/agreements/${id}/`),
 
   // Счётчики для бейджей вкладок (отклонённые/завершённые — непросмотренные мной).

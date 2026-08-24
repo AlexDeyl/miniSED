@@ -20,6 +20,7 @@ from django.urls import reverse
 from django.utils.crypto import get_random_string
 
 from approvalflow.models import ApprovalParticipant
+from core import auth as core_auth
 from core.models import UserProfile
 
 
@@ -37,17 +38,9 @@ def _approve_url(participant) -> str:
     return base + reverse("reg_external_approve", args=[participant.external_token])
 
 
-def lawyer_b24_ids() -> list[int]:
-    """b24-id всех активных сотрудников с правом юриста (legal_manage)."""
-    return list(
-        UserProfile.objects.filter(
-            is_active=True,
-            bitrix_id__isnull=False,
-            roles__permissions__code="legal_manage",
-        )
-        .values_list("bitrix_id", flat=True)
-        .distinct()
-    )
+# Состав юротдела живёт в core.auth — им пользуются и уведомления, и видимость
+# юр-дел (approvals). Реэкспорт, чтобы не менять вызовы в этом модуле.
+lawyer_b24_ids = core_auth.lawyer_b24_ids
 
 
 def _emails_via_bitrix(b24_ids) -> dict:

@@ -37,7 +37,7 @@ from django.core.mail import send_mail
 from django.conf import settings
 from django.db.models import F, Q
 from core.services import log_action
-from core.auth import get_current_profile
+from core.auth import get_current_profile, is_lawyer, lawyer_b24_ids
 from urllib.parse import urlencode
 
 
@@ -270,6 +270,73 @@ def get_current_b24_id(request):
     return None
 
 
+def user_emails(b24_id) -> list[str]:
+    """Все известные адреса сотрудника: привязки B24UserEmail + email профиля.
+
+    По ним сотрудник опознаётся среди ВНЕШНИХ участников. Один адрес можно
+    привязать к нескольким сотрудникам — так работает общий ящик (например
+    почта юротдела): согласование, ушедшее на него, видят все, к кому он
+    привязан."""
+    if not b24_id:
+        return []
+    from core.models import UserProfile
+
+    emails = set(
+        B24UserEmail.objects.filter(b24_user_id=b24_id).values_list("email", flat=True)
+    )
+    profile_email = (
+        UserProfile.objects.filter(bitrix_id=b24_id)
+        .values_list("email", flat=True)
+        .first()
+    )
+    if profile_email:
+        emails.add(profile_email)
+    return sorted({e.strip().lower() for e in emails if e and e.strip()})
+
+
+def _external_email_q(emails) -> Q:
+    """Внешний участник по любому из адресов, без учёта регистра.
+
+    Регистр важен: в перенесённых данных рядом живут «Isa@…» и «isa@…», а
+    привязки B24UserEmail всегда в нижнем регистре — точное сравнение их
+    теряло."""
+    q = Q()
+    for email in emails:
+        q |= Q(
+            participants__type=Participant.TYPE_EXTERNAL,
+            participants__email__iexact=email,
+        )
+    return q
+
+
+def _legal_team_q() -> Q:
+    """Согласования с участием юротдела — их видит любой сотрудник отдела.
+
+    Участие юротдела = внутренний участник-юрист либо внешний участник на любом
+    из адресов юристов, включая общий ящик отдела (один email, привязанный к
+    нескольким юристам). Раньше согласование с общего ящика видел только тот
+    юрист, кому этот адрес был привязан вручную, и в архив к остальным оно не
+    попадало. Согласования БЕЗ юристов в маршруте отделу по-прежнему не видны."""
+    from core.models import UserProfile
+
+    ids = lawyer_b24_ids()
+    if not ids:
+        return Q(pk__in=[])
+    emails = set(
+        B24UserEmail.objects.filter(b24_user_id__in=ids).values_list("email", flat=True)
+    )
+    emails.update(
+        UserProfile.objects.filter(bitrix_id__in=ids)
+        .exclude(email="")
+        .values_list("email", flat=True)
+    )
+    emails = {e.strip().lower() for e in emails if e and e.strip()}
+    return Q(
+        participants__type=Participant.TYPE_INTERNAL,
+        participants__b24_user_id__in=ids,
+    ) | _external_email_q(emails)
+
+
 @method_decorator(csrf_exempt, name="dispatch")
 class AgreementViewSet(viewsets.ModelViewSet):
     """
@@ -292,7 +359,9 @@ class AgreementViewSet(viewsets.ModelViewSet):
         имеет отношение:
         - инициатор;
         - внутренний участник (по b24_user_id);
-        - внешний участник (по email, привязанному к его Б24-профилю).
+        - внешний участник (по email, привязанному к его профилю);
+        - сотруднику юротдела — все согласования с участием юротдела
+          (см. _legal_team_q).
         """
         base_qs = super().get_queryset()
         request = getattr(self, "request", None)
@@ -304,10 +373,7 @@ class AgreementViewSet(viewsets.ModelViewSet):
             return base_qs.none()
         emails = getattr(self, "b24_emails", None)
         if emails is None:
-            emails = list(
-                B24UserEmail.objects.filter(b24_user_id=user_id)
-                .values_list("email", flat=True)
-            )
+            emails = user_emails(user_id)
 
         base_q = Q(author_b24_id=user_id) | Q(
             participants__type=Participant.TYPE_INTERNAL,
@@ -315,12 +381,21 @@ class AgreementViewSet(viewsets.ModelViewSet):
         )
 
         if emails:
-            base_q |= Q(
-                participants__type=Participant.TYPE_EXTERNAL,
-                participants__email__in=emails,
-            )
+            base_q |= _external_email_q(emails)
 
-        return base_qs.filter(base_q).distinct()
+        if is_lawyer(user_id):
+            base_q |= _legal_team_q()
+
+        qs = base_qs.filter(base_q).distinct()
+        # Вкладки списка («В работе»/«Отклонённые»/«Завершённые») фильтруют по
+        # статусу на сервере — иначе на каждой пришлось бы гонять весь архив.
+        status_f = (
+            request.query_params.get("status")
+            if getattr(self, "action", None) == "list" else None
+        )
+        if status_f:
+            qs = qs.filter(status=status_f)
+        return qs
 
     def perform_create(self, serializer):
         agreement = serializer.save()
@@ -348,10 +423,7 @@ class AgreementViewSet(viewsets.ModelViewSet):
         if not self.b24_id:
             raise AuthenticationFailed("Откройте приложение «Мини-СЭД» из Битрикс24.")
 
-        self.b24_emails = list(
-            B24UserEmail.objects.filter(b24_user_id=self.b24_id)
-            .values_list("email", flat=True)
-        )
+        self.b24_emails = user_emails(self.b24_id)
 
         return super().initial(request, *args, **kwargs)
 
@@ -461,10 +533,11 @@ class AgreementViewSet(viewsets.ModelViewSet):
         )
 
         cond_external = Q()
-        if emails:
-            cond_external = Q(
+        for email in emails:
+            # регистр адреса в старых данных не нормализован — сравниваем iexact
+            cond_external |= Q(
                 participants__type=Participant.TYPE_EXTERNAL,
-                participants__email__in=emails,
+                participants__email__iexact=email,
                 participants__status=Participant.STATUS_WAITING,
                 participants__round_number=F("current_round"),
             )
@@ -892,20 +965,14 @@ class AgreementViewSet(viewsets.ModelViewSet):
         if not b24_id:
             raise AuthenticationFailed("Откройте приложение «Мини-СЭД» из Битрикс24.")
 
-        emails = list(
-            B24UserEmail.objects.filter(b24_user_id=b24_id)
-            .values_list("email", flat=True)
-        )
+        emails = user_emails(b24_id)
 
         base_q = Q(
             participants__type=Participant.TYPE_INTERNAL,
             participants__b24_user_id=b24_id,
         )
         if emails:
-            base_q |= Q(
-                participants__type=Participant.TYPE_EXTERNAL,
-                participants__email__in=emails,
-            )
+            base_q |= _external_email_q(emails)
 
         qs = self.get_queryset().filter(base_q).distinct()
         serializer = self.get_serializer(qs, many=True)

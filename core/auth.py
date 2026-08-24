@@ -53,3 +53,21 @@ def is_lawyer(b24_id) -> bool:
 
     profile = UserProfile.objects.filter(bitrix_id=b24_id, is_active=True).first()
     return bool(profile and profile.has_perm("legal_manage"))
+
+
+def lawyer_b24_ids() -> list[int]:
+    """b24-id всех активных сотрудников с правом юриста (legal_manage).
+
+    Состав юротдела как множество: на нём строятся групповые юр-этапы,
+    уведомления юристам и общая видимость юр-дел внутри отдела."""
+    from .models import UserProfile
+
+    return list(
+        UserProfile.objects.filter(
+            is_active=True,
+            bitrix_id__isnull=False,
+            roles__permissions__code="legal_manage",
+        )
+        .values_list("bitrix_id", flat=True)
+        .distinct()
+    )
