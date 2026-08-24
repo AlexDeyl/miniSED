@@ -9,6 +9,7 @@ from unittest import skipUnless
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from core.models import CFO, Facility, Organization
@@ -369,6 +370,37 @@ class ApiTests(TestCase):
         self.assertEqual(found("ДОВ-000001"), {petrov.id})
         self.assertEqual(found("123456"), {petrov.id})        # паспорт из анкеты
         self.assertEqual(found("Ленин"), set())
+
+    def test_search_by_attached_file(self):
+        """Готовую доверенность юрист прикладывает файлом — по имени файла и
+        названию документа заявка должна находиться."""
+        req = self._mk_poa("Кузнецов Кузьма", "ДОВ-000060", status="closed")
+        other = self._mk_poa("Иванов Иван", "ДОВ-000061", status="closed")
+        doc = docsvc.create_document(title="Скан доверенности", linked_object=req)
+        docsvc.add_version(doc, SimpleUploadedFile("dov-77-2026.pdf", b"scan"))
+
+        def found(q):
+            return {x["id"] for x in api(30).get(
+                f"/api/reg/requests/legal_queue/?q={q}").json()}
+
+        self.assertEqual(found("dov-77-2026"), {req.id})     # имя файла
+        self.assertEqual(found("dov-77-2026.pdf"), {req.id})
+        self.assertNotIn(other.id, found("dov-77"))
+        # заявка не задваивается, даже если версий несколько
+        docsvc.add_version(doc, SimpleUploadedFile("dov-77-2026.pdf", b"scan v2"))
+        self.assertEqual(len(api(30).get(
+            "/api/reg/requests/legal_queue/?q=dov-77-2026").json()), 1)
+
+    def test_search_skips_deleted_files(self):
+        """Удалённый файл не должен вытаскивать заявку в результаты."""
+        req = self._mk_poa("Кузнецов", "ДОВ-000070", status="closed")
+        doc = docsvc.create_document(title="Скан", linked_object=req)
+        docsvc.add_version(doc, SimpleUploadedFile("secret-file.pdf", b"x"))
+        doc.deleted_at = timezone.now()
+        doc.save(update_fields=["deleted_at"])
+
+        r = api(30).get("/api/reg/requests/legal_queue/?q=secret-file")
+        self.assertEqual(r.json(), [])
 
     @skipUnless(
         connection.vendor == "postgresql",

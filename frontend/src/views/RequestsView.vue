@@ -39,7 +39,7 @@ onMounted(load)
       <RouterLink to="/requests/new" class="btn btn--primary">Создать</RouterLink>
     </Teleport>
 
-    <SearchBox v-model="query" placeholder="Поиск: номер, ФИО, паспорт, организация" />
+    <SearchBox v-model="query" placeholder="Поиск: номер, ФИО, паспорт, организация, имя файла" />
 
     <p v-if="loading" class="state">Загрузка…</p>
     <p v-else-if="error" class="state state--error">{{ error }}</p>

@@ -42,7 +42,7 @@ onMounted(load)
 
 <template>
   <section>
-    <SearchBox v-model="query" placeholder="Поиск: номер, ФИО, паспорт, организация" />
+    <SearchBox v-model="query" placeholder="Поиск: номер, ФИО, паспорт, организация, имя файла" />
     <p v-if="query && !loading && !error" class="state" style="margin-bottom:8px">
       Поиск идёт по всем заявкам юротдела, независимо от вкладки. Найдено: {{ items.length }}.
     </p>
