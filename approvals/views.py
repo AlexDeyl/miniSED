@@ -39,6 +39,8 @@ from django.conf import settings
 from django.db.models import F, Q
 from core.services import log_action
 from core.auth import can_view_all, get_current_profile, is_lawyer, lawyer_b24_ids
+from core.search import query_param
+from .search import search
 from urllib.parse import urlencode
 
 
@@ -391,13 +393,17 @@ class AgreementViewSet(viewsets.ModelViewSet):
         if not user_id:
             return base_qs.none()
 
+        # Поиск (?q=) — по названию, описанию, сделке, участникам и ИМЕНАМ
+        # прикреплённых файлов. При непустом запросе вкладка не сужает выборку:
+        # ищут конкретную карточку, а в каком она статусе — заранее неизвестно
+        # (тот же принцип, что в очереди юротдела).
+        query = query_param(request, "q").strip() if self._is_list() else ""
+
         # Сквозной просмотр (системный администратор) — видит всё, без отбора.
         if can_view_all(user_id):
-            status_all = (
-                request.query_params.get("status")
-                if getattr(self, "action", None) == "list" else None
-            )
-            return base_qs.filter(status=status_all) if status_all else base_qs
+            status_all = self._status_filter() if not query else None
+            all_qs = base_qs.filter(status=status_all) if status_all else base_qs
+            return search(all_qs, query)
 
         emails = getattr(self, "b24_emails", None)
         if emails is None:
@@ -417,13 +423,20 @@ class AgreementViewSet(viewsets.ModelViewSet):
         qs = base_qs.filter(base_q).distinct()
         # Вкладки списка («В работе»/«Отклонённые»/«Завершённые») фильтруют по
         # статусу на сервере — иначе на каждой пришлось бы гонять весь архив.
-        status_f = (
-            request.query_params.get("status")
-            if getattr(self, "action", None) == "list" else None
-        )
+        status_f = self._status_filter() if not query else None
         if status_f:
             qs = qs.filter(status=status_f)
-        return qs
+        return search(qs, query)
+
+    def _is_list(self) -> bool:
+        return getattr(self, "action", None) == "list"
+
+    def _status_filter(self):
+        """Статус из ?status= — фильтр вкладок списка (только для list)."""
+        request = getattr(self, "request", None)
+        if request is None or not self._is_list():
+            return None
+        return request.query_params.get("status")
 
     def perform_create(self, serializer):
         agreement = serializer.save()

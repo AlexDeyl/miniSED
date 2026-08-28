@@ -45,6 +45,11 @@ EXECUTION_SCOPES = {
     "work": EXECUTION_WORK_STATUSES,
     "archive": EXECUTION_ARCHIVE_STATUSES,
 }
+# При поиске вкладка очереди не сужает выборку — статус искомой заявки заранее
+# неизвестен (тот же принцип, что в очереди юротдела).
+EXECUTION_ALL_STATUSES = (
+    EXECUTION_NEW_STATUSES + EXECUTION_WORK_STATUSES + EXECUTION_ARCHIVE_STATUSES
+)
 
 NUMBER_PREFIX = "КМП"
 

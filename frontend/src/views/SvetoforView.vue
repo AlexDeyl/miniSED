@@ -10,6 +10,7 @@ import type { ComplimentListItem } from '@/types/compliment'
 import { bitrix, type BitrixUser, type BitrixDeal } from '@/services/bitrix'
 import BitrixSearchModal from '@/components/BitrixSearchModal.vue'
 import DocumentEditor from '@/components/DocumentEditor.vue'
+import SearchBox from '@/components/SearchBox.vue'
 import { api, ApiError } from '@/services/api'
 import { versionFileName } from '@/utils/filename'
 import { useAuthStore } from '@/stores/auth'
@@ -25,6 +26,11 @@ const auth = useAuthStore()
 // Режим вкладок живёт в сторе — кнопки перенесены в сайдбар (App.vue).
 const svet = useSvetoforStore()
 const mode = computed(() => svet.mode)
+
+// Поиск по согласованиям: название, описание, сделка, участники и ИМЕНА
+// прикреплённых файлов. При непустом запросе вкладка выборку не сужает —
+// ищут карточку, не зная её статуса (как в очереди юротдела).
+const query = ref('')
 
 const items = ref<Agreement[]>([])
 // Регламентные заявки, ждущие моего решения (показываем во вкладке «Требует действия»).
@@ -94,6 +100,8 @@ const STATUS_BY_MODE: Partial<Record<Mode, string>> = {
 }
 
 async function fetchByMode(m: Mode): Promise<Agreement[]> {
+  // Поиск идёт по всем доступным согласованиям, независимо от вкладки.
+  if (query.value) return agreements.all(undefined, query.value)
   if (m === 'todo') return agreements.todo()
   const statusFilter = STATUS_BY_MODE[m]
   if (statusFilter) return agreements.all(statusFilter)
@@ -111,10 +119,13 @@ async function loadList() {
       items.value = await fetchByMode(mode.value)
       // подтянуть имена авторов/участников списка
       enrichUsers(items.value.flatMap((a) => [a.author_b24_id, ...a.participants.map((p) => p.b24_user_id)]))
-      // заявки и договоры, ждущие моего решения — только во вкладке «Требует действия»
-      requestTodo.value = mode.value === 'todo' ? await requests.todo().catch(() => []) : []
-      contractTodo.value = mode.value === 'todo' ? await contracts.todo().catch(() => []) : []
-      complimentTodo.value = mode.value === 'todo' ? await compliments.todo().catch(() => []) : []
+      // заявки и договоры, ждущие моего решения — только во вкладке «Требует
+      // действия» и только без поиска (при поиске в списке одни согласования;
+      // заявки/договоры/комплименты ищут в своих разделах)
+      const todoLists = mode.value === 'todo' && !query.value
+      requestTodo.value = todoLists ? await requests.todo().catch(() => []) : []
+      contractTodo.value = todoLists ? await contracts.todo().catch(() => []) : []
+      complimentTodo.value = todoLists ? await compliments.todo().catch(() => []) : []
     }
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Ошибка загрузки'
@@ -126,8 +137,8 @@ async function loadList() {
 function setMode(m: Mode) {
   svet.mode = m
 }
-// Смена вкладки (в т.ч. из сайдбара) перезагружает список.
-watch(() => svet.mode, loadList)
+// Смена вкладки (в т.ч. из сайдбара) или строки поиска перезагружает список.
+watch([() => svet.mode, query], loadList)
 
 // Счётчики бейджей в сайдбаре: «требует действия» (по всем модулям) +
 // непросмотренные отклонённые/завершённые (мои согласования). Обновляем всегда —
@@ -593,6 +604,14 @@ onMounted(async () => {
     <div class="svet-body">
       <!-- Список -->
       <div class="svet-list">
+        <SearchBox
+          v-if="mode !== 'templates'" v-model="query"
+          placeholder="Поиск: название, автор, сделка, имя файла"
+        />
+        <p v-if="query && !loading" class="state" style="margin-bottom:8px">
+          Поиск идёт по всем доступным согласованиям, независимо от вкладки. Найдено: {{ items.length }}.
+        </p>
+
         <p v-if="loading" class="state">Загрузка…</p>
 
         <template v-else-if="mode === 'templates'">
@@ -640,7 +659,7 @@ onMounted(async () => {
           <p
             v-if="items.length === 0 && !(mode === 'todo' && (requestTodo.length || contractTodo.length || complimentTodo.length))"
             class="state"
-          >Пусто.</p>
+          >{{ query ? 'Ничего не найдено.' : 'Пусто.' }}</p>
           <div v-for="a in items" :key="a.id" class="svet-card" :class="{ active: selected?.id === a.id }" @click="open(a.id)">
             <div class="svet-card-row">
               <span class="svet-card-title">#{{ a.id }} {{ a.title }}</span>

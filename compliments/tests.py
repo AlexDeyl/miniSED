@@ -2,6 +2,7 @@
 Тесты заявок на комплименты: маршрут по категориям, согласование, исполнение.
 """
 
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from rest_framework.test import APIClient
 
@@ -286,3 +287,84 @@ class ApiTests(BaseData):
             constants.CATEGORY_RESTAURANT,
             constants.CATEGORY_STAY,
         })
+
+
+class SearchTests(BaseData):
+    """Поиск по комплиментам (раздел и очередь исполнения) — как в
+    доверенностях/МЧД, включая поиск по имени прикреплённого файла."""
+
+    INITIATOR = 800
+
+    def _compliment(self, title, number="", company="ООО Партнёр", **kw):
+        kw.setdefault("category", constants.CATEGORY_STAY)
+        kw.setdefault("facility", self.hotel)
+        c = Compliment.objects.create(
+            initiator_b24_id=self.INITIATOR, title=title, company=company, **kw,
+        )
+        if number:
+            c.number = number
+            c.save(update_fields=["number"])
+        return c
+
+    def _found(self, q, uid=INITIATOR):
+        resp = api(uid).get(f"/api/compliments/?q={q}")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        return {x["id"] for x in resp.json()}
+
+    def test_search_by_number_company_and_guest(self):
+        a = self._compliment("Торт на юбилей", number="КМП-000001",
+                             company="ООО Ромашка", guest_name="Петров Пётр")
+        self._compliment("Сертификат", number="КМП-000002", company="ООО Лютик")
+        self.assertEqual(self._found("Ромашка"), {a.id})
+        self.assertEqual(self._found("КМП-000001"), {a.id})
+        self.assertEqual(self._found("Петров"), {a.id})
+        self.assertEqual(self._found("Ленин"), set())
+
+    def test_search_by_attached_file_name(self):
+        from documents import services as docsvc
+
+        c = self._compliment("Сертификат на проживание", number="КМП-000010")
+        other = self._compliment("Другая заявка", number="КМП-000011")
+        doc = docsvc.create_document(title="Бланк заявки", linked_object=c)
+        docsvc.add_version(doc, SimpleUploadedFile("kmp-55-2026.pdf", b"blank"))
+
+        self.assertEqual(self._found("kmp-55-2026"), {c.id})
+        self.assertEqual(self._found("Бланк"), {c.id})
+        self.assertNotIn(other.id, self._found("kmp-55"))
+        docsvc.add_version(doc, SimpleUploadedFile("kmp-55-2026.pdf", b"blank v2"))
+        self.assertEqual(len(self._found("kmp-55-2026")), 1)
+
+    def test_search_skips_deleted_files(self):
+        from django.utils import timezone
+        from documents import services as docsvc
+
+        c = self._compliment("Заявка с удалённым файлом")
+        doc = docsvc.create_document(title="Скан", linked_object=c)
+        docsvc.add_version(doc, SimpleUploadedFile("secret-file.pdf", b"x"))
+        doc.deleted_at = timezone.now()
+        doc.save(update_fields=["deleted_at"])
+        self.assertEqual(self._found("secret-file"), set())
+
+    def test_search_terms_are_and(self):
+        a = self._compliment("Торт на юбилей", company="ООО Ромашка")
+        self._compliment("Торт на свадьбу", company="ООО Ромашка")
+        self.assertEqual(self._found("Торт юбилей"), {a.id})
+
+    def test_search_ignores_status_tab(self):
+        c = self._compliment("Исполненный торт", status=constants.STATUS_EXECUTED)
+        resp = api(self.INITIATOR).get("/api/compliments/?status=draft&q=торт")
+        self.assertEqual({x["id"] for x in resp.json()}, {c.id})
+
+    def test_search_in_execution_queue_ignores_tab(self):
+        """В очереди исполнения ищем по всем вкладкам: статус заранее неизвестен."""
+        from documents import services as docsvc
+
+        done = self._compliment("Сертификат гостю", category=constants.CATEGORY_STAY,
+                                status=constants.STATUS_EXECUTED)
+        doc = docsvc.create_document(title="Подтверждение", linked_object=done)
+        docsvc.add_version(doc, SimpleUploadedFile("vruchenie-12.pdf", b"ok"))
+
+        # Соколинская — исполнитель категории «проживание»; вкладка «Новые»
+        resp = api(SOKOL).get("/api/compliments/execution_queue/?scope=new&q=vruchenie-12")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual({x["id"] for x in resp.json()}, {done.id})

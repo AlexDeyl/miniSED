@@ -4,7 +4,12 @@ import { RouterLink } from 'vue-router'
 import { compliments } from '@/services/compliments'
 import { ApiError } from '@/services/api'
 import { useComplimentsUiStore } from '@/stores/complimentsUi'
+import SearchBox from '@/components/SearchBox.vue'
 import type { ComplimentListItem, ComplimentStatus } from '@/types/compliment'
+
+// Поиск по компании, гостю, отелю, содержанию и ИМЕНАМ вложенных файлов.
+// При непустом запросе вкладка выборку не сужает — статус заранее неизвестен.
+const query = ref('')
 
 const ui = useComplimentsUiStore()
 
@@ -31,7 +36,9 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    if (ui.mode === 'todo') {
+    if (query.value) {
+      items.value = await compliments.list('all', query.value)
+    } else if (ui.mode === 'todo') {
       items.value = await compliments.todo()
     } else {
       // Черновики бывают только свои; в остальных вкладках показываем всё,
@@ -51,7 +58,7 @@ async function refreshBadge() {
   ui.todoCount = (await compliments.todo().catch(() => [])).length
 }
 
-watch(() => ui.mode, load)
+watch([() => ui.mode, query], load)
 onMounted(() => {
   load()
   refreshBadge()
@@ -64,9 +71,16 @@ onMounted(() => {
       <RouterLink to="/compliments/new" class="btn btn--primary">Создать заявку</RouterLink>
     </Teleport>
 
+    <SearchBox v-model="query" placeholder="Поиск: номер, компания, гость, отель, имя файла" />
+    <p v-if="query && !loading && !error" class="state" style="margin-bottom:8px">
+      Поиск идёт по всем доступным заявкам, независимо от вкладки. Найдено: {{ items.length }}.
+    </p>
+
     <p v-if="loading" class="state">Загрузка…</p>
     <p v-else-if="error" class="state state--error">{{ error }}</p>
-    <p v-else-if="items.length === 0" class="state">{{ emptyText }}</p>
+    <p v-else-if="items.length === 0" class="state">
+      {{ query ? 'Ничего не найдено.' : emptyText }}
+    </p>
 
     <ul v-else class="item-list">
       <li v-for="c in items" :key="c.id">

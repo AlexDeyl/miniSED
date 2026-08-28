@@ -4,7 +4,13 @@ import { RouterLink } from 'vue-router'
 import { contracts } from '@/services/contracts'
 import { ApiError } from '@/services/api'
 import { useContractsUiStore } from '@/stores/contractsUi'
+import SearchBox from '@/components/SearchBox.vue'
 import type { ContractListItem, ContractStatus } from '@/types/contract'
+
+// Поиск по номеру, названию, юрлицу/ЦФО и ИМЕНАМ вложенных файлов.
+// При непустом запросе сервер ищет по всем статусам, а не только по вкладке:
+// когда ищут договор (или его дубль), статус заранее неизвестен.
+const query = ref('')
 
 const ui = useContractsUiStore()
 
@@ -34,7 +40,10 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    if (ui.mode === 'todo') {
+    if (query.value) {
+      // Поиск идёт по всему, что мне доступно, независимо от вкладки.
+      items.value = await contracts.list('all', query.value)
+    } else if (ui.mode === 'todo') {
       items.value = await contracts.todo()
     } else {
       // Черновики бывают только свои; в остальных вкладках показываем и те
@@ -55,7 +64,7 @@ async function refreshBadge() {
   ui.todoCount = (await contracts.todo().catch(() => [])).length
 }
 
-watch(() => ui.mode, load)
+watch([() => ui.mode, query], load)
 onMounted(() => {
   load()
   refreshBadge()
@@ -68,9 +77,16 @@ onMounted(() => {
       <RouterLink to="/contracts/new" class="btn btn--primary">Создать договор</RouterLink>
     </Teleport>
 
+    <SearchBox v-model="query" placeholder="Поиск: номер, название, юрлицо, имя файла" />
+    <p v-if="query && !loading && !error" class="state" style="margin-bottom:8px">
+      Поиск идёт по всем доступным договорам, независимо от вкладки. Найдено: {{ items.length }}.
+    </p>
+
     <p v-if="loading" class="state">Загрузка…</p>
     <p v-else-if="error" class="state state--error">{{ error }}</p>
-    <p v-else-if="items.length === 0" class="state">{{ emptyText }}</p>
+    <p v-else-if="items.length === 0" class="state">
+      {{ query ? 'Ничего не найдено.' : emptyText }}
+    </p>
 
     <ul v-else class="item-list">
       <li v-for="c in items" :key="c.id">

@@ -24,9 +24,11 @@ from rest_framework.response import Response
 from approvalflow import sheet as flow_sheet
 from approvalflow.models import ApprovalParticipant
 from core.auth import can_view_all, get_current_b24_id, is_lawyer
+from core.search import query_param
 
 from . import constants, services
 from .models import Contract
+from .search import search
 from .serializers import (
     ContractDetailSerializer,
     ContractListSerializer,
@@ -91,6 +93,9 @@ class ContractViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = Contract.objects.select_related("organization", "cfo")
+        # Поиск (?q=) — по номеру, названию, юрлицу/ЦФО и ИМЕНАМ прикреплённых
+        # файлов (подписанный скан ищут именно по имени файла).
+        query = query_param(self.request, "q").strip() if self.action == "list" else ""
         # Раздел «Договоры» по умолчанию = только СВОИ (созданные мной).
         # ?scope=participant — где я согласующий, ?scope=all — и мои, и чужие,
         # в которых я участвую (вкладки списка).
@@ -113,10 +118,12 @@ class ContractViewSet(viewsets.ModelViewSet):
                     qs = qs.filter(mine | participant)
             else:
                 qs = qs.filter(mine)
-        status_f = self.request.query_params.get("status")
+        # При поиске вкладка (статус) не сужает выборку: ищут конкретный
+        # договор, а в каком он статусе — заранее неизвестно.
+        status_f = self.request.query_params.get("status") if not query else None
         if status_f:
             qs = qs.filter(status=status_f)
-        return qs
+        return search(qs, query)
 
     def _is_participant(self, contract) -> bool:
         approval = services.get_approval(contract)

@@ -1,3 +1,4 @@
+from django.contrib.contenttypes.fields import GenericRelation
 from django.db import models
 from django.utils.crypto import get_random_string
 
@@ -53,6 +54,15 @@ class Agreement(models.Model):
         default=STATUS_IN_PROGRESS,
     )
     current_round = models.PositiveIntegerField("Текущий круг", default=1)
+
+    # Версионируемые документы (приложение documents). Исторические файлы
+    # согласования лежат в AgreementDocument (related_name="documents"), новые
+    # грузятся через documents — поиск по имени файла обязан видеть и те, и те.
+    versioned_documents = GenericRelation(
+        "documents.Document", content_type_field="content_type",
+        object_id_field="object_id", related_query_name="agreement",
+    )
+
     created_at = models.DateTimeField("Создано", auto_now_add=True)
     updated_at = models.DateTimeField("Обновлено", auto_now=True)
 

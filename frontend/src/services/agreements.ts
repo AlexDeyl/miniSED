@@ -7,8 +7,15 @@ export const agreements = {
   my: () => api.get<Agreement[]>('/agreements/my/'),
   // Всё, к чему я имею отношение (автор, участник, юр-дела своего отдела).
   // status — фильтр вкладок, чтобы не тянуть весь архив на каждую.
-  all: (status?: string) =>
-    api.get<Agreement[]>(`/agreements/${status ? `?status=${status}` : ''}`),
+  // q — поиск по названию, описанию, сделке, участникам и именам вложенных
+  // файлов; при непустом запросе сервер игнорирует вкладку (status).
+  all: (status?: string, q?: string) => {
+    const p = new URLSearchParams()
+    if (status) p.set('status', status)
+    if (q) p.set('q', q)
+    const qs = p.toString()
+    return api.get<Agreement[]>(`/agreements/${qs ? `?${qs}` : ''}`)
+  },
   get: (id: number) => api.get<Agreement>(`/agreements/${id}/`),
 
   // Счётчики для бейджей вкладок (отклонённые/завершённые — непросмотренные мной).

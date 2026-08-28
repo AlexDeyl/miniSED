@@ -353,3 +353,77 @@ class ApiTests(TestCase):
         self.assertEqual([v["version_number"] for v in doc["versions"]], [1, 2])
         self.assertEqual(doc["versions"][1]["change_comment"], "правки юриста")
         self.assertIn(f"/api/documents/{doc_id}/versions/", doc["download_url"])
+
+
+class SearchTests(TestCase):
+    """Поиск по договорам — как в доверенностях/МЧД, включая поиск по имени
+    прикреплённого файла (подписанный скан ищут именно по нему)."""
+
+    INITIATOR = 700
+
+    def setUp(self):
+        self.org = Organization.objects.create(short_name="АО Отель Введенский")
+
+    def _contract(self, title, number="", **kw):
+        c = Contract.objects.create(
+            organization=self.org, initiator_b24_id=self.INITIATOR,
+            title=title, **kw,
+        )
+        if number:
+            c.number = number
+            c.save(update_fields=["number"])
+        return c
+
+    def _found(self, q, uid=INITIATOR):
+        resp = api(uid).get(f"/api/contracts/?q={q}")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        return {x["id"] for x in resp.json()}
+
+    def test_search_by_number_title_and_org(self):
+        a = self._contract("Договор аренды помещения", number="ДГ-000001")
+        self._contract("Договор поставки белья", number="ДГ-000002")
+        self.assertEqual(self._found("аренды"), {a.id})
+        self.assertEqual(self._found("ДГ-000001"), {a.id})
+        self.assertEqual(self._found("Ленин"), set())
+
+    def test_search_by_attached_file_name(self):
+        from documents import services as docsvc
+
+        c = self._contract("Договор на клининг", number="ДГ-000010")
+        other = self._contract("Другой договор", number="ДГ-000011")
+        doc = docsvc.create_document(title="Подписанный скан", linked_object=c)
+        docsvc.add_version(doc, SimpleUploadedFile("dogovor-99-2026.pdf", b"scan"))
+
+        self.assertEqual(self._found("dogovor-99-2026"), {c.id})
+        self.assertEqual(self._found("Подписанный"), {c.id})
+        self.assertNotIn(other.id, self._found("dogovor-99"))
+        # несколько версий файла не задваивают договор в выдаче
+        docsvc.add_version(doc, SimpleUploadedFile("dogovor-99-2026.pdf", b"scan v2"))
+        self.assertEqual(len(self._found("dogovor-99-2026")), 1)
+
+    def test_search_skips_deleted_files(self):
+        from django.utils import timezone
+        from documents import services as docsvc
+
+        c = self._contract("Договор с удалённым файлом")
+        doc = docsvc.create_document(title="Скан", linked_object=c)
+        docsvc.add_version(doc, SimpleUploadedFile("secret-file.pdf", b"x"))
+        doc.deleted_at = timezone.now()
+        doc.save(update_fields=["deleted_at"])
+        self.assertEqual(self._found("secret-file"), set())
+
+    def test_search_terms_are_and(self):
+        a = self._contract("Договор аренды помещения")
+        self._contract("Договор аренды автомобиля")
+        self.assertEqual(self._found("аренды помещения"), {a.id})
+
+    def test_search_ignores_status_tab(self):
+        c = self._contract("Согласованный клининг", status=constants.STATUS_APPROVED)
+        resp = api(self.INITIATOR).get("/api/contracts/?status=draft&q=клининг")
+        self.assertEqual({x["id"] for x in resp.json()}, {c.id})
+
+    def test_search_stays_within_my_contracts(self):
+        Contract.objects.create(
+            organization=self.org, initiator_b24_id=999, title="Чужой клининг",
+        )
+        self.assertEqual(self._found("клининг"), set())

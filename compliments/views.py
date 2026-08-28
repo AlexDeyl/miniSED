@@ -27,10 +27,12 @@ from rest_framework.response import Response
 from approvalflow import sheet as flow_sheet
 from approvalflow.models import ApprovalParticipant
 from core.auth import can_view_all, get_current_b24_id
+from core.search import query_param
 from requests_reg.models import RoleAssignment
 
 from . import constants, form_pdf, services
 from .models import Compliment
+from .search import search
 from .serializers import (
     ComplimentDetailSerializer,
     ComplimentListSerializer,
@@ -93,6 +95,9 @@ class ComplimentViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = Compliment.objects.select_related("facility", "organization")
+        # Поиск (?q=) — по компании, гостю, отелю, содержанию комплимента и
+        # ИМЕНАМ прикреплённых файлов.
+        query = query_param(self.request, "q").strip() if self.action == "list" else ""
         if self.action == "list":
             scope = self.request.query_params.get("scope") or "mine"
             if can_view_all(self.b24_id) and scope == "all":
@@ -109,10 +114,12 @@ class ComplimentViewSet(viewsets.ModelViewSet):
                 )
             else:
                 qs = qs.filter(initiator_b24_id=self.b24_id)
-        status_f = self.request.query_params.get("status")
+        # При поиске вкладка (статус) не сужает выборку: ищут конкретную
+        # заявку, а в каком она статусе — заранее неизвестно.
+        status_f = self.request.query_params.get("status") if not query else None
         if status_f:
             qs = qs.filter(status=status_f)
-        return qs
+        return search(qs, query)
 
     def _is_executor_role(self, compliment) -> bool:
         """Я на роли исполнителя этой категории (даже если персонально не назначен)."""
@@ -247,7 +254,12 @@ class ComplimentViewSet(viewsets.ModelViewSet):
     def execution_queue(self, request):
         """Раздел «Заявки для исполнения»: новые / в работе / архив."""
         scope = request.query_params.get("scope") or "new"
-        statuses = constants.EXECUTION_SCOPES.get(scope, constants.EXECUTION_NEW_STATUSES)
+        query = query_param(request, "q").strip()
+        # При поиске вкладка не сужает выборку: заявку ищут, не зная её статуса.
+        statuses = (
+            constants.EXECUTION_ALL_STATUSES if query
+            else constants.EXECUTION_SCOPES.get(scope, constants.EXECUTION_NEW_STATUSES)
+        )
         qs = Compliment.objects.select_related("facility").filter(status__in=statuses)
 
         # Мои роли исполнителя → какие категории мне показывать.
@@ -261,6 +273,7 @@ class ComplimentViewSet(viewsets.ModelViewSet):
             if plan["executor"] in my_roles
         ]
         qs = qs.filter(Q(executor_b24_id=self.b24_id) | Q(category__in=my_categories))
+        qs = search(qs, query)
         return Response(ComplimentListSerializer(qs, many=True).data)
 
     @action(detail=True, methods=["post"], url_path="take")

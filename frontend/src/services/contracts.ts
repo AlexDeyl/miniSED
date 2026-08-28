@@ -20,8 +20,12 @@ export const contracts = {
 
   // scope: mine — созданные мной (по умолчанию), participant — где я согласующий,
   // all — и то, и другое (вкладки раздела).
-  list: (scope: 'mine' | 'participant' | 'all' = 'mine') =>
-    api.get<ContractListItem[]>(`${BASE}/?scope=${scope}`),
+  // q — поиск по номеру, названию, юрлицу/ЦФО и именам вложенных файлов.
+  list: (scope: 'mine' | 'participant' | 'all' = 'mine', q?: string) => {
+    const p = new URLSearchParams({ scope })
+    if (q) p.set('q', q)
+    return api.get<ContractListItem[]>(`${BASE}/?${p.toString()}`)
+  },
   // Договоры, ждущие моего решения — для общего «Требует действия».
   todo: () => api.get<ContractListItem[]>(`${BASE}/todo/`),
   get: (id: number | string) => api.get<ContractDetail>(`${BASE}/${id}/`),

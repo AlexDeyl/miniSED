@@ -16,8 +16,12 @@ export const compliments = {
 
   // scope: mine — мои заявки (по умолчанию), participant — где я согласующий,
   // all — всё, что мне доступно (руководителю продаж — все заявки).
-  list: (scope: 'mine' | 'participant' | 'all' = 'mine') =>
-    api.get<ComplimentListItem[]>(`${BASE}/?scope=${scope}`),
+  // q — поиск по компании, гостю, отелю и именам вложенных файлов.
+  list: (scope: 'mine' | 'participant' | 'all' = 'mine', q?: string) => {
+    const p = new URLSearchParams({ scope })
+    if (q) p.set('q', q)
+    return api.get<ComplimentListItem[]>(`${BASE}/?${p.toString()}`)
+  },
   // Заявки, ждущие моего решения — в общий «Требует действия».
   todo: () => api.get<ComplimentListItem[]>(`${BASE}/todo/`),
   get: (id: number | string) => api.get<ComplimentDetail>(`${BASE}/${id}/`),
@@ -39,8 +43,13 @@ export const compliments = {
   remove: (id: number | string) => api.delete<void>(`${BASE}/${id}/`),
 
   // --- исполнение ---
-  executionQueue: (scope: 'new' | 'work' | 'archive' = 'new') =>
-    api.get<ComplimentListItem[]>(`${BASE}/execution_queue/?scope=${scope}`),
+  // q — поиск по очереди исполнения; при непустом запросе вкладка не сужает
+  // выборку (заявку ищут, не зная её статуса).
+  executionQueue: (scope: 'new' | 'work' | 'archive' = 'new', q?: string) => {
+    const p = new URLSearchParams({ scope })
+    if (q) p.set('q', q)
+    return api.get<ComplimentListItem[]>(`${BASE}/execution_queue/?${p.toString()}`)
+  },
   take: (id: number | string) => api.post<ComplimentDetail>(`${BASE}/${id}/take/`),
   execute: (id: number | string, comment = '') =>
     api.post<ComplimentDetail>(`${BASE}/${id}/execute/`, { comment }),

@@ -6,7 +6,12 @@ import { RouterLink } from 'vue-router'
 import { compliments } from '@/services/compliments'
 import { ApiError } from '@/services/api'
 import { useComplimentsUiStore } from '@/stores/complimentsUi'
+import SearchBox from '@/components/SearchBox.vue'
 import type { ComplimentListItem } from '@/types/compliment'
+
+// Поиск по очереди исполнения (в т.ч. по именам вложенных файлов).
+// При непустом запросе вкладка выборку не сужает.
+const query = ref('')
 
 const ui = useComplimentsUiStore()
 
@@ -29,7 +34,7 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    items.value = await compliments.executionQueue(ui.executionMode)
+    items.value = await compliments.executionQueue(ui.executionMode, query.value || undefined)
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Не удалось загрузить'
   } finally {
@@ -55,7 +60,7 @@ async function act(fn: () => Promise<unknown>) {
   }
 }
 
-watch(() => ui.executionMode, load)
+watch([() => ui.executionMode, query], load)
 onMounted(() => {
   load()
   refreshBadge()
@@ -64,9 +69,16 @@ onMounted(() => {
 
 <template>
   <section>
+    <SearchBox v-model="query" placeholder="Поиск: номер, компания, гость, отель, имя файла" />
+    <p v-if="query && !loading && !error" class="state" style="margin-bottom:8px">
+      Поиск идёт по всей очереди исполнения, независимо от вкладки. Найдено: {{ items.length }}.
+    </p>
+
     <p v-if="loading" class="state">Загрузка…</p>
     <p v-else-if="error" class="state state--error">{{ error }}</p>
-    <p v-else-if="items.length === 0" class="state">{{ emptyText }}</p>
+    <p v-else-if="items.length === 0" class="state">
+      {{ query ? 'Ничего не найдено.' : emptyText }}
+    </p>
 
     <ul v-else class="item-list">
       <li v-for="c in items" :key="c.id">

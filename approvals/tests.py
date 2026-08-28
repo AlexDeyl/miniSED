@@ -7,6 +7,7 @@
 Личность пользователя определяется по заголовку X-B24-User (HTTP_X_B24_USER).
 """
 
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, Client
 from django.urls import reverse
 from rest_framework.test import APIClient
@@ -15,6 +16,7 @@ from core.models import Role, UserProfile
 
 from .models import (
     Agreement,
+    AgreementDocument,
     Participant,
     DecisionLog,
     B24UserEmail,
@@ -687,3 +689,78 @@ class SimpleCreateEndpointTests(TestCase):
             "/api/agreements/create_simple/", {"title": ""}, format="multipart"
         )
         self.assertEqual(resp.status_code, 400)
+
+
+class SearchTests(TestCase):
+    """Поиск в разделе «Согласования» — как в доверенностях/МЧД, включая
+    главное требование: находить по имени прикреплённого файла."""
+
+    def _found(self, q, uid=AUTHOR):
+        resp = api(uid).get(f"/api/agreements/?q={q}")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        return {x["id"] for x in resp.json()}
+
+    def test_search_by_title_and_crm(self):
+        a = Factory.agreement(title="Договор аренды Введенский")
+        Factory.agreement(title="Скидка Невесомость")
+        self.assertEqual(self._found("аренды"), {a.id})
+        self.assertEqual(self._found("Ленин"), set())
+
+    def test_search_by_attached_file_name(self):
+        """Файл прикладывают к согласованию — по имени файла оно и находится."""
+        from documents import services as docsvc
+
+        a = Factory.agreement(title="Согласование сметы")
+        other = Factory.agreement(title="Другое согласование")
+        doc = docsvc.create_document(title="Смета подрядчика", linked_object=a)
+        docsvc.add_version(doc, SimpleUploadedFile("smeta-77-2026.pdf", b"pdf"))
+
+        self.assertEqual(self._found("smeta-77-2026"), {a.id})
+        self.assertEqual(self._found("Смета"), {a.id})
+        self.assertNotIn(other.id, self._found("smeta-77"))
+        # несколько версий одного файла не задваивают согласование
+        docsvc.add_version(doc, SimpleUploadedFile("smeta-77-2026.pdf", b"pdf v2"))
+        self.assertEqual(len(self._found("smeta-77-2026")), 1)
+
+    def test_search_skips_deleted_files(self):
+        from django.utils import timezone
+        from documents import services as docsvc
+
+        a = Factory.agreement(title="Согласование с удалённым файлом")
+        doc = docsvc.create_document(title="Скан", linked_object=a)
+        docsvc.add_version(doc, SimpleUploadedFile("secret-file.pdf", b"x"))
+        doc.deleted_at = timezone.now()
+        doc.save(update_fields=["deleted_at"])
+        self.assertEqual(self._found("secret-file"), set())
+
+    def test_search_by_legacy_file(self):
+        """Старые файлы лежат в AgreementDocument — их тоже надо находить."""
+        a = Factory.agreement(title="Старое согласование")
+        AgreementDocument.objects.create(
+            agreement=a, type=AgreementDocument.TYPE_FILE,
+            file=SimpleUploadedFile("legacy-report-2019.pdf", b"old"),
+        )
+        self.assertEqual(self._found("legacy-report-2019"), {a.id})
+
+    def test_search_by_number(self):
+        """Своего номера у согласования нет — карточку называют по id."""
+        a = Factory.agreement(title="Согласование по id")
+        self.assertEqual(self._found(f"%23{a.id}"), {a.id})
+
+    def test_search_terms_are_and(self):
+        a = Factory.agreement(title="Договор аренды Введенский")
+        Factory.agreement(title="Договор поставки Введенский")
+        self.assertEqual(self._found("Договор аренды"), {a.id})
+
+    def test_search_ignores_status_tab(self):
+        """Ищут, не зная статуса: вкладка выборку не сужает."""
+        done = Factory.agreement(title="Завершённая смета")
+        done.status = Agreement.STATUS_COMPLETED
+        done.save(update_fields=["status"])
+        resp = api(AUTHOR).get("/api/agreements/?status=in_progress&q=смета")
+        self.assertEqual({x["id"] for x in resp.json()}, {done.id})
+
+    def test_search_stays_within_my_agreements(self):
+        """Поиск не расширяет видимость: чужое согласование не находится."""
+        Agreement.objects.create(title="Чужая смета", author_b24_id=OUTSIDER)
+        self.assertEqual(self._found("смета"), set())

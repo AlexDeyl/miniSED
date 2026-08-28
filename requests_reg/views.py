@@ -3,39 +3,8 @@ API регламентных заявок: согласование (через 
 Личность — b24_user_id (заголовок X-B24-User).
 """
 
-from urllib.parse import unquote_to_bytes
-
 import requests as http
 from django.conf import settings
-
-
-def _query_param(request, name, default=""):
-    """GET-параметр с устойчивым декодированием кириллицы.
-
-    Периметр (openresty) перекодирует кириллицу в query-строке из UTF-8 в CP1251,
-    поэтому читаем СЫРЫЕ байты query и пробуем UTF-8, затем CP1251 (иначе Django
-    декодирует cp1251-байты как UTF-8 и получается мусор).
-
-    QUERY_STRING по WSGI — это байты, декодированные как latin-1, поэтому перед
-    раскодированием %XX возвращаем строку в байты тем же latin-1. Иначе клиент,
-    приславший кириллицу в query БЕЗ процентного кодирования, доезжал мусором.
-    """
-    qs = request.META.get("QUERY_STRING", "") or ""
-    prefix = name + "="
-    for part in qs.split("&"):
-        if part.startswith(prefix):
-            value = part[len(prefix):].replace("+", " ")
-            try:
-                raw = unquote_to_bytes(value.encode("latin-1"))
-            except UnicodeEncodeError:  # не из WSGI (тесты, внутренние вызовы)
-                raw = unquote_to_bytes(value)
-            for enc in ("utf-8", "cp1251"):
-                try:
-                    return raw.decode(enc)
-                except UnicodeDecodeError:
-                    continue
-            return raw.decode("utf-8", errors="replace")
-    return default
 from django.http import FileResponse
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
@@ -49,6 +18,7 @@ from rest_framework.exceptions import NotFound, PermissionDenied
 
 from approvalflow.models import ApprovalParticipant
 from core.auth import can_view_all, get_current_b24_id, is_lawyer
+from core.search import query_param as _query_param
 
 from . import constants, services
 from .models import PowerTemplate, RegulatoryRequest
