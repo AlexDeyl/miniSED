@@ -123,7 +123,7 @@ onMounted(async () => {
 <template>
   <div class="login">
     <div class="login-card">
-      <div class="login-logo">МиниСЭД 2.0</div>
+      <div class="login-logo">Минин-СЭД 2.0</div>
       <p class="login-sub">Электронный документооборот</p>
 
       <form @submit.prevent="submit">

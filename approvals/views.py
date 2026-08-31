@@ -462,7 +462,7 @@ class AgreementViewSet(viewsets.ModelViewSet):
     def initial(self, request, *args, **kwargs):
         self.b24_id = get_current_b24_id(request)
         if not self.b24_id:
-            raise AuthenticationFailed("Откройте приложение «Мини-СЭД» из Битрикс24.")
+            raise AuthenticationFailed("Откройте приложение «Минин-СЭД» из Битрикс24.")
 
         self.b24_emails = user_emails(self.b24_id)
 
@@ -605,7 +605,7 @@ class AgreementViewSet(viewsets.ModelViewSet):
         """
         b24_id = get_current_b24_id(request)
         if not b24_id:
-            raise AuthenticationFailed("Откройте приложение «Мини-СЭД» из Битрикс24.")
+            raise AuthenticationFailed("Откройте приложение «Минин-СЭД» из Битрикс24.")
 
         agreement = self.get_object()
 
@@ -916,7 +916,7 @@ class AgreementViewSet(viewsets.ModelViewSet):
         """
         b24_id = get_current_b24_id(request)
         if not b24_id:
-            raise AuthenticationFailed("Откройте приложение «Мини-СЭД» из Битрикс24.")
+            raise AuthenticationFailed("Откройте приложение «Минин-СЭД» из Битрикс24.")
         agreement = self.get_object()
 
         if agreement.author_b24_id != b24_id:
@@ -950,7 +950,7 @@ class AgreementViewSet(viewsets.ModelViewSet):
         """
         b24_id = get_current_b24_id(request)
         if not b24_id:
-            raise AuthenticationFailed("Откройте приложение «Мини-СЭД» из Битрикс24.")
+            raise AuthenticationFailed("Откройте приложение «Минин-СЭД» из Битрикс24.")
         agreement = self.get_object()
 
         if agreement.author_b24_id != b24_id:
@@ -969,7 +969,7 @@ class AgreementViewSet(viewsets.ModelViewSet):
     def update_document(self, request, pk=None):
         b24_id = get_current_b24_id(request)
         if not b24_id:
-            raise AuthenticationFailed("Откройте приложение «Мини-СЭД» из Битрикс24.")
+            raise AuthenticationFailed("Откройте приложение «Минин-СЭД» из Битрикс24.")
         agreement = self.get_object()
 
         if agreement.author_b24_id != b24_id:
@@ -1014,7 +1014,7 @@ class AgreementViewSet(viewsets.ModelViewSet):
         """
         b24_id = get_current_b24_id(request)
         if not b24_id:
-            raise AuthenticationFailed("Откройте приложение «Мини-СЭД» из Битрикс24.")
+            raise AuthenticationFailed("Откройте приложение «Минин-СЭД» из Битрикс24.")
 
         emails = user_emails(b24_id)
 

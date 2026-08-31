@@ -17,7 +17,7 @@ const legalUi = useLegalUiStore()
 const contractsUi = useContractsUiStore()
 const complimentsUi = useComplimentsUiStore()
 
-const pageTitle = computed(() => (route.meta.title as string) || 'MiniSED')
+const pageTitle = computed(() => (route.meta.title as string) || 'Минин-СЭД')
 const bare = computed(() => route.meta.noShell === true)
 // Под-вкладки показываем вложенно под своим пунктом меню.
 const onSvetofor = computed(() => route.name === 'svetofor')
@@ -50,7 +50,7 @@ function tabBadge(code: string): number {
   <div v-else class="app-shell">
     <aside class="sidebar">
       <div class="sidebar-logo">
-        Мини-СЭД
+        Минин-СЭД
         <small>Электронный документооборот</small>
       </div>
       <nav class="sidebar-nav">
@@ -135,7 +135,7 @@ function tabBadge(code: string): number {
       </div>
 
       <div class="sidebar-footer">
-        ©Mini-SED by Alexander Rodionov, v. 2.0, 2026
+        ©Minin-SED by Alexander Rodionov, v. 2.0, 2026
       </div>
     </aside>
 
