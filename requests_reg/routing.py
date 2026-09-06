@@ -36,7 +36,12 @@ ROUTE_RULES = [
     (C.ROLE_RESTAURANT_DIRECTOR, lambda r: _is_nevesomost(r) or _cat(r) == "restaurant"),
     (C.ROLE_FINANCE_DIRECTOR, lambda r: True),
     (C.ROLE_LEGAL_DEPT, lambda r: True),
-    (C.ROLE_FINAL_SIGNER, lambda r: True),
+    # ГД — НЕ для обычной доверенности: её генеральный подписывает вживую, на
+    # бумаге, после того как юротдел напечатает готовый документ (статус «На
+    # подписании»). Электронное согласование ГД в маршруте было бы вторым,
+    # лишним кругом того же решения. Для МЧД/ЭЦП подписи на бумаге нет —
+    # там ГД остаётся согласующим в маршруте.
+    (C.ROLE_FINAL_SIGNER, lambda r: r.request_type != C.TYPE_POA),
 ]
 
 

@@ -37,19 +37,36 @@ class RoutingTests(TestCase):
         self.cfo_sales = CFO.objects.create(name="Продажи", organization=self.org, category="sales")
         self.cfo_it = CFO.objects.create(name="ИТ", organization=self.org, category="its_it")
 
-    def _req(self, cfo=None, facility=None):
+    def _req(self, cfo=None, facility=None, request_type=C.TYPE_POA):
         return services.create_request(
-            request_type=C.TYPE_POA, organization=self.org, cfo=cfo, facility=facility,
+            request_type=request_type, organization=self.org, cfo=cfo, facility=facility,
             initiator_b24_id=1,
         )
 
     def test_base_route_always_roles(self):
         route = routing.build_route(self._req())
         codes = [s["role_code"] for s in route]
-        # без ЦФО: всегда — руководитель ЦФО, финдиректор, юротдел, финальный подписант
+        # без ЦФО: всегда — руководитель ЦФО, финдиректор, юротдел.
+        # ГД в маршруте доверенности НЕТ: он подписывает её на бумаге.
         self.assertEqual(codes, [
-            C.ROLE_CFO_HEAD, C.ROLE_FINANCE_DIRECTOR, C.ROLE_LEGAL_DEPT, C.ROLE_FINAL_SIGNER,
+            C.ROLE_CFO_HEAD, C.ROLE_FINANCE_DIRECTOR, C.ROLE_LEGAL_DEPT,
         ])
+
+    def test_poa_route_has_no_final_signer(self):
+        """Обычную доверенность ГД подписывает вживую, на бумаге, — в
+        электронном маршруте его быть не должно."""
+        codes = [s["role_code"] for s in routing.build_route(self._req())]
+        self.assertNotIn(C.ROLE_FINAL_SIGNER, codes)
+
+    def test_mchd_and_ecp_keep_final_signer(self):
+        """У МЧД и ЭЦП бумажной подписи нет — ГД остаётся согласующим."""
+        for rtype in (C.TYPE_MCHD, C.TYPE_ECP):
+            with self.subTest(request_type=rtype):
+                codes = [s["role_code"] for s in
+                         routing.build_route(self._req(request_type=rtype))]
+                self.assertIn(C.ROLE_FINAL_SIGNER, codes)
+                # и он последний в маршруте — подписант замыкает согласование
+                self.assertEqual(codes[-1], C.ROLE_FINAL_SIGNER)
 
     def test_sales_category_adds_sales_head(self):
         codes = [s["role_code"] for s in routing.build_route(self._req(cfo=self.cfo_sales))]
@@ -147,8 +164,8 @@ class FlowTests(TestCase):
 
     def test_manual_selection_logged(self):
         req = self._req()
-        # роль final_signer не имеет назначения -> ручной выбор, должен залогироваться
-        services.submit(req, [internal(77, 0, C.ROLE_FINAL_SIGNER)])
+        # роль cfo_head не имеет назначения -> ручной выбор, должен залогироваться
+        services.submit(req, [internal(77, 0, C.ROLE_CFO_HEAD)])
         self.assertTrue(
             AuditLog.objects.filter(action="manual_approver_selected").exists()
         )
@@ -172,7 +189,15 @@ class ApiTests(TestCase):
         data = api(1).get(f"/api/reg/requests/{rid}/route_preview/").json()
         codes = [s["role_code"] for s in data["route"]]
         self.assertIn(C.ROLE_CFO_HEAD, codes)
-        self.assertIn(C.ROLE_FINAL_SIGNER, codes)
+        # доверенность: ГД подписывает на бумаге, в маршруте его нет
+        self.assertNotIn(C.ROLE_FINAL_SIGNER, codes)
+
+    def test_route_preview_mchd_keeps_final_signer(self):
+        rid = api(1).post("/api/reg/requests/", {
+            "request_type": "mchd", "organization": self.org.id, "subject_name": "Petrov",
+        }, format="json").json()["id"]
+        data = api(1).get(f"/api/reg/requests/{rid}/route_preview/").json()
+        self.assertIn(C.ROLE_FINAL_SIGNER, [s["role_code"] for s in data["route"]])
 
     def test_submit_decide_reaches_legal_queue(self):
         rid = self._create()
