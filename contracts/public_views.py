@@ -34,10 +34,14 @@ def _ctx(request, participant, contract, **extra):
     if contract:
         for d in contract.documents.filter(deleted_at__isnull=True):
             cur = d.current_version
-            if cur:
+            if cur and cur.file:
+                # Не /api/documents/…: тот эндпоинт требует заголовок
+                # X-B24-User, которого у браузера, открывшего ссылку из письма,
+                # нет — вместо документа приходил отказ. Отдаём по токену
+                # участника (documents.public_views).
                 docs.append({
-                    "url": f"/api/documents/{d.id}/versions/{cur.id}/download/",
-                    "name": d.title,
+                    "url": f"/external/doc/{participant.external_token}/{d.id}/",
+                    "name": d.title or cur.original_filename or "Документ",
                 })
     ctx = {
         "participant": participant,

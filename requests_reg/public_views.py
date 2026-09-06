@@ -34,15 +34,29 @@ def _resolve(token):
     return participant, req
 
 
+def _documents(participant, card):
+    """Документы карточки для внешней страницы — со ссылкой по токену."""
+    if card is None:
+        return []
+    docs = []
+    for d in card.documents.filter(deleted_at__isnull=True):
+        if d.current_version and d.current_version.file:
+            docs.append({
+                "url": f"/external/doc/{participant.external_token}/{d.id}/",
+                "name": d.title or d.current_version.original_filename or "Документ",
+            })
+    return docs
+
+
 def _ctx(request, participant, req, **extra):
     ctx = {
         "participant": participant,
         "req": req,
-        "documents": [
-            {"url": d.file.url, "name": d.file.name.rsplit("/", 1)[-1]}
-            for d in req.documents.filter(deleted_at__isnull=True)
-            if getattr(d, "file", None)
-        ] if req else [],
+        # Файл лежит на ВЕРСИИ документа, а не на самом документе: раньше тут
+        # проверялось несуществующее поле Document.file, и список документов на
+        # внешней странице всегда оказывался пустым — участник согласовывал
+        # вслепую. Ссылка ведёт на просмотр по токену (documents.public_views).
+        "documents": _documents(participant, req),
         "already_decided": participant.decision != ApprovalParticipant.DECISION_WAITING,
     }
     ctx.update(extra)

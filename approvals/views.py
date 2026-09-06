@@ -1246,26 +1246,26 @@ def external_approve_view(request, token):
 
     agreement = participant.agreement
     documents = []
+    # Файлы отдаём по токену участника, а не прямой ссылкой в /media: страница
+    # согласования не должна зависеть от того, открыт ли media наружу, а сам
+    # токен и так позволяет больше — принять решение. См. documents.public_views.
     for d in agreement.documents.all():  # type: ignore
-        url = None
-        name = None
-
         if d.file:
-            url = d.file.url
-            name = os.path.basename(d.file.name)
+            documents.append({
+                "url": f"/external/file/{participant.external_token}/{d.id}/",
+                "name": os.path.basename(d.file.name) or "Документ",
+            })
         elif d.url:
-            url = d.url
-            name = d.url
+            documents.append({"url": d.url, "name": d.url})
 
-        if not url:
-            continue
+    # Версионируемые документы (приложение documents) — те же правила.
+    for d in agreement.versioned_documents.filter(deleted_at__isnull=True):
+        if d.current_version and d.current_version.file:
+            documents.append({
+                "url": f"/external/doc/{participant.external_token}/{d.id}/",
+                "name": d.title or d.current_version.original_filename or "Документ",
+            })
 
-        documents.append(
-            {
-                "url": url,
-                "name": name or "Документ",
-            }
-        )
     file_url = documents[0]["url"] if documents else None
 
     if request.method == "POST":

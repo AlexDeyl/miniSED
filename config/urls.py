@@ -7,6 +7,7 @@ from rest_framework.routers import DefaultRouter
 from core import auth_views
 from requests_reg.public_views import reg_external_approve
 from contracts.public_views import contract_external_approve
+from documents.public_views import external_agreement_file, external_document
 from approvals.views import (
     AgreementViewSet,
     ApprovalTemplateViewSet,
@@ -45,6 +46,17 @@ urlpatterns = [
     path(
         "external/contract/approve/<str:token>/", contract_external_approve,
         name="contract_external_approve"
+    ),
+    # Документы для того, кто согласует по ссылке из письма. Доступ даёт тот же
+    # токен участника — читать он позволяет строго меньше, чем уже позволяет
+    # сама ссылка (принять решение). См. documents/public_views.py.
+    path(
+        "external/doc/<str:token>/<int:doc_id>/", external_document,
+        name="external_document"
+    ),
+    path(
+        "external/file/<str:token>/<int:doc_id>/", external_agreement_file,
+        name="external_agreement_file"
     ),
     path(
         "api/agreements/create_simple/",
