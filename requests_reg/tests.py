@@ -73,15 +73,47 @@ class RoutingTests(TestCase):
         codes = [s["role_code"] for s in routing.build_route(self._req(cfo=self.cfo_sales))]
         self.assertIn(C.ROLE_SALES_HEAD, codes)
 
-    def test_it_category_adds_tech_and_ops(self):
+    def test_it_category_adds_tech_director(self):
         codes = [s["role_code"] for s in routing.build_route(self._req(cfo=self.cfo_it))]
         self.assertIn(C.ROLE_TECH_DIRECTOR, codes)
-        self.assertIn(C.ROLE_OPS_DIRECTOR, codes)
 
     def test_nevesomost_adds_restaurant_director(self):
+        """«Проект Невесомость» — это ЮРЛИЦО: у него рестораны и своя
+        ресторанная служба. Раньше правило смотрело только на объект (отель) и
+        не срабатывало никогда, потому что Невесомость заведена юрлицом."""
+        nev = Organization.objects.create(short_name='ООО "Невесомость"')
+        req = services.create_request(
+            request_type=C.TYPE_POA, organization=nev, initiator_b24_id=1,
+        )
+        codes = [s["role_code"] for s in routing.build_route(req)]
+        self.assertIn(C.ROLE_RESTAURANT_DIRECTOR, codes)
+
+    def test_nevesomost_facility_still_works(self):
+        """Объект с таким названием тоже может появиться — его не теряем."""
         fac = Facility.objects.create(name="Невесомость", organization=self.org)
         codes = [s["role_code"] for s in routing.build_route(self._req(facility=fac))]
         self.assertIn(C.ROLE_RESTAURANT_DIRECTOR, codes)
+
+    def test_restaurant_cfo_adds_restaurant_director(self):
+        cfo = CFO.objects.create(name="Ресторанная служба", organization=self.org,
+                                 category="restaurant")
+        codes = [s["role_code"] for s in routing.build_route(self._req(cfo=cfo))]
+        self.assertIn(C.ROLE_RESTAURANT_DIRECTOR, codes)
+
+    def test_its_it_does_not_call_ops_director(self):
+        """ИТС и ИТ ведёт только технический директор: операционному эти
+        заявки падать не должны (уточнение заказчика)."""
+        codes = [s["role_code"] for s in routing.build_route(self._req(cfo=self.cfo_it))]
+        self.assertIn(C.ROLE_TECH_DIRECTOR, codes)
+        self.assertNotIn(C.ROLE_OPS_DIRECTOR, codes)
+
+    def test_reception_calls_ops_director(self):
+        """СПиР — зона операционного директора, техдиректор не нужен."""
+        cfo = CFO.objects.create(name="СПиР Отель Введенский", organization=self.org,
+                                 category="reception")
+        codes = [s["role_code"] for s in routing.build_route(self._req(cfo=cfo))]
+        self.assertIn(C.ROLE_OPS_DIRECTOR, codes)
+        self.assertNotIn(C.ROLE_TECH_DIRECTOR, codes)
 
     def test_role_resolution_and_manual_fallback(self):
         RoleAssignment.objects.create(

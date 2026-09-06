@@ -19,9 +19,22 @@ def _cat(request: RegulatoryRequest) -> str:
     return request.cfo.category if request.cfo else ""
 
 
-def _is_nevesomost(request: RegulatoryRequest) -> bool:
-    name = (request.facility.name if request.facility else "").lower()
-    return "невесом" in name
+def _needs_restaurant_director(request: RegulatoryRequest) -> bool:
+    """Подключать ли директора ресторанной службы.
+
+    Он ведёт рестораны, поэтому цепляется к ресторанному ЦФО. «Проект
+    Невесомость» из ТЗ — это ЮРЛИЦО ООО «Невесомость»: у него рестораны и свой
+    ЦФО «Ресторанная служба». Раньше правило смотрело ТОЛЬКО на объект (отель),
+    а Невесомость заведена юрлицом — и не срабатывало никогда. Проверяем оба:
+    объект с таким названием тоже может появиться.
+    """
+    if _cat(request) == "restaurant":
+        return True
+    names = (
+        request.organization.short_name if request.organization_id else "",
+        request.facility.name if request.facility_id else "",
+    )
+    return any("невесом" in (n or "").lower() for n in names)
 
 
 # Правила: (role_code, condition(request) -> bool). Порядок = порядок маршрута.
@@ -32,8 +45,10 @@ ROUTE_RULES = [
     (C.ROLE_CHIEF_ACCOUNTANT, lambda r: _cat(r) == "accounting"),
     (C.ROLE_HR_HEAD, lambda r: _cat(r) in ("hr_kdp", "hr_recruit", "hr_training")),
     (C.ROLE_TECH_DIRECTOR, lambda r: _cat(r) == "its_it"),
-    (C.ROLE_OPS_DIRECTOR, lambda r: _cat(r) in ("its_it", "sgh", "territory", "warehouse")),
-    (C.ROLE_RESTAURANT_DIRECTOR, lambda r: _is_nevesomost(r) or _cat(r) == "restaurant"),
+    # ИТС и ИТ ведёт только технический директор: операционному эти заявки
+    # падать не должны (уточнение заказчика к таблице маршрута).
+    (C.ROLE_OPS_DIRECTOR, lambda r: _cat(r) in ("reception", "sgh", "territory", "warehouse")),
+    (C.ROLE_RESTAURANT_DIRECTOR, _needs_restaurant_director),
     (C.ROLE_FINANCE_DIRECTOR, lambda r: True),
     (C.ROLE_LEGAL_DEPT, lambda r: True),
     # ГД — НЕ для обычной доверенности: её генеральный подписывает вживую, на
