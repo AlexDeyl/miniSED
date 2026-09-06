@@ -22,7 +22,7 @@ from approvalflow.models import Approval, ApprovalParticipant
 from core.auth import is_lawyer
 from core.services import log_action
 
-from . import constants, routing
+from . import constants, routing, validators
 from .models import RegulatoryRequest
 
 
@@ -116,6 +116,14 @@ def submit(request: RegulatoryRequest, participants: list[dict], *, flow_type=No
         raise RequestError("Отправить можно черновик, возвращённую или отклонённую заявку.")
     if not participants:
         raise RequestError("Маршрут пуст — добавьте согласующих.")
+
+    # МЧД без ИНН/СНИЛС представителя отправлять некуда: ФНС такую доверенность
+    # не примет. Сериализатор ловит это при сохранении анкеты, но заявка могла
+    # быть создана и другим путём — здесь последний рубеж перед маршрутом.
+    if request.request_type == constants.TYPE_MCHD:
+        err = validators.mchd_rep_error(request.data)
+        if err:
+            raise RequestError(err)
 
     # зафиксировать ручной выбор согласующих (слоты, которые система не разрешила)
     manual_roles = {s["role_code"] for s in routing.build_route(request) if s["needs_manual"]}

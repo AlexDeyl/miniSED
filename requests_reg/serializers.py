@@ -5,7 +5,7 @@ from rest_framework import serializers
 from approvalflow.serializers import ApprovalDetailSerializer
 from documents.serializers import linked_documents
 
-from . import constants, services
+from . import constants, services, validators
 from .models import RegulatoryRequest
 
 
@@ -73,8 +73,18 @@ class RegulatoryRequestWriteSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, attrs):
-        # Серверная страховка правила «доверенность не более 3 лет».
+        # Серверная страховка правил анкеты (фронт проверяет то же самое).
         data = attrs.get("data")
+
+        # МЧД: представителя идентифицируют ИНН и СНИЛС — без них ФНС
+        # доверенность не примет. Проверяем, только когда анкету присылают:
+        # PATCH одного поля (например комментария) не должен спотыкаться.
+        rtype = attrs.get("request_type") or getattr(self.instance, "request_type", None)
+        if rtype == constants.TYPE_MCHD and isinstance(data, dict):
+            err = validators.mchd_rep_error(data)
+            if err:
+                raise serializers.ValidationError({"detail": err})
+
         if isinstance(data, dict) and data.get("term_type") == "period":
             f = _parse_date(data.get("term_from"))
             t = _parse_date(data.get("term_to"))

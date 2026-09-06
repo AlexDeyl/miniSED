@@ -5,6 +5,7 @@ import { requests, type Cfo, type Facility, type Organization } from '@/services
 import { ApiError } from '@/services/api'
 import type { RequestType } from '@/types/request'
 import AddressAutocomplete from '@/components/AddressAutocomplete.vue'
+import { formatSnils, isValidInn, isValidSnils } from '@/utils/personal'
 
 const router = useRouter()
 
@@ -76,7 +77,8 @@ const data = reactive<Record<string, unknown>>({
   poa_type: 'single', urgency: 'standard', planned_date: '',
   rep: {
     last_name: '', first_name: '', middle_name: '', birth_date: '', status: 'employee',
-    position: '', phone: '', email: '', passport: '', passport_department_code: '',
+    position: '', phone: '', email: '', inn: '', snils: '',
+    passport: '', passport_department_code: '',
     passport_issued_by: '', passport_issue_date: '', reg_address: '',
   },
   rep_legal: { name: '', ogrn: '', inn: '', kpp: '', address: '', acting_person: '' },
@@ -115,6 +117,14 @@ async function uploadAttachments(reqId: number) {
 }
 
 const isAnketa = computed(() => requestType.value === 'poa' || requestType.value === 'mchd')
+// ИНН и СНИЛС нужны только машиночитаемой доверенности: для бумажной
+// представителя удостоверяет паспорт.
+const isMchd = computed(() => requestType.value === 'mchd')
+
+// СНИЛС приводим к привычному виду XXX-XXX-XXX YY, как код подразделения.
+function onSnilsBlur() {
+  rep.snils = formatSnils(rep.snils)
+}
 
 // Максимальная дата окончания срока — не более 3 лет от даты начала.
 const maxTermTo = computed(() => {
@@ -165,6 +175,18 @@ function validate(): string | null {
     if (rep.birth_date > todayStr) return 'Раздел 1: дата рождения не может быть в будущем.'
     if (rep.birth_date > isoMinusYears(18)) return 'Раздел 1: представитель должен быть старше 18 лет.'
     if (!rep.position.trim()) return 'Раздел 1: укажите должность представителя.'
+
+    // МЧД: ФНС опознаёт представителя по ИНН и СНИЛС — без них доверенность
+    // не примут, поэтому оба поля обязательны и проверяются по контрольным
+    // разрядам (те же правила на сервере).
+    if (isMchd.value) {
+      if (!rep.inn.trim()) return 'Раздел 1: для МЧД укажите ИНН представителя.'
+      if (!isValidInn(rep.inn))
+        return 'Раздел 1: проверьте ИНН — должно быть 12 цифр, контрольный разряд не сходится.'
+      if (!rep.snils.trim()) return 'Раздел 1: для МЧД укажите СНИЛС представителя.'
+      if (!isValidSnils(rep.snils))
+        return 'Раздел 1: проверьте СНИЛС — должно быть 11 цифр, контрольное число не сходится.'
+    }
 
     if (rep.phone.trim()) {
       const digits = rep.phone.replace(/\D/g, '')
@@ -335,6 +357,22 @@ async function save() {
             <label class="form-field"><span>Телефон</span><input v-model="rep.phone" /></label>
             <label class="form-field"><span>Email</span><input v-model="rep.email" type="email" /></label>
           </div>
+          <div v-if="isMchd" class="form-row">
+            <label class="form-field">
+              <span>ИНН представителя *</span>
+              <input v-model="rep.inn" inputmode="numeric" maxlength="12" placeholder="12 цифр" />
+            </label>
+            <label class="form-field">
+              <span>СНИЛС представителя *</span>
+              <input
+                v-model="rep.snils" @blur="onSnilsBlur"
+                inputmode="numeric" maxlength="14" placeholder="123-456-789 01"
+              />
+            </label>
+          </div>
+          <p v-if="isMchd" class="field-hint">
+            ИНН и СНИЛС обязательны для МЧД: по ним ФНС опознаёт представителя.
+          </p>
           <div class="form-row">
             <label class="form-field"><span>Паспорт (серия, №) *</span><input v-model="rep.passport" inputmode="numeric" maxlength="11" placeholder="1234 567890" /></label>
             <label class="form-field">
@@ -459,6 +497,7 @@ async function save() {
 .check { display: block; font-size: 13px; margin: 3px 0; cursor: pointer; }
 .check input { margin-right: 6px; }
 .attach-hint { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+.field-hint { font-size: 12px; color: var(--text-muted); margin: -4px 0 8px; }
 .attach-row { margin: 4px 0; }
 .attach-file { margin: 2px 0 8px 22px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .attach-file input[type=file] { font-size: 12px; }

@@ -16,7 +16,7 @@ from core.models import CFO, Facility, Organization
 from core.models import AuditLog, Role, UserProfile
 from documents import services as docsvc
 from . import constants as C
-from . import routing, services
+from . import routing, services, validators
 from .models import RegulatoryRequest, RoleAssignment
 
 
@@ -649,3 +649,88 @@ class AnketaTests(TestCase):
         pdf = render_pdf(req)
         self.assertTrue(pdf.startswith(b"%PDF"))
         self.assertGreater(len(pdf), 800)
+
+
+class MchdIdentifiersTests(TestCase):
+    """ИНН и СНИЛС представителя обязательны для МЧД: по ним ФНС опознаёт
+    представителя, и без них доверенность не примут."""
+
+    VALID = {"inn": "500100732259", "snils": "112-233-445 95"}
+
+    def setUp(self):
+        self.org = Organization.objects.create(short_name="УК Норд")
+
+    # --- сами проверки контрольных разрядов ---
+    def test_inn_checksum(self):
+        self.assertTrue(validators.is_valid_inn("500100732259"))
+        self.assertFalse(validators.is_valid_inn("500100732250"))  # битый разряд
+        self.assertFalse(validators.is_valid_inn("5001007322"))    # 10 цифр — это ИНН юрлица
+        self.assertFalse(validators.is_valid_inn(""))
+
+    def test_snils_checksum_and_format(self):
+        self.assertTrue(validators.is_valid_snils("112-233-445 95"))
+        self.assertTrue(validators.is_valid_snils("11223344595"))  # без разделителей
+        self.assertFalse(validators.is_valid_snils("112-233-445 96"))
+        self.assertFalse(validators.is_valid_snils("112-233-445"))
+        self.assertEqual(validators.format_snils("11223344595"), "112-233-445 95")
+
+    def test_snils_without_checksum_range(self):
+        """Номера до 001-001-998 выданы без контрольного числа."""
+        self.assertTrue(validators.is_valid_snils("001-001-998 00"))
+
+    # --- API: создание заявки ---
+    def _post(self, rtype, rep):
+        return api(1).post("/api/reg/requests/", {
+            "request_type": rtype, "organization": self.org.id,
+            "subject_name": "Петров", "data": {"rep": rep},
+        }, format="json")
+
+    def test_mchd_rejected_without_inn(self):
+        r = self._post("mchd", {"snils": self.VALID["snils"]})
+        self.assertEqual(r.status_code, 400, r.content)
+        self.assertIn("ИНН", str(r.json()))
+
+    def test_mchd_rejected_without_snils(self):
+        r = self._post("mchd", {"inn": self.VALID["inn"]})
+        self.assertEqual(r.status_code, 400, r.content)
+        self.assertIn("СНИЛС", str(r.json()))
+
+    def test_mchd_rejected_on_typo(self):
+        r = self._post("mchd", {"inn": "500100732250", "snils": self.VALID["snils"]})
+        self.assertEqual(r.status_code, 400, r.content)
+
+    def test_mchd_accepted_with_valid_identifiers(self):
+        r = self._post("mchd", dict(self.VALID))
+        self.assertEqual(r.status_code, 201, r.content)
+
+    def test_poa_does_not_require_identifiers(self):
+        """Бумажную доверенность удостоверяет паспорт — ИНН/СНИЛС не нужны."""
+        r = self._post("poa", {"last_name": "Петров"})
+        self.assertEqual(r.status_code, 201, r.content)
+
+    def test_patch_without_anketa_not_blocked(self):
+        """PATCH одного поля не должен спотыкаться о проверку анкеты."""
+        rid = self._post("mchd", dict(self.VALID)).json()["id"]
+        r = api(1).patch(f"/api/reg/requests/{rid}/", {"comment": "уточнение"},
+                         format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+
+    # --- гейт на отправке (заявка могла быть создана в обход анкеты) ---
+    def test_submit_blocked_without_identifiers(self):
+        req = services.create_request(
+            request_type=C.TYPE_MCHD, organization=self.org, initiator_b24_id=1,
+        )
+        with self.assertRaises(services.RequestError) as ctx:
+            services.submit(req, [internal(10, 0, C.ROLE_CFO_HEAD)])
+        self.assertIn("ИНН", str(ctx.exception))
+        req.refresh_from_db()
+        self.assertEqual(req.status, C.STATUS_DRAFT)
+
+    def test_submit_passes_with_identifiers(self):
+        req = services.create_request(
+            request_type=C.TYPE_MCHD, organization=self.org, initiator_b24_id=1,
+            data={"rep": dict(self.VALID)},
+        )
+        services.submit(req, [internal(10, 0, C.ROLE_CFO_HEAD)])
+        req.refresh_from_db()
+        self.assertEqual(req.status, C.STATUS_ON_APPROVAL)
