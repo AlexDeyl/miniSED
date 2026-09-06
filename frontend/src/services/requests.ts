@@ -16,10 +16,13 @@ export interface UserOption { id: number; fio: string; bitrix_id: number; positi
 
 export const requests = {
   // q — поиск по номеру, ФИО, организации и анкете доверенности.
-  list: (type?: string, q?: string) => {
+  // scope: mine — созданные мной (по умолчанию), participant — где я
+  // согласующий (этим живёт рабочее место визирования), all — и то, и другое.
+  list: (type?: string, q?: string, scope?: 'mine' | 'participant' | 'all') => {
     const p = new URLSearchParams()
     if (type) p.set('type', type)
     if (q) p.set('q', q)
+    if (scope) p.set('scope', scope)
     const qs = p.toString()
     return api.get<RegulatoryRequestListItem[]>(`${BASE}/${qs ? `?${qs}` : ''}`)
   },

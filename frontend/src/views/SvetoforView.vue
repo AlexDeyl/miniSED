@@ -7,16 +7,17 @@ import { contracts } from '@/services/contracts'
 import { compliments } from '@/services/compliments'
 import type { ContractListItem } from '@/types/contract'
 import type { ComplimentListItem } from '@/types/compliment'
-import { bitrix, type BitrixUser, type BitrixDeal } from '@/services/bitrix'
 import BitrixSearchModal from '@/components/BitrixSearchModal.vue'
 import DocumentEditor from '@/components/DocumentEditor.vue'
 import SearchBox from '@/components/SearchBox.vue'
+import { useUserDirectory } from '@/composables/useUserDirectory'
+import { mergeIds, useBitrixPicker } from '@/composables/useBitrixPicker'
 import { api, ApiError } from '@/services/api'
 import { versionFileName } from '@/utils/filename'
 import { useAuthStore } from '@/stores/auth'
 import { useSvetoforStore, type SvetoforMode as Mode } from '@/stores/svetofor'
 import {
-  type Agreement, type AgParticipant, type AgreementTemplate, type DecisionLog,
+  type Agreement, type AgParticipant, type DecisionLog,
   AG_STATUS_LABEL,
 } from '@/types/agreement'
 import type { RegulatoryRequestListItem } from '@/types/request'
@@ -32,14 +33,31 @@ const mode = computed(() => svet.mode)
 // ищут карточку, не зная её статуса (как в очереди юротдела).
 const query = ref('')
 
-const items = ref<Agreement[]>([])
-// Регламентные заявки, ждущие моего решения (показываем во вкладке «Требует действия»).
-const requestTodo = ref<RegulatoryRequestListItem[]>([])
-// Договоры, ждущие моего решения (та же вкладка «Требует действия»).
-const contractTodo = ref<ContractListItem[]>([])
-// Заявки на комплименты, ждущие моего решения.
-const complimentTodo = ref<ComplimentListItem[]>([])
-const templates = ref<AgreementTemplate[]>([])
+// Рабочее место визирования показывает ВСЁ, что проходило через меня, а не
+// только свободные согласования: заявки, договоры и комплименты, где я
+// согласующий, попадают в те же вкладки. Свои свободные согласования тоже
+// остаются в списке — жить им больше негде, отдельного раздела у них нет.
+type WorkKind = 'agreement' | 'request' | 'contract' | 'compliment'
+
+interface WorkItem {
+  kind: WorkKind
+  id: number
+  title: string
+  subtitle: string
+  status: string
+  statusDisplay: string
+  badge: string
+  createdAt: string
+  /** Маршрут карточки; у согласований пусто — они раскрываются панелью справа. */
+  to: string
+  tags: string[]
+}
+
+const rawAgreements = ref<Agreement[]>([])
+const rawRequests = ref<RegulatoryRequestListItem[]>([])
+const rawContracts = ref<ContractListItem[]>([])
+const rawCompliments = ref<ComplimentListItem[]>([])
+
 const selected = ref<Agreement | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -47,86 +65,151 @@ const busy = ref(false)
 
 const uid = computed(() => auth.b24UserId)
 
-// Справочник b24_id → ФИО/должность (как в старом миниседе показываем имена).
-// Наполняется из /api/core/users/ и из данных BX24 при выборе сотрудников.
-const userDir = ref<Record<number, { fio: string; position?: string }>>({})
-// домен портала — для сборки полной ссылки на сделку при выборе через коннектор
-const portalDomain = ref('')
-async function loadUserDir() {
-  try {
-    for (const u of await requests.users()) {
-      userDir.value[u.bitrix_id] = { fio: u.fio, position: u.position_name || '' }
-    }
-  } catch { /* не критично */ }
-  try { portalDomain.value = (await bitrix.status()).domain || '' } catch { /* не критично */ }
-}
-function udName(id: number | null | undefined): string {
-  return (id != null && userDir.value[id]?.fio) || (id != null ? `USER #${id}` : '')
-}
-function udPos(id: number | null | undefined): string {
-  return (id != null && userDir.value[id]?.position) || ''
-}
-function udInitials(id: number | null | undefined): string {
-  const known = id != null && userDir.value[id]?.fio
-  if (!known) return 'U#'
-  const parts = known.trim().split(/\s+/).filter(Boolean)
-  const s = parts.length >= 2 ? parts[0][0] + parts[1][0] : known.trim().slice(0, 2)
-  return s.toUpperCase()
-}
-// Дозагрузка ФИО/должности из Битрикса для id, которых нет в справочнике
-// (реальные сотрудники портала, не заведённые в профилях). Вне Битрикса — no-op.
-async function enrichUsers(ids: (number | null | undefined)[]) {
-  const need = [...new Set(ids.filter((x): x is number => x != null && userDir.value[x] === undefined))]
-  if (!need.length) return
-  try {
-    const { results } = await bitrix.usersByIds(need)
-    for (const u of results) {
-      const id = Number(u.ID)
-      if (Number.isNaN(id)) continue
-      const fio = [u.LAST_NAME, u.NAME, u.SECOND_NAME].filter(Boolean).join(' ') || `USER #${id}`
-      userDir.value[id] = { fio, position: u.WORK_POSITION || '' }
-    }
-  } catch { /* вне Битрикса недоступно */ }
-}
+const {
+  userDir, portalDomain, loadUserDir, udName, udPos, udInitials, enrichUsers,
+} = useUserDirectory()
 
-// Статусные вкладки — архив по статусу (в работе / отклонённые / завершённые)
-// по ВСЕМ доступным мне согласованиям: не только созданным мной, но и тем, где
-// я согласующий. Иначе завершённое согласование, где я был участником, не
-// попадало никуда, кроме вкладки «Все».
+// Свободные согласования отбираем по статусу на сервере: иначе на каждой
+// вкладке пришлось бы тянуть весь архив.
 const STATUS_BY_MODE: Partial<Record<Mode, string>> = {
   in_progress: 'in_progress',
   rejected: 'rejected',
   completed: 'completed',
 }
 
-async function fetchByMode(m: Mode): Promise<Agreement[]> {
-  // Поиск идёт по всем доступным согласованиям, независимо от вкладки.
-  if (query.value) return agreements.all(undefined, query.value)
-  if (m === 'todo') return agreements.todo()
-  const statusFilter = STATUS_BY_MODE[m]
-  if (statusFilter) return agreements.all(statusFilter)
-  return agreements.all()
+// Статусные вкладки — архив по статусу. У каждого модуля свои статусы, поэтому
+// раскладку берём ту же, что в его собственном разделе: иначе одна и та же
+// карточка попадала бы в разных местах приложения на разные вкладки.
+const TAB_STATUSES: Record<string, Record<WorkKind, string[]>> = {
+  in_progress: {
+    agreement: ['in_progress'],
+    request: ['on_approval', 'returned'],
+    contract: ['on_approval'],
+    compliment: ['on_approval', 'returned'],
+  },
+  rejected: {
+    agreement: ['rejected'],
+    request: ['rejected'],
+    contract: ['rejected', 'returned'],
+    compliment: ['rejected'],
+  },
+  completed: {
+    agreement: ['completed'],
+    request: ['approved', 'to_legal', 'legal_work', 'signing', 'executed', 'closed'],
+    contract: ['approved'],
+    compliment: ['approved', 'in_work', 'executed'],
+  },
 }
+
+function fmtDate(v: string | null | undefined): string {
+  return v ? new Date(v).toLocaleDateString('ru') : ''
+}
+
+// Имена подставляются здесь, а не при загрузке: справочник сотрудников
+// дозагружается из Битрикса асинхронно, и вычисляемый список сам обновится.
+const items = computed<WorkItem[]>(() => {
+  const merged: WorkItem[] = [
+    ...rawAgreements.value.map((a) => ({
+      kind: 'agreement' as const,
+      id: a.id,
+      title: `#${a.id} ${a.title}`,
+      subtitle: [
+        `Автор: ${udName(a.author_b24_id)}`,
+        fmtDate(a.created_at),
+        a.deadline ? `Дедлайн: ${fmtDate(a.deadline)}` : '',
+      ].filter(Boolean).join(' · '),
+      status: a.status,
+      statusDisplay: AG_STATUS_LABEL[a.status] || a.status,
+      badge: 'Согласование',
+      createdAt: a.created_at,
+      to: '',
+      tags: a.participants.map((p) => (p.type === 'internal' ? udName(p.b24_user_id) : p.email)),
+    })),
+    ...rawRequests.value.map((r) => ({
+      kind: 'request' as const,
+      id: r.id,
+      title: `${r.number} · ${r.type_display}`,
+      subtitle: [r.subject_name || 'Без темы', r.organization_name].filter(Boolean).join(' · '),
+      status: r.status,
+      statusDisplay: r.status_display,
+      badge: 'Заявка',
+      createdAt: r.created_at,
+      to: `/requests/${r.id}`,
+      tags: [],
+    })),
+    ...rawContracts.value.map((c) => ({
+      kind: 'contract' as const,
+      id: c.id,
+      title: `${c.number} · ${c.title}`,
+      subtitle: [c.organization_name, c.cfo_name].filter(Boolean).join(' · '),
+      status: c.status,
+      statusDisplay: c.status_display,
+      badge: 'Договор',
+      createdAt: c.created_at,
+      to: `/contracts/${c.id}`,
+      tags: [],
+    })),
+    ...rawCompliments.value.map((c) => ({
+      kind: 'compliment' as const,
+      id: c.id,
+      title: `${c.number} · ${c.title}`,
+      subtitle: [c.category_display, c.company].filter(Boolean).join(' · '),
+      status: c.status,
+      statusDisplay: c.status_display,
+      badge: 'Комплимент',
+      createdAt: c.created_at,
+      to: `/compliments/${c.id}`,
+      tags: [],
+    })),
+  ]
+  // «Требует действия» и «Все» показывают всё пришедшее; при поиске вкладка
+  // тоже не сужает выборку — статус искомой карточки заранее неизвестен.
+  const byStatus = query.value ? undefined : TAB_STATUSES[mode.value]
+  const list = byStatus
+    ? merged.filter((it) => (byStatus[it.kind] || []).includes(it.status))
+    : merged
+  return [...list].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+})
 
 async function loadList() {
   loading.value = true
   error.value = null
   selected.value = null
+  const q = query.value || undefined
   try {
-    if (mode.value === 'templates') {
-      templates.value = await agreements.templates()
+    if (mode.value === 'todo' && !q) {
+      // «Требует действия» — то, что ждёт именно моего решения, по всем модулям
+      const [ag, rq, ct, cm] = await Promise.all([
+        agreements.todo(),
+        requests.todo().catch(() => []),
+        contracts.todo().catch(() => []),
+        compliments.todo().catch(() => []),
+      ])
+      rawAgreements.value = ag
+      rawRequests.value = rq
+      rawContracts.value = ct
+      rawCompliments.value = cm
     } else {
-      items.value = await fetchByMode(mode.value)
-      // подтянуть имена авторов/участников списка
-      enrichUsers(items.value.flatMap((a) => [a.author_b24_id, ...a.participants.map((p) => p.b24_user_id)]))
-      // заявки и договоры, ждущие моего решения — только во вкладке «Требует
-      // действия» и только без поиска (при поиске в списке одни согласования;
-      // заявки/договоры/комплименты ищут в своих разделах)
-      const todoLists = mode.value === 'todo' && !query.value
-      requestTodo.value = todoLists ? await requests.todo().catch(() => []) : []
-      contractTodo.value = todoLists ? await contracts.todo().catch(() => []) : []
-      complimentTodo.value = todoLists ? await compliments.todo().catch(() => []) : []
+      // Архивные вкладки: всё, где я согласующий, плюс свои свободные
+      // согласования. Статус согласований отбираем на сервере — иначе на каждой
+      // вкладке пришлось бы тянуть весь архив; остальные модули отсеиваем на
+      // клиенте, их объёмы несопоставимо меньше.
+      const agStatus = q ? undefined : STATUS_BY_MODE[mode.value]
+      const [ag, rq, ct, cm] = await Promise.all([
+        agreements.all(agStatus, q),
+        requests.list(undefined, q, 'participant').catch(() => []),
+        contracts.list('participant', q).catch(() => []),
+        compliments.list('participant', q).catch(() => []),
+      ])
+      rawAgreements.value = ag
+      rawRequests.value = rq
+      rawContracts.value = ct
+      rawCompliments.value = cm
     }
+    // подтянуть имена авторов/участников списка
+    enrichUsers(rawAgreements.value.flatMap(
+      (a) => [a.author_b24_id, ...a.participants.map((p) => p.b24_user_id)],
+    ))
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Ошибка загрузки'
   } finally {
@@ -134,9 +217,6 @@ async function loadList() {
   }
 }
 
-function setMode(m: Mode) {
-  svet.mode = m
-}
 // Смена вкладки (в т.ч. из сайдбара) или строки поиска перезагружает список.
 watch([() => svet.mode, query], loadList)
 
@@ -171,8 +251,14 @@ async function open(id: number) {
 }
 
 async function reloadSelected() {
-  if (selected.value) await open(selected.value.id)
-  if (mode.value !== 'templates') items.value = await fetchByMode(mode.value)
+  const id = selected.value?.id
+  if (id) await open(id)
+  // Обновляем только согласования — раскрытую карточку при этом не сбрасываем
+  // (loadList для этого не годится: он снимает выделение).
+  const q = query.value || undefined
+  rawAgreements.value = (mode.value === 'todo' && !q)
+    ? await agreements.todo()
+    : await agreements.all(q ? undefined : STATUS_BY_MODE[mode.value], q)
 }
 
 // --- решения ---
@@ -337,213 +423,12 @@ function downloadSheet() {
 
 const isAuthor = computed(() => selected.value?.author_b24_id === uid.value)
 
-// --- новое согласование (slide-over) ---
-const showForm = ref(false)
-const form = ref({
-  title: '', description: '', amount: '', deadline: '', crm_link: '',
-  flow_type: 'parallel', internal_users: '',
-})
-const formFiles = ref<File[]>([])
-const savingForm = ref(false)
-
-// внешние участники — чипами (как в старой форме)
-const externalList = ref<string[]>([])
-const externalInput = ref('')
-function addExternal() {
-  const e = externalInput.value.trim()
-  if (e && !externalList.value.includes(e)) externalList.value.push(e)
-  externalInput.value = ''
-}
-function removeExternal(i: number) { externalList.value.splice(i, 1) }
-
-// Внутренние участники формы как чипы (id → аватар+ФИО, как в старом миниседе)
-const internalChips = computed(() =>
-  form.value.internal_users
-    .split(',').map((s) => s.trim()).filter(Boolean)
-    .map(Number).filter((n) => !Number.isNaN(n)),
-)
-function removeInternal(id: number) {
-  form.value.internal_users = internalChips.value.filter((x) => x !== id).join(', ')
-}
-
-// шаблоны маршрута
-const formTemplates = ref<AgreementTemplate[]>([])
-const selectedTemplate = ref<number | ''>('')
-const templateName = ref('')
-const templateScope = ref('private')
-const savingTemplate = ref(false)
-
-async function loadFormTemplates() {
-  try { formTemplates.value = await agreements.templates() } catch { /* не критично */ }
-}
-function applyTemplate() {
-  const t = formTemplates.value.find((x) => x.id === selectedTemplate.value)
-  if (!t) return
-  form.value.internal_users = t.participants
-    .filter((p) => p.type === 'internal' && p.b24_user_id)
-    .map((p) => p.b24_user_id).join(', ')
-  externalList.value = t.participants.filter((p) => p.type === 'external').map((p) => p.email)
-}
-function buildParticipants() {
-  const parts: { type: string; b24_user_id: number | null; email: string; name: string; order_index: number }[] = []
-  let idx = 0
-  form.value.internal_users.split(',').map((s) => s.trim()).filter(Boolean).forEach((s) => {
-    const id = parseInt(s, 10)
-    if (!Number.isNaN(id)) parts.push({ type: 'internal', b24_user_id: id, email: '', name: '', order_index: idx++ })
-  })
-  externalList.value.forEach((email) => parts.push({ type: 'external', b24_user_id: null, email, name: '', order_index: idx++ }))
-  return parts
-}
-async function saveTemplate() {
-  const parts = buildParticipants()
-  if (!templateName.value.trim() || !parts.length) {
-    error.value = 'Укажите название шаблона и хотя бы одного участника.'
-    return
-  }
-  savingTemplate.value = true
-  error.value = null
-  try {
-    await agreements.createTemplate({ name: templateName.value.trim(), scope: templateScope.value, participants: parts })
-    templateName.value = ''
-    await loadFormTemplates()
-  } catch (e) {
-    error.value = e instanceof ApiError ? e.message : 'Не удалось сохранить шаблон'
-  } finally {
-    savingTemplate.value = false
-  }
-}
-
-// Нативные виджеты Битрикс24 (работают внутри iframe портала).
-interface BX24User { id: string | number; name?: string; position?: string }
-interface BX24CrmItem { id: string | number; title?: string; url?: string }
-interface BX24SDK {
-  init(cb: () => void): void
-  getAuth(): { domain?: string } | false
-  selectUsers?(cb: (users: BX24User[]) => void): void
-  selectCRM?(
-    params: { entityType?: string[]; multiple?: boolean },
-    cb: (res: Record<string, BX24CrmItem[]>) => void,
-  ): void
-}
-function bx24(): BX24SDK | undefined {
-  return (window as unknown as { BX24?: BX24SDK }).BX24
-}
-
-
-// Слить выбранные id с уже введёнными (строка «1, 2, 3») без дублей.
-function mergeIds(current: string, picked: number[]): string {
-  const existing = current.split(',').map((s) => s.trim()).filter(Boolean).map(Number)
-  return Array.from(new Set([...existing, ...picked])).join(', ')
-}
-
-// Модалка поиска через серверный коннектор (для выбора вне iframe портала).
-const pickerKind = ref<'users' | 'deals' | null>(null)
-const pickApply = ref<(ids: number[]) => void>(() => {})
-
-// Выбор сотрудников: внутри портала — нативный диалог BX24; вне — коннектор.
-// apply получает выбранные id; заодно запоминаем ФИО/должность в справочник.
-function pickUsersInto(apply: (ids: number[]) => void) {
-  const BX24 = bx24()
-  if (BX24 && BX24.selectUsers) {
-    BX24.init(() => {
-      BX24.selectUsers!((users) => {
-        const ids: number[] = []
-        for (const u of users) {
-          const id = Number(u.id)
-          if (Number.isNaN(id)) continue
-          ids.push(id)
-          userDir.value[id] = { fio: u.name || `USER #${id}`, position: u.position || '' }
-        }
-        apply(ids)
-      })
-    })
-    return
-  }
-  pickApply.value = apply
-  pickerKind.value = 'users'
-}
-function pickBitrixUsers() {
-  pickUsersInto((ids) => { form.value.internal_users = mergeIds(form.value.internal_users, ids) })
-}
+// Выбор сотрудников Битрикса — только для правки маршрута в карточке.
+// Форма нового согласования вместе со своим выбором людей и сделок уехала
+// в раздел «Иное» (создание — не визирование).
+const { pickerKind, pickUsers, onPickUser, onPickDeal } = useBitrixPicker(userDir, portalDomain)
 function pickRouteUsers() {
-  pickUsersInto((ids) => { routeInternal.value = mergeIds(routeInternal.value, ids) })
-}
-
-// Выбор из модалки коннектора
-function onPickUser(u: BitrixUser) {
-  const id = Number(u.ID)
-  if (Number.isNaN(id)) return
-  userDir.value[id] = {
-    fio: [u.LAST_NAME, u.NAME, u.SECOND_NAME].filter(Boolean).join(' ') || `USER #${id}`,
-    position: u.WORK_POSITION || '',
-  }
-  pickApply.value([id])
-}
-function onPickDeal(d: BitrixDeal) {
-  const dom = portalDomain.value
-  form.value.crm_link = dom ? `https://${dom}/crm/deal/details/${d.ID}/` : String(d.ID)
-  pickerKind.value = null
-}
-
-// Выбор сделки: внутри портала — нативный диалог CRM; вне — коннектор.
-function pickBitrixDeal() {
-  const BX24 = bx24()
-  if (!BX24 || !BX24.selectCRM) { pickerKind.value = 'deals'; return }
-  BX24.init(() => {
-    BX24.selectCRM!({ entityType: ['deal'], multiple: false }, (res) => {
-      const deal = res?.deal?.[0]
-      if (!deal) return
-      const auth = BX24.getAuth()
-      const domain = (auth && auth.domain) || ''
-      // deal.url приходит относительным (/crm/deal/show/ID/) — дополняем доменом
-      // портала до полной ссылки, как в старом миниседе.
-      let link = deal.url || (domain ? `/crm/deal/show/${deal.id}/` : String(deal.id))
-      if (link.startsWith('/') && domain) link = `https://${domain}${link}`
-      form.value.crm_link = link
-    })
-  })
-}
-
-function openForm() {
-  showForm.value = true
-  loadFormTemplates()
-}
-function onFormFiles(e: Event) {
-  const input = e.target as HTMLInputElement
-  const picked = Array.from(input.files || [])
-  // добавляем к уже выбранным (можно по одному, в несколько заходов), без дублей
-  for (const f of picked) {
-    if (!formFiles.value.some((x) => x.name === f.name && x.size === f.size)) {
-      formFiles.value.push(f)
-    }
-  }
-  input.value = '' // сброс, чтобы можно было выбрать тот же файл снова
-}
-function removeFormFile(i: number) {
-  formFiles.value.splice(i, 1)
-}
-async function createApproval() {
-  if (!form.value.title.trim()) { error.value = 'Укажите название'; return }
-  savingForm.value = true
-  error.value = null
-  try {
-    const created = await agreements.create({
-      ...form.value,
-      external_emails: externalList.value.join(','),
-      files: formFiles.value,
-    })
-    showForm.value = false
-    form.value = { title: '', description: '', amount: '', deadline: '', crm_link: '', flow_type: 'parallel', internal_users: '' }
-    externalList.value = []
-    formFiles.value = []
-    selectedTemplate.value = ''
-    setMode('in_progress')
-    await open(created.id)
-  } catch (e) {
-    error.value = e instanceof ApiError ? e.message : 'Не удалось создать'
-  } finally {
-    savingForm.value = false
-  }
+  pickUsers((ids) => { routeInternal.value = mergeIds(routeInternal.value, ids) })
 }
 
 function partLabel(p: AgParticipant): string {
@@ -578,11 +463,6 @@ onMounted(async () => {
 
 <template>
   <div class="svet">
-    <!-- Основная кнопка — в фиксированной шапке приложения -->
-    <Teleport to="#header-actions">
-      <button class="btn btn--primary" @click="openForm">+ Новое согласование</button>
-    </Teleport>
-
     <!-- Поиск сотрудников/сделок через коннектор (вне iframe портала) -->
     <BitrixSearchModal
       v-if="pickerKind"
@@ -605,75 +485,46 @@ onMounted(async () => {
       <!-- Список -->
       <div class="svet-list">
         <SearchBox
-          v-if="mode !== 'templates'" v-model="query"
-          placeholder="Поиск: название, автор, сделка, имя файла"
+          v-model="query"
+          placeholder="Поиск: название, номер, автор, сделка, имя файла"
         />
         <p v-if="query && !loading" class="state" style="margin-bottom:8px">
-          Поиск идёт по всем доступным согласованиям, независимо от вкладки. Найдено: {{ items.length }}.
+          Поиск идёт по всему, что мне доступно, независимо от вкладки. Найдено: {{ items.length }}.
         </p>
 
         <p v-if="loading" class="state">Загрузка…</p>
 
-        <template v-else-if="mode === 'templates'">
-          <p v-if="templates.length === 0" class="state">Шаблонов пока нет.</p>
-          <div v-for="t in templates" :key="t.id" class="svet-card">
-            <div class="svet-card-title">{{ t.name }}</div>
-            <div class="item-sub">{{ t.participants.length }} участник(ов)</div>
-          </div>
-        </template>
-
         <template v-else>
-          <!-- Заявки, ждущие моего решения (вкладка «Требует действия») -->
-          <RouterLink
-            v-for="r in (mode === 'todo' ? requestTodo : [])" :key="'req' + r.id"
-            :to="`/requests/${r.id}`" class="svet-card svet-card--req">
-            <div class="svet-card-row">
-              <span class="svet-card-title">{{ r.number }} · {{ r.type_display }}</span>
-              <span class="req-badge">Заявка</span>
-            </div>
-            <div class="item-sub">{{ r.subject_name || 'Без темы' }} · {{ r.status_display }}</div>
-          </RouterLink>
+          <p v-if="items.length === 0" class="state">
+            {{ query ? 'Ничего не найдено.' : 'Пусто.' }}
+          </p>
 
-          <!-- Договоры, ждущие моего решения -->
-          <RouterLink
-            v-for="c in (mode === 'todo' ? contractTodo : [])" :key="'con' + c.id"
-            :to="`/contracts/${c.id}`" class="svet-card svet-card--req">
-            <div class="svet-card-row">
-              <span class="svet-card-title">{{ c.number }} · {{ c.title }}</span>
-              <span class="req-badge">Договор</span>
-            </div>
-            <div class="item-sub">{{ c.organization_name }} · {{ c.status_display }}</div>
-          </RouterLink>
+          <!-- Карточки всех модулей в одном списке. Свободное согласование
+               раскрывается панелью справа, остальное — своей страницей. -->
+          <template v-for="it in items" :key="it.kind + it.id">
+            <RouterLink v-if="it.to" :to="it.to" class="svet-card svet-card--req">
+              <div class="svet-card-row">
+                <span class="svet-card-title">{{ it.title }}</span>
+                <span class="req-badge">{{ it.badge }}</span>
+              </div>
+              <div class="item-sub">{{ it.subtitle }} · {{ it.statusDisplay }}</div>
+            </RouterLink>
 
-          <!-- Заявки на комплименты, ждущие моего решения -->
-          <RouterLink
-            v-for="c in (mode === 'todo' ? complimentTodo : [])" :key="'cmp' + c.id"
-            :to="`/compliments/${c.id}`" class="svet-card svet-card--req">
-            <div class="svet-card-row">
-              <span class="svet-card-title">{{ c.number }} · {{ c.title }}</span>
-              <span class="req-badge">Комплимент</span>
+            <div
+              v-else class="svet-card"
+              :class="{ active: selected?.id === it.id }"
+              @click="open(it.id)"
+            >
+              <div class="svet-card-row">
+                <span class="svet-card-title">{{ it.title }}</span>
+                <span class="status-pill" :class="it.status">{{ it.statusDisplay }}</span>
+              </div>
+              <div class="item-sub">{{ it.subtitle }}</div>
+              <div v-if="it.tags.length" class="item-tags">
+                <span v-for="(t, i) in it.tags" :key="i" class="tag-chip">{{ t }}</span>
+              </div>
             </div>
-            <div class="item-sub">{{ c.category_display }} · {{ c.company }}</div>
-          </RouterLink>
-
-          <p
-            v-if="items.length === 0 && !(mode === 'todo' && (requestTodo.length || contractTodo.length || complimentTodo.length))"
-            class="state"
-          >{{ query ? 'Ничего не найдено.' : 'Пусто.' }}</p>
-          <div v-for="a in items" :key="a.id" class="svet-card" :class="{ active: selected?.id === a.id }" @click="open(a.id)">
-            <div class="svet-card-row">
-              <span class="svet-card-title">#{{ a.id }} {{ a.title }}</span>
-              <span class="status-pill" :class="a.status">{{ AG_STATUS_LABEL[a.status] }}</span>
-            </div>
-            <div class="item-sub">Автор: {{ udName(a.author_b24_id) }} · {{ new Date(a.created_at).toLocaleDateString('ru') }}
-              <template v-if="a.deadline"> · Дедлайн: {{ new Date(a.deadline).toLocaleDateString('ru') }}</template>
-            </div>
-            <div class="item-tags">
-              <span v-for="p in a.participants" :key="p.id" class="tag-chip">
-                {{ p.type === 'internal' ? udName(p.b24_user_id) : p.email }}
-              </span>
-            </div>
-          </div>
+          </template>
         </template>
       </div>
 
@@ -898,121 +749,6 @@ onMounted(async () => {
       </div>
     </div>
 
-    <!-- Slide-over: новое согласование -->
-    <div v-if="showForm" class="slideover-back" @click.self="showForm = false">
-      <aside class="slideover">
-        <div class="slideover-head">
-          <b>Новое согласование</b>
-          <button class="link-btn" @click="showForm = false">Закрыть</button>
-        </div>
-        <div class="slideover-body">
-          <div class="fr">
-            <label class="fr-label fr-req">Название</label>
-            <input class="fr-input" v-model="form.title" />
-          </div>
-
-          <div class="fr">
-            <label class="fr-label">Описание</label>
-            <textarea class="fr-input" v-model="form.description" rows="3"></textarea>
-          </div>
-
-          <div class="fr">
-            <label class="fr-label">Тип согласования</label>
-            <label class="fr-radio"><input type="radio" value="parallel" v-model="form.flow_type" /> Параллельное (все могут голосовать сразу)</label>
-            <label class="fr-radio"><input type="radio" value="sequential" v-model="form.flow_type" /> Последовательное (по очереди, в порядке добавления)</label>
-          </div>
-
-          <div class="fr">
-            <label class="fr-label">Сумма</label>
-            <input class="fr-input" v-model="form.amount" type="number" />
-          </div>
-
-          <div class="fr">
-            <label class="fr-label">Дедлайн</label>
-            <input class="fr-input" v-model="form.deadline" type="date" />
-            <div class="fr-hint">Необязательное поле, используется для напоминаний.</div>
-          </div>
-
-          <div class="fr">
-            <label class="fr-label">Привязка к CRM</label>
-            <div class="fr-inline">
-              <input class="fr-input" v-model="form.crm_link" placeholder="Вставьте ссылку или выберите" />
-              <button type="button" class="ag-btn ag-btn--blue" @click="pickBitrixDeal">Выбрать из CRM</button>
-            </div>
-            <div class="fr-hint">Можно вставить ссылку на сделку/счёт/контакт вручную или выбрать элемент CRM через диалог Битрикс24.</div>
-          </div>
-
-          <div class="fr">
-            <label class="fr-label">Участники из Б24</label>
-            <div class="fr-inline">
-              <input class="fr-input" v-model="form.internal_users" placeholder="Например: 1, 25, 37" />
-              <button type="button" class="ag-btn ag-btn--blue" @click="pickBitrixUsers">+ Выбрать в Б24</button>
-            </div>
-            <div v-if="internalChips.length" class="chips" style="margin-top:8px">
-              <span v-for="id in internalChips" :key="id" class="chip chip--user">
-                <span class="chip-ava">{{ udInitials(id) }}</span>
-                {{ udName(id) }}
-                <button type="button" class="chip-x" @click="removeInternal(id)">×</button>
-              </span>
-            </div>
-            <div class="fr-hint">Можно указать через запятую или выбрать через диалог Bitrix24.</div>
-          </div>
-
-          <div class="fr">
-            <label class="fr-label">Внешние участники (email)</label>
-            <div class="fr-inline">
-              <input class="fr-input" v-model="externalInput" type="email" placeholder="email@example.com" @keyup.enter="addExternal" />
-              <button type="button" class="ag-btn ag-btn--soft" @click="addExternal">+ Добавить</button>
-            </div>
-            <div v-if="externalList.length" class="chips">
-              <span v-for="(em, i) in externalList" :key="i" class="chip chip--ext">
-                {{ em }} <button type="button" class="chip-x" @click="removeExternal(i)">×</button>
-              </span>
-            </div>
-            <div class="fr-hint">На указанные адреса будет отправлена ссылка для согласования.</div>
-          </div>
-
-          <div class="fr">
-            <label class="fr-label">Шаблон согласования</label>
-            <div class="fr-inline">
-              <select class="fr-input" v-model="selectedTemplate" @change="applyTemplate">
-                <option value="">— Не использовать шаблон —</option>
-                <option v-for="t in formTemplates" :key="t.id" :value="t.id">{{ t.name }}</option>
-              </select>
-              <button type="button" class="ag-btn ag-btn--soft" @click="loadFormTemplates">Обновить</button>
-            </div>
-            <div class="fr-inline" style="margin-top:8px">
-              <input class="fr-input" v-model="templateName" placeholder="Название шаблона" />
-              <select class="fr-input" style="max-width:130px" v-model="templateScope">
-                <option value="private">Только мне</option>
-                <option value="public">Всем</option>
-              </select>
-            </div>
-            <button type="button" class="ag-btn ag-btn--green" style="margin-top:8px" :disabled="savingTemplate" @click="saveTemplate">
-              {{ savingTemplate ? 'Сохранение…' : 'Сохранить как шаблон' }}
-            </button>
-            <div class="fr-hint">Шаблон сохраняет только маршрут (список участников). Название и описание согласования вы задаёте отдельно при создании.</div>
-          </div>
-
-          <div class="fr">
-            <label class="fr-label">Файлы</label>
-            <input type="file" multiple @change="onFormFiles" />
-            <ul v-if="formFiles.length" class="file-list">
-              <li v-for="(f, i) in formFiles" :key="i" class="file-row">
-                <span class="file-name">{{ f.name }}</span>
-                <button type="button" class="chip-x" title="Убрать" @click="removeFormFile(i)">×</button>
-              </li>
-            </ul>
-            <div class="fr-hint">Можно добавлять по одному в несколько заходов; лишние — убрать до отправки.</div>
-          </div>
-        </div>
-        <div class="slideover-foot">
-          <button class="btn btn--primary" :disabled="savingForm" @click="createApproval">
-            {{ savingForm ? 'Создание…' : 'Создать и отправить' }}
-          </button>
-        </div>
-      </aside>
-    </div>
   </div>
 </template>
 
@@ -1090,31 +826,8 @@ onMounted(async () => {
 .ag-btn--blue { background: #2f6fd6; color: #fff; border-color: #2f6fd6; white-space: nowrap; }
 
 /* --- Форма создания (порт из старого app.html) --- */
-.fr { margin-bottom: 18px; }
-.fr-label { display: block; font-size: 12px; font-weight: 500; margin-bottom: 4px; }
-.fr-req::after { content: " *"; color: var(--red-main); }
-.fr-input { width: 100%; box-sizing: border-box; padding: 8px 11px; border-radius: 4px; border: 1px solid #d0d0d0; font: inherit; font-size: 14px; }
 textarea.fr-input { resize: vertical; min-height: 60px; }
-.fr-hint { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
-.fr-radio { display: block; font-size: 13px; margin: 4px 0; }
-.fr-inline { display: flex; gap: 8px; align-items: center; }
-.fr-inline .fr-input { flex: 1; min-width: 0; }
-.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-.chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 999px; background: #f1f3f4; font-size: 12px; }
-.chip--ext { background: #fff3e0; }
-.file-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.file-row { display: flex; align-items: center; gap: 8px; background: #f5f6f8; border-radius: 6px; padding: 5px 8px; font-size: 12.5px; }
-.file-name { flex: 1; overflow-wrap: anywhere; }
-.chip--user { background: var(--green-light); color: #0a6e52; padding-left: 3px; }
-.chip-ava { width: 20px; height: 20px; border-radius: 999px; background: #fff; color: var(--green-main); font-size: 10px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; flex: none; }
-.chip-x { border: none; background: transparent; cursor: pointer; font-size: 14px; line-height: 1; color: var(--text-muted); padding: 0; }
 
-.slideover-back { position: fixed; inset: 0; background: rgba(0,0,0,0.25); display: flex; justify-content: flex-end; z-index: 50; }
-.slideover { width: 420px; max-width: 92vw; background: #fff; height: 100%; display: flex; flex-direction: column; box-shadow: -2px 0 12px rgba(0,0,0,0.12); }
-.slideover-head { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--gray-border); }
-.slideover-body { flex: 1; overflow-y: auto; padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; }
-.slideover-foot { padding: 14px 18px; border-top: 1px solid var(--gray-border); }
-.slideover-body textarea { padding: 8px 11px; font: inherit; border: 1px solid var(--gray-border); border-radius: 6px; resize: vertical; }
 .link-btn { background: none; border: none; color: var(--green-main); cursor: pointer; font: inherit; }
 
 @media (max-width: 900px) {

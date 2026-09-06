@@ -787,3 +787,60 @@ class MchdIdentifiersGrandfatheringTests(TestCase):
             "subject_name": "Петров", "data": {"rep": {}},
         }, format="json")
         self.assertEqual(r.status_code, 400, r.content)
+
+
+class RequestScopeTests(TestCase):
+    """?scope=participant — заявки, где я согласующий: этим живёт рабочее
+    место визирования (раздел показывает всё, что проходило через меня)."""
+
+    def setUp(self):
+        self.org = Organization.objects.create(short_name="УК Норд")
+
+    def _submitted(self, initiator, approver):
+        req = services.create_request(
+            request_type=C.TYPE_POA, organization=self.org,
+            initiator_b24_id=initiator, subject_name="Петров",
+        )
+        services.submit(req, [internal(approver, 0, C.ROLE_CFO_HEAD)])
+        return req
+
+    def _ids(self, uid, scope):
+        r = api(uid).get(f"/api/reg/requests/?scope={scope}")
+        self.assertEqual(r.status_code, 200, r.content)
+        return {x["id"] for x in r.json()}
+
+    def test_participant_sees_foreign_request(self):
+        req = self._submitted(initiator=1, approver=20)
+        self.assertEqual(self._ids(20, "participant"), {req.id})
+        # в своём разделе «Регламентные заявки» её быть не должно — она чужая
+        self.assertEqual(self._ids(20, "mine"), set())
+
+    def test_initiator_not_listed_as_participant(self):
+        self._submitted(initiator=1, approver=20)
+        self.assertEqual(self._ids(1, "participant"), set())
+
+    def test_scope_all_is_union(self):
+        foreign = self._submitted(initiator=1, approver=20)
+        own = self._submitted(initiator=20, approver=30)
+        self.assertEqual(self._ids(20, "all"), {foreign.id, own.id})
+
+    def test_default_scope_unchanged(self):
+        """Без scope раздел «Регламентные заявки» по-прежнему показывает свои."""
+        self._submitted(initiator=1, approver=20)
+        own = self._submitted(initiator=20, approver=30)
+        r = api(20).get("/api/reg/requests/")
+        self.assertEqual({x["id"] for x in r.json()}, {own.id})
+
+    def test_lawyer_sees_group_legal_stage(self):
+        """Групповой юр-этап засчитывается всему юротделу, а не одному юристу."""
+        lawyer = UserProfile.objects.create(fio="Юрист", bitrix_id=31, is_active=True)
+        lawyer.roles.add(Role.objects.get(code="lawyer"))
+        req = services.create_request(
+            request_type=C.TYPE_POA, organization=self.org,
+            initiator_b24_id=1, subject_name="Петров",
+        )
+        services.submit(req, [{
+            "type": "internal", "b24_user_id": None, "order": 0,
+            "role": C.ROLE_LEGAL_DEPT,
+        }])
+        self.assertEqual(self._ids(31, "participant"), {req.id})

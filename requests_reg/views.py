@@ -5,6 +5,8 @@ API регламентных заявок: согласование (через 
 
 import requests as http
 from django.conf import settings
+from django.contrib.contenttypes.models import ContentType
+from django.db.models import Q
 from django.http import FileResponse
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
@@ -129,12 +131,41 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
             return RegulatoryRequestListSerializer
         return RegulatoryRequestDetailSerializer
 
+    def _participant_request_ids(self):
+        """ID заявок, где я согласующий (в любом круге).
+
+        Юристу засчитываем весь групповой юр-этап — и ещё не согласованный
+        (b24_user_id пуст), и закрытый другим юристом (после решения туда
+        проставляется id решавшего). Иначе заявка, согласованная коллегой,
+        пропадала бы из рабочего места визирования остальных юристов."""
+        ct = ContentType.objects.get_for_model(RegulatoryRequest)
+        cond = Q(b24_user_id=self.b24_id)
+        if is_lawyer(self.b24_id):
+            cond |= Q(role=constants.ROLE_LEGAL_DEPT)
+        return (
+            ApprovalParticipant.objects
+            .filter(Q(round__approval__content_type=ct) & cond)
+            .values_list("round__approval__object_id", flat=True)
+            .distinct()
+        )
+
     def get_queryset(self):
         qs = RegulatoryRequest.objects.select_related("organization")
         # Раздел «Регламентные заявки» = только СВОИ (созданные мной);
-        # сотрудник с правом сквозного просмотра видит все.
-        if self.action == "list" and not can_view_all(self.b24_id):
-            qs = qs.filter(initiator_b24_id=self.b24_id)
+        # ?scope=participant — где я согласующий (рабочее место визирования),
+        # ?scope=all — и то, и другое. Сотрудник с правом сквозного просмотра
+        # видит все заявки.
+        if self.action == "list":
+            scope = self.request.query_params.get("scope") or "mine"
+            mine = Q(initiator_b24_id=self.b24_id)
+            participant = Q(id__in=self._participant_request_ids())
+            if scope == "participant":
+                qs = qs.filter(participant)
+            elif scope == "all":
+                if not can_view_all(self.b24_id):
+                    qs = qs.filter(mine | participant)
+            elif not can_view_all(self.b24_id):
+                qs = qs.filter(mine)
         rtype = self.request.query_params.get("type")
         if rtype:
             qs = qs.filter(request_type=rtype)

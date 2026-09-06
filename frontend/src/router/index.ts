@@ -14,7 +14,7 @@ const router = createRouter({
       path: '/svetofor',
       name: 'svetofor',
       component: () => import('@/views/SvetoforView.vue'),
-      meta: { title: 'Согласования', wide: true },
+      meta: { title: 'Рабочее место визирования', wide: true },
     },
     {
       path: '/tasks',
@@ -110,6 +110,12 @@ const router = createRouter({
       name: 'legal',
       component: () => import('@/views/LegalQueueView.vue'),
       meta: { title: 'Работа юристов', lawyerOnly: true },
+    },
+    {
+      path: '/other',
+      name: 'other',
+      component: () => import('@/views/OtherView.vue'),
+      meta: { title: 'Иное' },
     },
     {
       path: '/deals',

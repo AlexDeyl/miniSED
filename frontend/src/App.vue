@@ -7,6 +7,7 @@ import { useRequestsUiStore, REQUEST_TYPE_TABS } from '@/stores/requestsUi'
 import { useLegalUiStore, LEGAL_TABS } from '@/stores/legalUi'
 import { useContractsUiStore, CONTRACT_TABS } from '@/stores/contractsUi'
 import { useComplimentsUiStore, COMPLIMENT_TABS, EXECUTION_TABS } from '@/stores/complimentsUi'
+import { useOtherUiStore, OTHER_TABS } from '@/stores/otherUi'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -16,6 +17,7 @@ const reqUi = useRequestsUiStore()
 const legalUi = useLegalUiStore()
 const contractsUi = useContractsUiStore()
 const complimentsUi = useComplimentsUiStore()
+const otherUi = useOtherUiStore()
 
 const pageTitle = computed(() => (route.meta.title as string) || 'Минин-СЭД')
 const bare = computed(() => route.meta.noShell === true)
@@ -26,6 +28,7 @@ const onLegal = computed(() => route.name === 'legal')
 const onContracts = computed(() => route.name === 'contracts')
 const onCompliments = computed(() => route.name === 'compliments')
 const onExecution = computed(() => route.name === 'execution')
+const onOther = computed(() => route.name === 'other')
 // Открыто из Битрикса (в iframe) — тогда «Выйти» не нужен (авто-вход портала).
 const inBitrix = window.self !== window.top
 
@@ -55,10 +58,10 @@ function tabBadge(code: string): number {
       </div>
       <nav class="sidebar-nav">
         <RouterLink to="/svetofor">
-          <span>Согласования</span>
+          <span>Рабочее место визирования</span>
           <span v-if="svet.todoCount" class="nav-badge" title="Требует действия">{{ svet.todoCount }}</span>
         </RouterLink>
-        <!-- под-вкладки согласований — вложенно под своим пунктом -->
+        <!-- под-вкладки визирования — вложенно под своим пунктом -->
         <div v-if="onSvetofor" class="sidebar-subtabs">
           <button
             v-for="t in SVETOFOR_TABS" :key="t.code"
@@ -124,6 +127,17 @@ function tabBadge(code: string): number {
         </div>
 
         <RouterLink to="/deals"><span>Поиск сделок</span></RouterLink>
+
+        <!-- «Иное» — то, что не относится к визированию: создание свободного
+             согласования и шаблоны маршрутов для него -->
+        <RouterLink to="/other"><span>Иное</span></RouterLink>
+        <div v-if="onOther" class="sidebar-subtabs">
+          <button
+            v-for="t in OTHER_TABS" :key="t.code"
+            class="sidebar-subtab" :class="{ active: otherUi.mode === t.code }"
+            @click="otherUi.mode = t.code"
+          >{{ t.label }}</button>
+        </div>
       </nav>
 
       <!-- Текущий пользователь -->
