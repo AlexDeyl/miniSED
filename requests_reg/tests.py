@@ -3,6 +3,7 @@
 исполнение юротделом, ручной выбор согласующего, API.
 """
 
+from datetime import date, datetime, timedelta
 from unittest import mock
 from unittest import skipUnless
 
@@ -734,3 +735,55 @@ class MchdIdentifiersTests(TestCase):
         services.submit(req, [internal(10, 0, C.ROLE_CFO_HEAD)])
         req.refresh_from_db()
         self.assertEqual(req.status, C.STATUS_ON_APPROVAL)
+
+
+class MchdIdentifiersGrandfatheringTests(TestCase):
+    """Заявки, поданные до введения требования, правило не задевает.
+
+    Анкету поданной заявки в интерфейсе не отредактировать: примени правило
+    задним числом — и такую заявку нельзя было бы ни отправить, ни исправить."""
+
+    VALID = {"inn": "500100732259", "snils": "112-233-445 95"}
+
+    def setUp(self):
+        self.org = Organization.objects.create(short_name="УК Норд")
+
+    def _mchd(self, created: date, data=None):
+        req = services.create_request(
+            request_type=C.TYPE_MCHD, organization=self.org, initiator_b24_id=1,
+            data=data or {},
+        )
+        # created_at — auto_now_add, поэтому переставляем датой напрямую
+        moment = timezone.make_aware(datetime(created.year, created.month, created.day, 12, 0))
+        RegulatoryRequest.objects.filter(id=req.id).update(created_at=moment)
+        req.refresh_from_db()
+        return req
+
+    def test_old_request_submits_without_identifiers(self):
+        cutoff = C.MCHD_IDENTIFIERS_REQUIRED_FROM
+        req = self._mchd(cutoff - timedelta(days=1))
+        services.submit(req, [internal(10, 0, C.ROLE_CFO_HEAD)])
+        req.refresh_from_db()
+        self.assertEqual(req.status, C.STATUS_ON_APPROVAL)
+
+    def test_request_from_cutoff_day_requires_identifiers(self):
+        """В сам день введения правило уже действует."""
+        req = self._mchd(C.MCHD_IDENTIFIERS_REQUIRED_FROM)
+        with self.assertRaises(services.RequestError):
+            services.submit(req, [internal(10, 0, C.ROLE_CFO_HEAD)])
+
+    def test_old_request_can_be_patched_without_identifiers(self):
+        """Старую заявку можно править, не заполняя ИНН/СНИЛС."""
+        req = self._mchd(C.MCHD_IDENTIFIERS_REQUIRED_FROM - timedelta(days=5),
+                         data={"rep": {"last_name": "Петров"}})
+        r = api(1).patch(f"/api/reg/requests/{req.id}/",
+                         {"data": {"rep": {"last_name": "Петров-Водкин"}}}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+
+    def test_new_request_still_requires_identifiers(self):
+        """Новые заявки создаются уже по новому правилу."""
+        r = api(1).post("/api/reg/requests/", {
+            "request_type": "mchd", "organization": self.org.id,
+            "subject_name": "Петров", "data": {"rep": {}},
+        }, format="json")
+        self.assertEqual(r.status_code, 400, r.content)

@@ -80,7 +80,12 @@ class RegulatoryRequestWriteSerializer(serializers.ModelSerializer):
         # доверенность не примет. Проверяем, только когда анкету присылают:
         # PATCH одного поля (например комментария) не должен спотыкаться.
         rtype = attrs.get("request_type") or getattr(self.instance, "request_type", None)
-        if rtype == constants.TYPE_MCHD and isinstance(data, dict):
+        created_at = getattr(self.instance, "created_at", None)
+        if (
+            rtype == constants.TYPE_MCHD
+            and isinstance(data, dict)
+            and validators.identifiers_required(created_at)
+        ):
             err = validators.mchd_rep_error(data)
             if err:
                 raise serializers.ValidationError({"detail": err})

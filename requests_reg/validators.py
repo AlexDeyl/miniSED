@@ -13,6 +13,10 @@
 
 from __future__ import annotations
 
+from django.utils import timezone
+
+from . import constants
+
 # Веса контрольных разрядов ИНН физлица (12 цифр), по приказу ФНС.
 _INN12_W11 = (7, 2, 4, 10, 3, 5, 9, 4, 6, 8)
 _INN12_W12 = (3, 7, 2, 4, 10, 3, 5, 9, 4, 6, 8)
@@ -62,6 +66,20 @@ def format_snils(value: str | None) -> str:
     if len(d) != 11:
         return (value or "").strip()
     return f"{d[0:3]}-{d[3:6]}-{d[6:9]} {d[9:]}"
+
+
+def identifiers_required(created_at=None) -> bool:
+    """Подпадает ли заявка под требование ИНН/СНИЛС.
+
+    Требование ввели, когда часть заявок уже была подана, а редактировать
+    анкету поданной заявки в интерфейсе нельзя: примени правило задним числом —
+    и такую заявку станет невозможно ни отправить, ни исправить, только
+    пересоздать. Поэтому смотрим на дату создания; None (заявки ещё нет) —
+    это новая заявка, к ней правило применяется.
+    """
+    if created_at is None:
+        return True
+    return timezone.localtime(created_at).date() >= constants.MCHD_IDENTIFIERS_REQUIRED_FROM
 
 
 def mchd_rep_error(data) -> str | None:
