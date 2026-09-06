@@ -196,7 +196,7 @@ async function loadList() {
       // клиенте, их объёмы несопоставимо меньше.
       const agStatus = q ? undefined : STATUS_BY_MODE[mode.value]
       const [ag, rq, ct, cm] = await Promise.all([
-        agreements.all(agStatus, q),
+        agreements.all(agStatus, q, 'participant'),
         requests.list(undefined, q, 'participant').catch(() => []),
         contracts.list('participant', q).catch(() => []),
         compliments.list('participant', q).catch(() => []),
@@ -258,7 +258,7 @@ async function reloadSelected() {
   const q = query.value || undefined
   rawAgreements.value = (mode.value === 'todo' && !q)
     ? await agreements.todo()
-    : await agreements.all(q ? undefined : STATUS_BY_MODE[mode.value], q)
+    : await agreements.all(q ? undefined : STATUS_BY_MODE[mode.value], q, 'participant')
 }
 
 // --- решения ---

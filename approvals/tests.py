@@ -764,3 +764,30 @@ class SearchTests(TestCase):
         """Поиск не расширяет видимость: чужое согласование не находится."""
         Agreement.objects.create(title="Чужая смета", author_b24_id=OUTSIDER)
         self.assertEqual(self._found("смета"), set())
+
+
+class PersonalScopeTests(TestCase):
+    """?scope=participant — рабочее место визирования показывает только своё.
+
+    Без параметра администратор со сквозным просмотром видит весь архив; в
+    личном списке это неверно — он визировал не всё."""
+
+    def setUp(self):
+        admin = UserProfile.objects.create(fio="Админ", bitrix_id=929, is_active=True)
+        admin.roles.add(Role.objects.get(code="sys_admin"))
+
+    def test_admin_sees_everything_without_scope(self):
+        Factory.agreement(author=OUTSIDER, title="Чужое согласование")
+        self.assertEqual(len(api(929).get("/api/agreements/").json()), 1)
+
+    def test_admin_personal_scope_hides_foreign(self):
+        Factory.agreement(author=OUTSIDER, title="Чужое согласование")
+        r = api(929).get("/api/agreements/?scope=participant")
+        self.assertEqual(r.json(), [])
+
+    def test_admin_personal_scope_keeps_own(self):
+        mine = Factory.agreement(author=929, title="Моё согласование")
+        foreign = Factory.agreement(author=OUTSIDER, title="Чужое")
+        Factory.internal(foreign, 929)  # а здесь я согласующий — тоже моё
+        ids = {x["id"] for x in api(929).get("/api/agreements/?scope=participant").json()}
+        self.assertEqual(ids, {mine.id, foreign.id})

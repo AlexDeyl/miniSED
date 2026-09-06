@@ -400,7 +400,10 @@ class AgreementViewSet(viewsets.ModelViewSet):
         query = query_param(request, "q").strip() if self._is_list() else ""
 
         # Сквозной просмотр (системный администратор) — видит всё, без отбора.
-        if can_view_all(user_id):
+        # НО: рабочее место визирования просит ?scope=participant и получает
+        # только своё. Иначе администратор открывал бы «Завершённые» и видел
+        # весь архив компании вместо того, что визировал лично.
+        if can_view_all(user_id) and not self._personal_scope():
             status_all = self._status_filter() if not query else None
             all_qs = base_qs.filter(status=status_all) if status_all else base_qs
             return search(all_qs, query)
@@ -430,6 +433,17 @@ class AgreementViewSet(viewsets.ModelViewSet):
 
     def _is_list(self) -> bool:
         return getattr(self, "action", None) == "list"
+
+    def _personal_scope(self) -> bool:
+        """?scope=participant — только свои: автор или согласующий.
+
+        Право сквозного просмотра при этом не отбирается — оно просто не
+        применяется к личному списку; без параметра администратор по-прежнему
+        видит все согласования."""
+        request = getattr(self, "request", None)
+        if request is None or not self._is_list():
+            return False
+        return request.query_params.get("scope") == "participant"
 
     def _status_filter(self):
         """Статус из ?status= — фильтр вкладок списка (только для list)."""
