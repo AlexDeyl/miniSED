@@ -5,9 +5,14 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { compliments } from '@/services/compliments'
 import { ApiError } from '@/services/api'
+import { useAdminModeStore } from '@/stores/adminMode'
 import { useComplimentsUiStore } from '@/stores/complimentsUi'
 import SearchBox from '@/components/SearchBox.vue'
 import type { ComplimentListItem } from '@/types/compliment'
+
+// Режим администратора: при переключении список надо перезагрузить —
+// сервер отдаёт другую выборку.
+const adminMode = useAdminModeStore()
 
 // Поиск по очереди исполнения (в т.ч. по именам вложенных файлов).
 // При непустом запросе вкладка выборку не сужает.
@@ -60,7 +65,7 @@ async function act(fn: () => Promise<unknown>) {
   }
 }
 
-watch([() => ui.executionMode, query], load)
+watch([() => ui.executionMode, query, () => adminMode.active], load)
 onMounted(() => {
   load()
   refreshBadge()

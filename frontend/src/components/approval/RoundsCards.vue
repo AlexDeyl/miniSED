@@ -34,6 +34,11 @@ const RESULT_RU: Record<string, string> = {
           </td>
           <td>
             <span class="participant-pill" :class="p.decision">{{ DECISION_RU[p.decision] || p.decision }}</span>
+            <!-- Решение проставил администратор за согласующего: место в
+                 маршруте остаётся за ним, но виза не его. -->
+            <span v-if="p.admin_override_by_b24_id" class="participant-pill admin-mark">
+              администратором
+            </span>
             <span v-if="p.decided_at" class="detail-meta"> · {{ fmtDateTime(p.decided_at) }}</span>
             <em v-if="p.decision_comment"> — {{ p.decision_comment }}</em>
           </td>

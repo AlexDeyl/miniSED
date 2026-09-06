@@ -9,14 +9,12 @@ export const agreements = {
   // status — фильтр вкладок, чтобы не тянуть весь архив на каждую.
   // q — поиск по названию, описанию, сделке, участникам и именам вложенных
   // файлов; при непустом запросе сервер игнорирует вкладку (status).
-  // scope: 'participant' — только своё (автор или согласующий). Рабочее место
-  // визирования всегда просит именно его: без параметра администратор со
-  // сквозным просмотром получил бы весь архив компании.
-  all: (status?: string, q?: string, scope?: 'participant') => {
+  // Список всегда личный (автор или согласующий); чужие карточки показывает
+  // только режим администратора — он передаётся заголовком, см. services/api.
+  all: (status?: string, q?: string) => {
     const p = new URLSearchParams()
     if (status) p.set('status', status)
     if (q) p.set('q', q)
-    if (scope) p.set('scope', scope)
     const qs = p.toString()
     return api.get<Agreement[]>(`/agreements/${qs ? `?${qs}` : ''}`)
   },

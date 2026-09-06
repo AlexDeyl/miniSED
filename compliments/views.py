@@ -26,7 +26,8 @@ from rest_framework.response import Response
 
 from approvalflow import sheet as flow_sheet
 from approvalflow.models import ApprovalParticipant
-from core.auth import can_view_all, get_current_b24_id
+from core.services import log_action
+from core.auth import can_view_all, get_current_b24_id, is_admin_mode
 from core.search import query_param
 from requests_reg.models import RoleAssignment
 
@@ -98,11 +99,13 @@ class ComplimentViewSet(viewsets.ModelViewSet):
         # Поиск (?q=) — по компании, гостю, отелю, содержанию комплимента и
         # ИМЕНАМ прикреплённых файлов.
         query = query_param(self.request, "q").strip() if self.action == "list" else ""
-        if self.action == "list":
+        if self.action == "list" and is_admin_mode(self.request):
+            pass  # режим администратора — все заявки, без отбора
+        elif self.action == "list":
             scope = self.request.query_params.get("scope") or "mine"
-            if can_view_all(self.b24_id) and scope == "all":
-                pass  # сквозной просмотр (администратор) — все заявки
-            elif self._is_sales_head() and scope == "all":
+            # Сквозной просмотр (view_all) здесь НЕ применяется: за чужими
+            # заявками администратор включает режим администратора.
+            if self._is_sales_head() and scope == "all":
                 pass  # руководитель продаж видит всё
             elif scope == "participant":
                 qs = qs.filter(id__in=self._participant_ids())
@@ -212,11 +215,23 @@ class ComplimentViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def decide(self, request, pk=None):
         compliment = self.get_object()
+        # Режим администратора: решение принимается за любого согласующего,
+        # на любом этапе — и помечается как принятое администратором.
+        admin_id = self.b24_id if is_admin_mode(request) else None
         err = self._run(lambda: services.decide(
             compliment, request.data.get("participant_id"),
             request.data.get("decision"), (request.data.get("comment") or "").strip(),
-            actor_b24_id=self.b24_id,
+            actor_b24_id=self.b24_id, admin_b24_id=admin_id,
         ))
+        if err is None and admin_id is not None:
+            log_action(
+                "admin_override_decision", target=compliment, request=request,
+                new_value={
+                    "participant_id": request.data.get("participant_id"),
+                    "decision": request.data.get("decision"),
+                    "by_b24_id": admin_id,
+                },
+            )
         return err or self._detail(compliment)
 
     @action(detail=True, methods=["post"], url_path="return")

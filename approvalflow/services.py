@@ -144,11 +144,18 @@ def _recompute(round: ApprovalRound) -> None:
 
 @transaction.atomic
 def decide(
-    participant: ApprovalParticipant, decision: str, comment: str = ""
+    participant: ApprovalParticipant, decision: str, comment: str = "",
+    *, admin_b24_id=None,
 ) -> ApprovalParticipant:
     """
     Решение участника: approve | reject.
     Проверяет очередь (для последовательного) и статус.
+
+    admin_b24_id — решение принимает администратор за этого согласующего
+    (режим администратора). Тогда очередь не проверяется: админ закрывает
+    любой этап маршрута, в том числе не наступивший. Проставленная пометка
+    остаётся в участнике навсегда — по ней видно, что визу поставил не
+    сам согласующий.
     """
     round = participant.round
     approval = round.approval
@@ -157,7 +164,7 @@ def decide(
         raise ApprovalError("Согласование не в статусе «на согласовании».")
     if participant.decision != ApprovalParticipant.DECISION_WAITING:
         raise ApprovalError("Вы уже приняли решение.")
-    if not _is_turn(round, participant):
+    if admin_b24_id is None and not _is_turn(round, participant):
         raise ApprovalError("Сейчас очередь других участников выше по списку.")
     if decision == "reject" and not comment.strip():
         raise ApprovalError("При отклонении комментарий обязателен.")
@@ -171,7 +178,10 @@ def decide(
 
     participant.decision_comment = comment.strip()
     participant.decided_at = timezone.now()
-    participant.save(update_fields=["decision", "decision_comment", "decided_at"])
+    participant.admin_override_by_b24_id = admin_b24_id
+    participant.save(update_fields=[
+        "decision", "decision_comment", "decided_at", "admin_override_by_b24_id",
+    ])
 
     _recompute(round)
     return participant

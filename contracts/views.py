@@ -23,7 +23,8 @@ from rest_framework.response import Response
 
 from approvalflow import sheet as flow_sheet
 from approvalflow.models import ApprovalParticipant
-from core.auth import can_view_all, get_current_b24_id, is_lawyer
+from core.services import log_action
+from core.auth import can_view_all, get_current_b24_id, is_admin_mode, is_lawyer
 from core.search import query_param
 
 from . import constants, services
@@ -99,16 +100,18 @@ class ContractViewSet(viewsets.ModelViewSet):
         # Раздел «Договоры» по умолчанию = только СВОИ (созданные мной).
         # ?scope=participant — где я согласующий, ?scope=all — и мои, и чужие,
         # в которых я участвую (вкладки списка).
-        if self.action == "list":
+        if self.action == "list" and is_admin_mode(self.request):
+            pass  # режим администратора — все договоры, без отбора
+        elif self.action == "list":
             scope = self.request.query_params.get("scope") or "mine"
             mine = Q(initiator_b24_id=self.b24_id)
             participant = Q(id__in=self._participant_contract_ids())
             if scope == "participant":
                 qs = qs.filter(participant)
             elif scope == "all":
-                if can_view_all(self.b24_id):
-                    pass  # сквозной просмотр: все договоры, включая черновики
-                elif is_lawyer(self.b24_id):
+                # Сквозной просмотр (view_all) здесь НЕ применяется: за чужими
+                # договорами администратор включает режим администратора.
+                if is_lawyer(self.b24_id):
                     # Юротделу во вкладке «Все» показываем все договоры, кроме
                     # чужих черновиков: юрист и так вправе открыть любую карточку
                     # (_can_view), а без общего списка невозможно ловить дубли —
@@ -216,11 +219,23 @@ class ContractViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def decide(self, request, pk=None):
         contract = self.get_object()
+        # Режим администратора: решение принимается за любого согласующего,
+        # на любом этапе — и помечается как принятое администратором.
+        admin_id = self.b24_id if is_admin_mode(request) else None
         err = self._run(lambda: services.decide(
             contract, request.data.get("participant_id"),
             request.data.get("decision"), (request.data.get("comment") or "").strip(),
-            actor_b24_id=self.b24_id,
+            actor_b24_id=self.b24_id, admin_b24_id=admin_id,
         ))
+        if err is None and admin_id is not None:
+            log_action(
+                "admin_override_decision", target=contract, request=request,
+                new_value={
+                    "participant_id": request.data.get("participant_id"),
+                    "decision": request.data.get("decision"),
+                    "by_b24_id": admin_id,
+                },
+            )
         return err or self._detail(contract)
 
     @action(detail=True, methods=["post"], url_path="return")

@@ -153,7 +153,7 @@ def is_group_legal(participant: ApprovalParticipant) -> bool:
 
 @transaction.atomic
 def decide(contract: Contract, participant_id, decision, comment="", *,
-           actor_b24_id=None) -> ApprovalParticipant:
+           actor_b24_id=None, admin_b24_id=None) -> ApprovalParticipant:
     approval = get_approval(contract)
     if approval is None:
         raise ContractError("Договор не отправлен на согласование.")
@@ -167,19 +167,23 @@ def decide(contract: Contract, participant_id, decision, comment="", *,
     # Авторизация решающего.
     if is_group_legal(participant):
         # Групповой юр-этап: согласовать может любой юрист; фиксируем, кто именно.
-        if not is_lawyer(actor_b24_id):
-            raise ContractError("Согласовать этап юротдела может только сотрудник юридического отдела.")
-        participant.b24_user_id = actor_b24_id
-        participant.save(update_fields=["b24_user_id"])
+        # Администратор в своём режиме закрывает и его — но себя в слот не
+        # подставляет: этап так и остаётся юротдельским, просто с пометкой.
+        if admin_b24_id is None:
+            if not is_lawyer(actor_b24_id):
+                raise ContractError("Согласовать этап юротдела может только сотрудник юридического отдела.")
+            participant.b24_user_id = actor_b24_id
+            participant.save(update_fields=["b24_user_id"])
     elif (
-        actor_b24_id is not None
+        admin_b24_id is None
+        and actor_b24_id is not None
         and participant.type == ApprovalParticipant.TYPE_INTERNAL
         and participant.b24_user_id
         and actor_b24_id != participant.b24_user_id
     ):
         raise ContractError("Вы не являетесь этим согласующим.")
 
-    flow.decide(participant, decision, comment)
+    flow.decide(participant, decision, comment, admin_b24_id=admin_b24_id)
     _sync_status(contract)
     # если ещё на согласовании — уведомить следующего согласующего
     _notify("notify_current_approver", contract)

@@ -26,6 +26,8 @@ export interface ApprovalParticipant {
   decision: Decision
   decision_comment: string
   decided_at: string | null
+  /** Решение проставил администратор за этого согласующего (его ID Б24). */
+  admin_override_by_b24_id: number | null
 }
 
 export interface ApprovalRound {

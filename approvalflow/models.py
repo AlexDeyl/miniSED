@@ -153,6 +153,14 @@ class ApprovalParticipant(models.Model):
     decision_comment = models.TextField("Комментарий к решению", blank=True)
     decided_at = models.DateTimeField("Дата решения", null=True, blank=True)
 
+    # Решение принято администратором за этого согласующего (режим
+    # администратора). Хранится ОТДЕЛЬНО от b24_user_id: маршрут должен
+    # по-прежнему показывать, чьё это место, а карточка — что решение
+    # проставил не он.
+    admin_override_by_b24_id = models.IntegerField(
+        "Решил администратор (ID Б24)", null=True, blank=True
+    )
+
     external_token = models.CharField(
         "Токен внешней ссылки", max_length=32, unique=True, null=True, blank=True
     )

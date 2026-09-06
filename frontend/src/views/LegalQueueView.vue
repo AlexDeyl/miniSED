@@ -3,9 +3,14 @@ import { onMounted, ref, watch, computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import { requests } from '@/services/requests'
 import { ApiError } from '@/services/api'
+import { useAdminModeStore } from '@/stores/adminMode'
 import { useLegalUiStore } from '@/stores/legalUi'
 import SearchBox from '@/components/SearchBox.vue'
 import type { RegulatoryRequestListItem } from '@/types/request'
+
+// Режим администратора: при переключении список надо перезагрузить —
+// сервер отдаёт другую выборку.
+const adminMode = useAdminModeStore()
 
 // Поиск по номеру, ФИО, паспорту, организации и анкете доверенности.
 // При непустом запросе сервер ищет по ВСЕМ статусам, а не только по вкладке:
@@ -36,7 +41,7 @@ async function load() {
   }
 }
 
-watch([() => legalUi.scope, query], load)
+watch([() => legalUi.scope, query, () => adminMode.active], load)
 onMounted(load)
 </script>
 

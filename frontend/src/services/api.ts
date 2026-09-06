@@ -1,4 +1,5 @@
 import { useAuthStore } from '@/stores/auth'
+import { readAdminMode } from '@/utils/adminMode'
 
 /**
  * Тонкая обёртка над fetch для общения с Django API.
@@ -41,6 +42,10 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   if (auth.token) {
     headers['Authorization'] = `Token ${auth.token}`
   }
+  // Режим администратора — заголовком, чтобы его видел КАЖДЫЙ запрос и не
+  // пришлось протаскивать флаг через все вызовы. Это лишь намерение: право
+  // проверяет сервер (core.auth.is_admin_mode).
+  if (readAdminMode()) headers['X-Admin-Mode'] = '1'
   // Режим Битрикс/дев: личность по X-B24-User
   if (auth.b24UserId) {
     headers['X-B24-User'] = String(auth.b24UserId)

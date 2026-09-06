@@ -19,7 +19,8 @@ from rest_framework.response import Response
 from rest_framework.exceptions import NotFound, PermissionDenied
 
 from approvalflow.models import ApprovalParticipant
-from core.auth import can_view_all, get_current_b24_id, is_lawyer
+from core.services import log_action
+from core.auth import can_view_all, get_current_b24_id, is_admin_mode, is_lawyer
 from core.search import query_param as _query_param
 
 from . import constants, services
@@ -155,16 +156,21 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
         # ?scope=participant — где я согласующий (рабочее место визирования),
         # ?scope=all — и то, и другое. Сотрудник с правом сквозного просмотра
         # видит все заявки.
-        if self.action == "list":
+        if self.action == "list" and is_admin_mode(self.request):
+            pass  # режим администратора — все заявки, без отбора
+        elif self.action == "list":
             scope = self.request.query_params.get("scope") or "mine"
             mine = Q(initiator_b24_id=self.b24_id)
             participant = Q(id__in=self._participant_request_ids())
+            # Сквозной просмотр (view_all) здесь НЕ применяется: чтобы увидеть
+            # чужие заявки, администратор включает режим администратора — иначе
+            # у него молча другой список, чем у всех, и переключатель ничего
+            # не значит.
             if scope == "participant":
                 qs = qs.filter(participant)
             elif scope == "all":
-                if not can_view_all(self.b24_id):
-                    qs = qs.filter(mine | participant)
-            elif not can_view_all(self.b24_id):
+                qs = qs.filter(mine | participant)
+            else:
                 qs = qs.filter(mine)
         rtype = self.request.query_params.get("type")
         if rtype:
@@ -277,11 +283,23 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def decide(self, request, pk=None):
         req = self.get_object()
+        # Режим администратора: решение принимается за любого согласующего,
+        # на любом этапе — и помечается как принятое администратором.
+        admin_id = self.b24_id if is_admin_mode(request) else None
         err = self._run(lambda: services.decide(
             req, request.data.get("participant_id"),
             request.data.get("decision"), (request.data.get("comment") or "").strip(),
-            actor_b24_id=self.b24_id,
+            actor_b24_id=self.b24_id, admin_b24_id=admin_id,
         ))
+        if err is None and admin_id is not None:
+            log_action(
+                "admin_override_decision", target=req, request=request,
+                new_value={
+                    "participant_id": request.data.get("participant_id"),
+                    "decision": request.data.get("decision"),
+                    "by_b24_id": admin_id,
+                },
+            )
         return err or self._detail(req)
 
     @action(detail=True, methods=["post"], url_path="return")

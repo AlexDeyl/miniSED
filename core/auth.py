@@ -55,6 +55,25 @@ def is_lawyer(b24_id) -> bool:
     return bool(profile and profile.has_perm("legal_manage"))
 
 
+def is_admin_mode(request) -> bool:
+    """Включён ли «режим администратора» для этого запроса.
+
+    Фронт присылает заголовок X-Admin-Mode, когда админ сам включил режим
+    кнопкой. Заголовок — только НАМЕРЕНИЕ: право проверяем здесь, поэтому
+    подделать режим без роли системного администратора нельзя.
+
+    В этом режиме сотрудник видит все карточки и может принять решение за
+    любого согласующего; каждое такое решение помечается в маршруте и в
+    истории как принятое администратором.
+    """
+    if request is None:
+        return False
+    header = (request.headers.get("X-Admin-Mode") or "").strip().lower()
+    if header not in ("1", "true", "yes", "on"):
+        return False
+    return can_view_all(get_current_b24_id(request))
+
+
 def can_view_all(b24_id) -> bool:
     """Есть ли у сотрудника право сквозного просмотра (view_all).
 

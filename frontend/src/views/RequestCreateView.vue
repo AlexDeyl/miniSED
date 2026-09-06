@@ -376,9 +376,6 @@ async function save() {
               />
             </label>
           </div>
-          <p v-if="isMchd" class="field-hint">
-            ИНН и СНИЛС обязательны для МЧД: по ним ФНС опознаёт представителя.
-          </p>
           <div class="form-row">
             <label class="form-field"><span>Паспорт (серия, №) *</span><input v-model="rep.passport" inputmode="numeric" maxlength="11" placeholder="1234 567890" /></label>
             <label class="form-field">
@@ -503,7 +500,6 @@ async function save() {
 .check { display: block; font-size: 13px; margin: 3px 0; cursor: pointer; }
 .check input { margin-right: 6px; }
 .attach-hint { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
-.field-hint { font-size: 12px; color: var(--text-muted); margin: -4px 0 8px; }
 .attach-row { margin: 4px 0; }
 .attach-file { margin: 2px 0 8px 22px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .attach-file input[type=file] { font-size: 12px; }

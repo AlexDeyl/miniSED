@@ -64,6 +64,15 @@ export function useApprovalCard(
   )
   const iAmParticipant = computed(() => rounds.value.some((r) => r.participants.some(isMine)))
 
+  // Все, кто ещё не принял решение в текущем круге — для режима администратора:
+  // он закрывает любой этап, в том числе не наступивший.
+  const waitingParts = computed(() => {
+    if (!active() || !currentRound.value) return []
+    return [...currentRound.value.participants]
+      .filter((p) => p.decision === 'waiting')
+      .sort((a, b) => a.order - b.order)
+  })
+
   const progress = computed(() => {
     const parts = currentRound.value?.participants || []
     return { done: parts.filter((p) => p.decision !== 'waiting').length, total: parts.length }
@@ -77,7 +86,10 @@ export function useApprovalCard(
           key: `p${p.id}`,
           when: p.decided_at as string,
           who: label(p),
-          what: p.decision === 'approved' ? 'согласовал(а)' : 'отклонил(а)',
+          // Решение за согласующего проставил администратор — в ленте это
+          // должно читаться сразу, а не только по значку в маршруте.
+          what: (p.decision === 'approved' ? 'согласовал(а)' : 'отклонил(а)')
+            + (p.admin_override_by_b24_id ? ' (администратором)' : ''),
           ok: p.decision === 'approved',
           comment: p.decision_comment,
         }))
@@ -101,7 +113,10 @@ export function useApprovalCard(
     }),
   )
 
-  return { rounds, currentRound, pendingPart, myPart, myDecided, iAmParticipant, progress, history }
+  return {
+    rounds, currentRound, pendingPart, myPart, myDecided, iAmParticipant,
+    waitingParts, progress, history,
+  }
 }
 
 export function fmtDateTime(dt: string | null | undefined): string {

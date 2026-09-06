@@ -32,6 +32,8 @@ export interface AgParticipant {
   round_number: number
   prev_status: PartStatus | null
   prev_comment: string
+  /** Решение проставил администратор за этого согласующего (его ID Б24). */
+  admin_override_by_b24_id: number | null
 }
 
 export interface DecisionLog {
@@ -41,6 +43,7 @@ export interface DecisionLog {
   comment: string
   round_number: number
   decided_at: string
+  admin_override_by_b24_id: number | null
 }
 
 export interface DocVersion {

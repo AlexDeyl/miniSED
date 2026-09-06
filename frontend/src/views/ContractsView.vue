@@ -3,9 +3,14 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { contracts } from '@/services/contracts'
 import { ApiError } from '@/services/api'
+import { useAdminModeStore } from '@/stores/adminMode'
 import { useContractsUiStore } from '@/stores/contractsUi'
 import SearchBox from '@/components/SearchBox.vue'
 import type { ContractListItem, ContractStatus } from '@/types/contract'
+
+// Режим администратора: при переключении список надо перезагрузить —
+// сервер отдаёт другую выборку.
+const adminMode = useAdminModeStore()
 
 // Поиск по номеру, названию, юрлицу/ЦФО и ИМЕНАМ вложенных файлов.
 // При непустом запросе сервер ищет по всем статусам, а не только по вкладке:
@@ -64,7 +69,7 @@ async function refreshBadge() {
   ui.todoCount = (await contracts.todo().catch(() => [])).length
 }
 
-watch([() => ui.mode, query], load)
+watch([() => ui.mode, query, () => adminMode.active], load)
 onMounted(() => {
   load()
   refreshBadge()

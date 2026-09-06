@@ -190,7 +190,7 @@ def is_group_legal(participant: ApprovalParticipant) -> bool:
 
 @transaction.atomic
 def decide(request: RegulatoryRequest, participant_id, decision, comment="", *,
-           actor_b24_id=None):
+           actor_b24_id=None, admin_b24_id=None):
     approval = get_approval(request)
     if approval is None:
         raise RequestError("Заявка не отправлена на согласование.")
@@ -205,19 +205,23 @@ def decide(request: RegulatoryRequest, participant_id, decision, comment="", *,
     # сервисном вызове (None) проверку личности обычного слота не навязываем.
     if is_group_legal(participant):
         # Групповой юрэтап: согласовать может любой юрист; фиксируем, кто именно.
-        if not is_lawyer(actor_b24_id):
-            raise RequestError("Согласовать этап юротдела может только сотрудник юридического отдела.")
-        participant.b24_user_id = actor_b24_id
-        participant.save(update_fields=["b24_user_id"])
+        # Администратор в своём режиме закрывает и его — но себя в слот не
+        # подставляет: этап так и остаётся юротдельским, просто с пометкой.
+        if admin_b24_id is None:
+            if not is_lawyer(actor_b24_id):
+                raise RequestError("Согласовать этап юротдела может только сотрудник юридического отдела.")
+            participant.b24_user_id = actor_b24_id
+            participant.save(update_fields=["b24_user_id"])
     elif (
-        actor_b24_id is not None
+        admin_b24_id is None
+        and actor_b24_id is not None
         and participant.type == ApprovalParticipant.TYPE_INTERNAL
         and participant.b24_user_id
         and actor_b24_id != participant.b24_user_id
     ):
         raise RequestError("Вы не являетесь этим согласующим.")
 
-    flow.decide(participant, decision, comment)
+    flow.decide(participant, decision, comment, admin_b24_id=admin_b24_id)
     _sync_status(request)
     # если ещё на согласовании — уведомить следующего согласующего
     _notify("notify_current_approver", request)

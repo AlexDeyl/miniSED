@@ -8,6 +8,7 @@ import { useLegalUiStore, LEGAL_TABS } from '@/stores/legalUi'
 import { useContractsUiStore, CONTRACT_TABS } from '@/stores/contractsUi'
 import { useComplimentsUiStore, COMPLIMENT_TABS, EXECUTION_TABS } from '@/stores/complimentsUi'
 import { useOtherUiStore, OTHER_TABS } from '@/stores/otherUi'
+import { useAdminModeStore } from '@/stores/adminMode'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -18,6 +19,7 @@ const legalUi = useLegalUiStore()
 const contractsUi = useContractsUiStore()
 const complimentsUi = useComplimentsUiStore()
 const otherUi = useOtherUiStore()
+const adminMode = useAdminModeStore()
 
 const pageTitle = computed(() => (route.meta.title as string) || 'Минин-СЭД')
 const bare = computed(() => route.meta.noShell === true)
@@ -159,9 +161,29 @@ function tabBadge(code: string): number {
           <div class="main-header-title">{{ pageTitle }}</div>
           <div class="main-header-subtitle">Согласования, заявки, документы</div>
         </div>
-        <!-- сюда вью телепортируют свою основную кнопку (Создать / Новое согласование) -->
-        <div id="header-actions" class="main-header-actions"></div>
+        <div class="main-header-actions">
+          <!-- Режим администратора виден только тем, у кого есть право
+               сквозного просмотра; сервер проверяет право отдельно. -->
+          <button
+            v-if="adminMode.available"
+            class="admin-toggle" :class="{ on: adminMode.active }"
+            :title="adminMode.active
+              ? 'Видны все карточки; решение можно принять за любого согласующего'
+              : 'Показать все карточки и разрешить решения за других'"
+            @click="adminMode.toggle()"
+          >
+            <span class="admin-dot"></span>
+            Режим администратора
+          </button>
+          <!-- сюда вью телепортируют свою основную кнопку (Создать / …) -->
+          <div id="header-actions" class="header-actions-slot"></div>
+        </div>
       </header>
+
+      <div v-if="adminMode.active" class="admin-banner">
+        Режим администратора включён: видны чужие карточки, а решения по ним
+        сохраняются с пометкой «согласовано администратором».
+      </div>
 
       <div class="main-body" :class="{ 'main-body--wide': route.meta.wide }">
         <div v-if="route.meta.wide" class="main-body-wide">

@@ -175,6 +175,13 @@ class Participant(models.Model):
         blank=True,
     )
 
+    # Решение принято администратором за этого согласующего (режим
+    # администратора). Место в маршруте остаётся за участником, но видно,
+    # что решение проставил не он.
+    admin_override_by_b24_id = models.IntegerField(
+        "Решил администратор (ID Б24)", null=True, blank=True
+    )
+
     external_token = models.CharField(
         "Токен внешней ссылки",
         max_length=32,
@@ -230,6 +237,11 @@ class DecisionLog(models.Model):
     comment = models.TextField(blank=True)
     round_number = models.PositiveIntegerField("Круг", default=1)
     decided_at = models.DateTimeField()
+    # История должна помнить, что решение проставил администратор, даже если
+    # позже участник переголосует в новом круге.
+    admin_override_by_b24_id = models.IntegerField(
+        "Решил администратор (ID Б24)", null=True, blank=True
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

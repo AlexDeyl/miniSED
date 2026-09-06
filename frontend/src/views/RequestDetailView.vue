@@ -176,7 +176,8 @@ function partLabel(p: ApprovalParticipant): string {
 }
 
 // Общая логика карточки согласования (та же, что у договоров).
-const { rounds, currentRound, pendingPart, myPart, myDecided, iAmParticipant, progress, history } =
+const { rounds, currentRound, pendingPart, myPart, myDecided, iAmParticipant, progress, history, waitingParts,
+} =
   useApprovalCard(
     () => req.value?.approval,
     () => req.value?.status === 'on_approval',
@@ -390,7 +391,7 @@ onMounted(load)
 
       <DecisionCard
         :pending="pendingPart" :my-part="myPart" :my-decided="myDecided"
-        :is-participant="iAmParticipant" :busy="busy"
+        :is-participant="iAmParticipant" :waiting="waitingParts" :busy="busy"
         :role-name="roleName" :label="partLabel"
         @decide="decide" @error="(m) => (error = m)"
       />

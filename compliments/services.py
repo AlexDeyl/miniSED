@@ -161,7 +161,7 @@ def current_pending_participant(approval: Approval | None) -> ApprovalParticipan
 
 @transaction.atomic
 def decide(compliment: Compliment, participant_id, decision, comment="", *,
-           actor_b24_id=None) -> ApprovalParticipant:
+           actor_b24_id=None, admin_b24_id=None) -> ApprovalParticipant:
     approval = get_approval(compliment)
     if approval is None:
         raise ComplimentError("Заявка не отправлена на согласование.")
@@ -173,14 +173,15 @@ def decide(compliment: Compliment, participant_id, decision, comment="", *,
         raise ComplimentError("Участник не найден.")
 
     if (
-        actor_b24_id is not None
+        admin_b24_id is None
+        and actor_b24_id is not None
         and participant.type == ApprovalParticipant.TYPE_INTERNAL
         and participant.b24_user_id
         and actor_b24_id != participant.b24_user_id
     ):
         raise ComplimentError("Вы не являетесь этим согласующим.")
 
-    flow.decide(participant, decision, comment)
+    flow.decide(participant, decision, comment, admin_b24_id=admin_b24_id)
     _sync_status(compliment)
     _notify("notify_current_approver", compliment)
     return participant

@@ -324,8 +324,12 @@ class MoneyFormatTests(TestCase):
 
 
 class ViewAllPermissionTests(TestCase):
-    """Право сквозного просмотра: администратор видит чужие карточки во всех
-    модулях, но остаётся читателем — решать может только участник маршрута."""
+    """Право сквозного просмотра.
+
+    Списки оно расширяет ТОЛЬКО в режиме администратора (см.
+    core.tests_admin_mode) — иначе у админа молча другая выдача, чем у всех.
+    А вот открыть чужую карточку по прямой ссылке право позволяет всегда:
+    так работают ссылки из писем и колокольчика."""
 
     ADMIN = 4242
     STRANGER = 4243
@@ -357,14 +361,24 @@ class ViewAllPermissionTests(TestCase):
         self.assertTrue(self.admin.has_perm("view_all"))
         self.assertIn("view_all", [p.code for p in Permission.objects.all()])
 
-    def test_admin_sees_foreign_agreements(self):
-        ids = [a["id"] for a in self._api(self.ADMIN).get("/api/agreements/").json()]
+    def test_foreign_agreements_hidden_until_admin_mode(self):
+        # без режима список личный — даже у администратора
+        self.assertEqual(self._api(self.ADMIN).get("/api/agreements/").json(), [])
+        # с режимом — видно чужое
+        c = APIClient()
+        c.credentials(HTTP_X_B24_USER=str(self.ADMIN), HTTP_X_ADMIN_MODE="1")
+        ids = [a["id"] for a in c.get("/api/agreements/").json()]
         self.assertEqual(ids, [self.agreement.id])
-        # посторонний без права — по-прежнему ничего
-        self.assertEqual(self._api(self.STRANGER).get("/api/agreements/").json(), [])
+        # посторонний без права — ничего, даже с заголовком
+        c2 = APIClient()
+        c2.credentials(HTTP_X_B24_USER=str(self.STRANGER), HTTP_X_ADMIN_MODE="1")
+        self.assertEqual(c2.get("/api/agreements/").json(), [])
 
     def test_admin_cannot_decide_for_others(self):
-        """Право на чтение не делает администратора согласующим."""
+        """Право на чтение не делает администратора согласующим.
+
+        Решать за других он может только во включённом режиме администратора,
+        и такое решение помечается (core.tests_admin_mode)."""
         r = self._api(self.ADMIN).post(
             f"/api/agreements/{self.agreement.id}/decide/",
             {"participant_id": self.participant.id, "decision": "approve"},
@@ -385,14 +399,27 @@ class ViewAllPermissionTests(TestCase):
             status="on_approval",
         )
 
-        reqs = self._api(self.ADMIN).get("/api/reg/requests/").json()
-        self.assertEqual([x["id"] for x in reqs], [req.id])
+        # В списках чужого не видно, пока не включён режим администратора…
+        self.assertEqual(self._api(self.ADMIN).get("/api/reg/requests/").json(), [])
+        self.assertEqual(
+            self._api(self.ADMIN).get("/api/contracts/?scope=all").json(), [],
+        )
+
+        admin = APIClient()
+        admin.credentials(HTTP_X_B24_USER=str(self.ADMIN), HTTP_X_ADMIN_MODE="1")
+        self.assertEqual(
+            [x["id"] for x in admin.get("/api/reg/requests/").json()], [req.id],
+        )
+        self.assertEqual(
+            [x["id"] for x in admin.get("/api/contracts/?scope=all").json()],
+            [contract.id],
+        )
+
+        # …но открыть карточку по прямой ссылке право позволяет и без режима:
+        # так работают ссылки из писем и колокольчика.
         self.assertEqual(
             self._api(self.ADMIN).get(f"/api/reg/requests/{req.id}/").status_code, 200,
         )
-
-        contracts = self._api(self.ADMIN).get("/api/contracts/?scope=all").json()
-        self.assertEqual([x["id"] for x in contracts], [contract.id])
         self.assertEqual(
             self._api(self.ADMIN).get(f"/api/contracts/{contract.id}/").status_code, 200,
         )

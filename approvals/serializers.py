@@ -133,6 +133,7 @@ class ParticipantSerializer(serializers.ModelSerializer):
             "round_number",
             "prev_status",
             "prev_comment",
+            "admin_override_by_b24_id",
         ]
         read_only_fields = [
             "status",
@@ -140,6 +141,7 @@ class ParticipantSerializer(serializers.ModelSerializer):
             "decided_at",
             "prev_status",
             "prev_comment",
+            "admin_override_by_b24_id",
         ]
 
 
@@ -148,7 +150,10 @@ class DecisionLogSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = DecisionLog
-        fields = ["id", "participant", "status", "comment", "round_number", "decided_at"]
+        fields = [
+            "id", "participant", "status", "comment", "round_number", "decided_at",
+            "admin_override_by_b24_id",
+        ]
 
 
 class RoundNoteSerializer(serializers.ModelSerializer):

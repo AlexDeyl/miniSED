@@ -15,6 +15,7 @@ class ParticipantSerializer(serializers.ModelSerializer):
         fields = [
             "id", "type", "b24_user_id", "email", "name", "role",
             "order", "is_required", "decision", "decision_comment", "decided_at",
+            "admin_override_by_b24_id",
         ]
 
 

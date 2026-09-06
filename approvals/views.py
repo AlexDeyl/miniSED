@@ -38,7 +38,9 @@ from django.core.mail import send_mail
 from django.conf import settings
 from django.db.models import F, Q
 from core.services import log_action
-from core.auth import can_view_all, get_current_profile, is_lawyer, lawyer_b24_ids
+from core.auth import (
+    can_view_all, get_current_profile, is_admin_mode, is_lawyer, lawyer_b24_ids,
+)
 from core.search import query_param
 from .search import search
 from urllib.parse import urlencode
@@ -399,11 +401,15 @@ class AgreementViewSet(viewsets.ModelViewSet):
         # (тот же принцип, что в очереди юротдела).
         query = query_param(request, "q").strip() if self._is_list() else ""
 
-        # Сквозной просмотр (системный администратор) — видит всё, без отбора.
-        # НО: рабочее место визирования просит ?scope=participant и получает
-        # только своё. Иначе администратор открывал бы «Завершённые» и видел
-        # весь архив компании вместо того, что визировал лично.
-        if can_view_all(user_id) and not self._personal_scope():
+        # Сквозной просмотр расширяет список ТОЛЬКО в режиме администратора —
+        # то же правило во всех модулях. Иначе у админа молча другой список,
+        # чем у всех, а переключатель ничего не значит: рабочее место
+        # визирования показывало бы ему весь архив компании вместо того,
+        # что он визировал лично.
+        # (Ограничение касается только СПИСКА: открыть чужую карточку по
+        # прямой ссылке право позволяет всегда — так работают ссылки из писем
+        # и колокольчика.)
+        if can_view_all(user_id) and (is_admin_mode(request) or not self._is_list()):
             status_all = self._status_filter() if not query else None
             all_qs = base_qs.filter(status=status_all) if status_all else base_qs
             return search(all_qs, query)
@@ -433,17 +439,6 @@ class AgreementViewSet(viewsets.ModelViewSet):
 
     def _is_list(self) -> bool:
         return getattr(self, "action", None) == "list"
-
-    def _personal_scope(self) -> bool:
-        """?scope=participant — только свои: автор или согласующий.
-
-        Право сквозного просмотра при этом не отбирается — оно просто не
-        применяется к личному списку; без параметра администратор по-прежнему
-        видит все согласования."""
-        request = getattr(self, "request", None)
-        if request is None or not self._is_list():
-            return False
-        return request.query_params.get("scope") == "participant"
 
     def _status_filter(self):
         """Статус из ?status= — фильтр вкладок списка (только для list)."""
@@ -647,7 +642,14 @@ class AgreementViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if participant.type == Participant.TYPE_INTERNAL:
+        # Режим администратора: решение принимается за любого согласующего и
+        # на любом этапе. Проверки личности и очереди при этом не применяются,
+        # но решение помечается как принятое администратором.
+        admin_id = b24_id if is_admin_mode(request) else None
+
+        if admin_id is not None:
+            pass  # право уже проверено в is_admin_mode
+        elif participant.type == Participant.TYPE_INTERNAL:
             if str(participant.b24_user_id) != str(b24_id):
                 return Response(
                     {"detail": "Недостаточно прав"},
@@ -671,7 +673,7 @@ class AgreementViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if agreement.flow_type == AgreementModel.FLOW_SEQUENTIAL:
+        if agreement.flow_type == AgreementModel.FLOW_SEQUENTIAL and admin_id is None:
 
             if not self._is_participant_turn(agreement, participant):
                 return Response(
@@ -701,7 +703,10 @@ class AgreementViewSet(viewsets.ModelViewSet):
 
         participant.comment = comment
         participant.decided_at = now
-        participant.save(update_fields=["status", "comment", "decided_at"])
+        participant.admin_override_by_b24_id = admin_id
+        participant.save(update_fields=[
+            "status", "comment", "decided_at", "admin_override_by_b24_id",
+        ])
 
         DecisionLog.objects.create(
             agreement=agreement,
@@ -710,7 +715,17 @@ class AgreementViewSet(viewsets.ModelViewSet):
             comment=participant.comment,
             round_number=agreement.current_round,
             decided_at=participant.decided_at,
+            admin_override_by_b24_id=admin_id,
         )
+        if admin_id is not None:
+            log_action(
+                "admin_override_decision", target=agreement, request=request,
+                new_value={
+                    "participant_id": participant.id,
+                    "decision": decision,
+                    "by_b24_id": admin_id,
+                },
+            )
 
         self._recompute_status(agreement)
 

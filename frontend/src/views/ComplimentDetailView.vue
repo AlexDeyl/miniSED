@@ -199,7 +199,8 @@ function partLabel(p: ApprovalParticipant): string {
   return nameByBid(p.b24_user_id) || `USER #${p.b24_user_id}`
 }
 
-const { rounds, currentRound, pendingPart, myPart, myDecided, iAmParticipant, progress, history } =
+const { rounds, currentRound, pendingPart, myPart, myDecided, iAmParticipant, progress, history, waitingParts,
+} =
   useApprovalCard(
     () => compliment.value?.approval,
     () => compliment.value?.status === 'on_approval',
@@ -495,7 +496,7 @@ onMounted(load)
 
       <DecisionCard
         :pending="pendingPart" :my-part="myPart" :my-decided="myDecided"
-        :is-participant="iAmParticipant" :busy="busy"
+        :is-participant="iAmParticipant" :waiting="waitingParts" :busy="busy"
         :role-name="roleName" :label="partLabel"
         @decide="decide" @error="(m) => (error = m)"
       />

@@ -16,11 +16,16 @@ import { api, ApiError } from '@/services/api'
 import { versionFileName } from '@/utils/filename'
 import { useAuthStore } from '@/stores/auth'
 import { useSvetoforStore, type SvetoforMode as Mode } from '@/stores/svetofor'
+import { useAdminModeStore } from '@/stores/adminMode'
 import {
   type Agreement, type AgParticipant, type DecisionLog,
   AG_STATUS_LABEL,
 } from '@/types/agreement'
 import type { RegulatoryRequestListItem } from '@/types/request'
+
+// Режим администратора: при переключении список надо перезагрузить —
+// сервер отдаёт другую выборку.
+const adminMode = useAdminModeStore()
 
 const auth = useAuthStore()
 
@@ -196,7 +201,7 @@ async function loadList() {
       // клиенте, их объёмы несопоставимо меньше.
       const agStatus = q ? undefined : STATUS_BY_MODE[mode.value]
       const [ag, rq, ct, cm] = await Promise.all([
-        agreements.all(agStatus, q, 'participant'),
+        agreements.all(agStatus, q),
         requests.list(undefined, q, 'participant').catch(() => []),
         contracts.list('participant', q).catch(() => []),
         compliments.list('participant', q).catch(() => []),
@@ -218,7 +223,7 @@ async function loadList() {
 }
 
 // Смена вкладки (в т.ч. из сайдбара) или строки поиска перезагружает список.
-watch([() => svet.mode, query], loadList)
+watch([() => svet.mode, query, () => adminMode.active], loadList)
 
 // Счётчики бейджей в сайдбаре: «требует действия» (по всем модулям) +
 // непросмотренные отклонённые/завершённые (мои согласования). Обновляем всегда —
@@ -258,7 +263,7 @@ async function reloadSelected() {
   const q = query.value || undefined
   rawAgreements.value = (mode.value === 'todo' && !q)
     ? await agreements.todo()
-    : await agreements.all(q ? undefined : STATUS_BY_MODE[mode.value], q, 'participant')
+    : await agreements.all(q ? undefined : STATUS_BY_MODE[mode.value], q)
 }
 
 // --- решения ---
@@ -306,6 +311,27 @@ const roundsHistory = computed(() => {
     .sort((a, b) => a[0] - b[0])
     .map(([round, logs]) => ({ round, logs, note: notes.get(round) || '' }))
 })
+// Режим администратора: ожидающие участники текущего круга — за любого из них
+// админ может проставить визу, в том числе не дожидаясь его очереди.
+const adminWaiting = computed(() =>
+  selected.value?.status === 'in_progress'
+    ? currentParts.value.filter((p) => p.status === 'waiting')
+    : [],
+)
+// Комментарий свой на каждого — иначе один текст уехал бы во все визы сразу.
+const adminComment = ref<Record<number, string>>({})
+
+async function decideFor(p: AgParticipant, decision: 'approve' | 'reject') {
+  const comment = (adminComment.value[p.id] || '').trim()
+  if (decision === 'reject' && !comment) {
+    error.value = 'Комментарий обязателен при отклонении.'
+    return
+  }
+  await run(() => agreements.decide(selected.value!.id, p.id, decision, comment))
+  delete adminComment.value[p.id]
+  void refreshBadges()
+}
+
 // маршрут текущего круга можно менять, пока никто не принял решение
 const noneDecided = computed(() => currentParts.value.length > 0 && currentParts.value.every((p) => p.status === 'waiting'))
 
@@ -649,6 +675,32 @@ onMounted(async () => {
                 </div>
               </div>
 
+              <!-- Режим администратора: виза за любого согласующего, на любом
+                   этапе. Сохраняется с пометкой «администратором». -->
+              <div v-if="adminMode.active && adminWaiting.length" class="ag-card">
+                <div class="ag-card-header">Решение за согласующего · режим администратора</div>
+                <div class="inner-box">
+                  <div class="ag-muted" style="margin-bottom:8px">
+                    Виза сохранится с пометкой, что её проставил администратор.
+                  </div>
+                  <div v-for="p in adminWaiting" :key="p.id" class="admin-row">
+                    <div style="font-size:13px;margin-bottom:6px">{{ partLabel(p) }}</div>
+                    <textarea
+                      v-model="adminComment[p.id]" rows="2" class="ag-textarea"
+                      placeholder="Комментарий (при отклонении обязателен)"
+                    ></textarea>
+                    <div class="decide-row">
+                      <button class="ag-btn ag-btn--soft" :disabled="busy" @click="decideFor(p, 'reject')">
+                        Отклонить за него
+                      </button>
+                      <button class="ag-btn ag-btn--green" :disabled="busy" @click="decideFor(p, 'approve')">
+                        Согласовать за него
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <!-- Участники (текущий круг) -->
               <div class="ag-card">
                 <div class="ag-card-header">
@@ -662,6 +714,11 @@ onMounted(async () => {
                       <div class="pc-name">{{ partLabel(p) }}</div>
                       <div v-if="partPosition(p)" class="pc-pos">{{ partPosition(p) }}</div>
                       <span class="ag-badge" :class="p.status">{{ PART_STATUS_LABEL[p.status] }}</span>
+                      <!-- Виза проставлена администратором за участника:
+                           место в маршруте остаётся за ним, решение — не его. -->
+                      <span v-if="p.admin_override_by_b24_id" class="ag-badge admin-mark">
+                        администратором
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -809,6 +866,9 @@ onMounted(async () => {
 .ag-badge.waiting { background: #ffe0b2; }
 .ag-badge.approved { background: #c8e6c9; }
 .ag-badge.rejected { background: #ffcdd2; }
+.admin-row { padding: 10px 0; border-top: 1px solid #f1f1f1; }
+.admin-row:first-child { border-top: 0; padding-top: 0; }
+.ag-badge.admin-mark { background: #ffe0b2; color: #8a4b00; font-weight: 600; margin-left: 4px; }
 
 .sum-block { border: 1px solid #e0e0e0; border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
 .sum-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted); margin-bottom: 4px; }

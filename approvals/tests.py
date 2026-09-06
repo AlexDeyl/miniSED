@@ -766,28 +766,39 @@ class SearchTests(TestCase):
         self.assertEqual(self._found("смета"), set())
 
 
-class PersonalScopeTests(TestCase):
-    """?scope=participant — рабочее место визирования показывает только своё.
-
-    Без параметра администратор со сквозным просмотром видит весь архив; в
-    личном списке это неверно — он визировал не всё."""
+class AdminListScopeTests(TestCase):
+    """Список согласований личный даже у администратора: чужое показывает
+    только режим администратора. Карточку по прямой ссылке право сквозного
+    просмотра открывает всегда — так работают ссылки из писем."""
 
     def setUp(self):
         admin = UserProfile.objects.create(fio="Админ", bitrix_id=929, is_active=True)
         admin.roles.add(Role.objects.get(code="sys_admin"))
 
-    def test_admin_sees_everything_without_scope(self):
-        Factory.agreement(author=OUTSIDER, title="Чужое согласование")
-        self.assertEqual(len(api(929).get("/api/agreements/").json()), 1)
+    def _admin(self, admin_mode=False):
+        c = APIClient()
+        creds = {"HTTP_X_B24_USER": "929"}
+        if admin_mode:
+            creds["HTTP_X_ADMIN_MODE"] = "1"
+        c.credentials(**creds)
+        return c
 
-    def test_admin_personal_scope_hides_foreign(self):
+    def test_list_is_personal_without_admin_mode(self):
         Factory.agreement(author=OUTSIDER, title="Чужое согласование")
-        r = api(929).get("/api/agreements/?scope=participant")
-        self.assertEqual(r.json(), [])
+        self.assertEqual(self._admin().get("/api/agreements/").json(), [])
 
-    def test_admin_personal_scope_keeps_own(self):
+    def test_admin_mode_shows_foreign(self):
+        a = Factory.agreement(author=OUTSIDER, title="Чужое согласование")
+        ids = {x["id"] for x in self._admin(admin_mode=True).get("/api/agreements/").json()}
+        self.assertEqual(ids, {a.id})
+
+    def test_own_agreements_always_listed(self):
         mine = Factory.agreement(author=929, title="Моё согласование")
         foreign = Factory.agreement(author=OUTSIDER, title="Чужое")
-        Factory.internal(foreign, 929)  # а здесь я согласующий — тоже моё
-        ids = {x["id"] for x in api(929).get("/api/agreements/?scope=participant").json()}
+        Factory.internal(foreign, 929)  # здесь я согласующий — тоже моё
+        ids = {x["id"] for x in self._admin().get("/api/agreements/").json()}
         self.assertEqual(ids, {mine.id, foreign.id})
+
+    def test_foreign_card_opens_by_direct_link(self):
+        a = Factory.agreement(author=OUTSIDER, title="Чужое согласование")
+        self.assertEqual(self._admin().get(f"/api/agreements/{a.id}/").status_code, 200)
