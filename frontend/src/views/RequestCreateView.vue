@@ -41,6 +41,20 @@ const ATTACHMENTS = [
   { code: 'charter', name: 'Копия устава / доверенности' },
   { code: 'memo', name: 'Служебная записка (срочность)' },
 ]
+// Приложения к заявке на ЭЦП (ТЗ, раздел 2) — свой список, у доверенности он
+// про образец формы и устав, а здесь про документы физлица.
+const ECP_ATTACHMENTS = [
+  { code: 'passport', name: 'Копия паспорта представителя (для не-сотрудников)' },
+  { code: 'snils', name: 'Копия СНИЛС представителя (для не-сотрудников)' },
+  { code: 'inn', name: 'Копия ИНН представителя (для не-сотрудников)' },
+  { code: 'memo', name: 'Служебная записка с обоснованием срочности' },
+  { code: 'other', name: 'Иное' },
+]
+const ECP_RECEIVE = [
+  { code: 'personally', name: 'Получить лично' },
+  { code: 'courier', name: 'Получить через курьера (третье лицо)' },
+  { code: 'other', name: 'Иным способом' },
+]
 const RECEIVE = [
   { code: 'electronic', name: 'Электронно (МЧД / файл с ЭП)' },
   { code: 'paper', name: 'Бумажный (лично / курьером)' },
@@ -75,6 +89,9 @@ async function onDeptCode() {
 
 const data = reactive<Record<string, unknown>>({
   poa_type: 'single', urgency: 'standard', planned_date: '',
+  // ЭЦП: тип пока свободным текстом — перечень согласуется с ИТ (ТЗ: «нужно
+  // обсудить с ИТ»), поэтому жёсткого справочника здесь намеренно нет.
+  ecp_type: '',
   rep: {
     last_name: '', first_name: '', middle_name: '', birth_date: '', status: 'employee',
     position: '', phone: '', email: '', inn: '', snils: '',
@@ -116,7 +133,12 @@ async function uploadAttachments(reqId: number) {
   if (jobs.length) await Promise.all(jobs)
 }
 
-const isAnketa = computed(() => requestType.value === 'poa' || requestType.value === 'mchd')
+// Анкета (сведения о представителе) одинакова у всех трёх типов; различаются
+// только «параметры» сверху и дополнительный раздел снизу.
+const isAnketa = computed(() => ['poa', 'mchd', 'ecp'].includes(requestType.value))
+const isEcp = computed(() => requestType.value === 'ecp')
+// Список приложений зависит от типа заявки, механика загрузки файлов общая.
+const attachmentList = computed(() => (isEcp.value ? ECP_ATTACHMENTS : ATTACHMENTS))
 // ИНН и СНИЛС нужны только машиночитаемой доверенности: для бумажной
 // представителя удостоверяет паспорт. «МЧД» в форме говорится в трёх местах —
 // тип заявки, тип доверенности и форма выдачи; инициатор пользуется любым,
@@ -213,6 +235,18 @@ function validate(): string | null {
       return 'Раздел 1: дата выдачи паспорта должна быть позже даты рождения.'
     if (!rep.reg_address.trim()) return 'Раздел 1: укажите адрес регистрации представителя.'
 
+    // У ЭЦП своего «раздела полномочий» нет: по ТЗ там только сведения о
+    // представителе, приложения и способ получения.
+    if (isEcp.value) {
+      if (!cfo.value) return 'Укажите ЦФО — по нему строится маршрут согласования.'
+      if (!data.planned_date) return 'Укажите планируемую дату получения.'
+      for (const a of attachmentList.value) {
+        if ((data.attachments as string[]).includes(a.code) && !attachmentFiles[a.code])
+          return `Приложите файл для «${a.name}» или снимите отметку.`
+      }
+      return null
+    }
+
     // Раздел 2 — полномочия
     if (!(data.target_org as string).trim())
       return 'Раздел 2: укажите, куда направляется представитель (организация / госорган).'
@@ -234,13 +268,14 @@ function validate(): string | null {
     }
 
     // Раздел 3 — отмеченное приложение обязано иметь файл
-    for (const a of ATTACHMENTS) {
+    for (const a of attachmentList.value) {
       if ((data.attachments as string[]).includes(a.code) && !attachmentFiles[a.code])
         return `Раздел 3: приложите файл для «${a.name}» или снимите отметку.`
     }
   }
 
-  if (!basis.value.trim()) return 'Укажите основание оформления.'
+  // Основание оформления — реквизит доверенности; в бланке ЭЦП его нет.
+  if (!isEcp.value && !basis.value.trim()) return 'Укажите основание оформления.'
   return null
 }
 
@@ -318,8 +353,29 @@ async function save() {
       </div>
 
       <template v-if="isAnketa">
+        <!-- Параметры ЭЦП -->
+        <div v-if="isEcp" class="detail-card">
+          <div class="detail-card-header">Параметры ЭЦП</div>
+          <label class="form-field" style="margin-bottom:10px">
+            <span>Тип ЭЦП</span>
+            <input v-model="data.ecp_type" placeholder="Уточняется с ИТ" />
+          </label>
+          <div class="form-row">
+            <label class="form-field">
+              <span>Планируемая дата получения *</span>
+              <input v-model="data.planned_date" type="date" />
+            </label>
+            <label class="form-field">
+              <span>Срочность</span>
+              <select v-model="data.urgency">
+                <option v-for="u in URGENCY" :key="u.code" :value="u.code">{{ u.name }}</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
         <!-- Параметры доверенности -->
-        <div class="detail-card">
+        <div v-if="!isEcp" class="detail-card">
           <div class="detail-card-header">Параметры доверенности</div>
           <div class="form-row">
             <label class="form-field">
@@ -393,8 +449,8 @@ async function save() {
           </label>
         </div>
 
-        <!-- Раздел 2: полномочия -->
-        <div class="detail-card">
+        <!-- Раздел 2: полномочия (у ЭЦП полномочий нет) -->
+        <div v-if="!isEcp" class="detail-card">
           <div class="detail-card-header">Раздел 2. Полномочия и цель</div>
           <label class="form-field" style="margin-bottom:10px">
             <span>Куда направляется представитель (организация / госорган) *</span>
@@ -445,10 +501,12 @@ async function save() {
           </div>
         </div>
 
-        <!-- Раздел 3: доп. сведения -->
+        <!-- Доп. сведения: приложения и способ получения -->
         <div class="detail-card">
-          <div class="detail-card-header">Раздел 3. Дополнительно</div>
-          <label class="form-field" style="margin-bottom:10px">
+          <div class="detail-card-header">
+            {{ isEcp ? 'Раздел 2. Дополнительные сведения' : 'Раздел 3. Дополнительно' }}
+          </div>
+          <label v-if="!isEcp" class="form-field" style="margin-bottom:10px">
             <span>Форма доверенности</span>
             <select v-model="data.form">
               <option v-for="f in FORMS" :key="f.code" :value="f.code">{{ f.name }}</option>
@@ -456,8 +514,10 @@ async function save() {
           </label>
           <div class="form-field" style="margin-bottom:10px">
             <span>Приложения к заявке</span>
-            <div class="attach-hint">Отметьте нужные документы и приложите файлы — юристы получат полный комплект.</div>
-            <div v-for="a in ATTACHMENTS" :key="a.code" class="attach-row">
+            <div class="attach-hint">
+              Отметьте нужные документы и приложите файлы — исполнитель получит полный комплект.
+            </div>
+            <div v-for="a in attachmentList" :key="a.code" class="attach-row">
               <label class="check">
                 <input type="checkbox" :value="a.code" v-model="(data.attachments as string[])" /> {{ a.name }}
               </label>
@@ -473,15 +533,17 @@ async function save() {
             <span v-if="extraFiles.length" class="attach-ok">Выбрано файлов: {{ extraFiles.length }}</span>
           </div>
           <label class="form-field">
-            <span>Способ получения готовой доверенности</span>
+            <span>{{ isEcp ? 'Способ получения ЭЦП' : 'Способ получения готовой доверенности' }}</span>
             <select v-model="data.receive">
-              <option v-for="r in RECEIVE" :key="r.code" :value="r.code">{{ r.name }}</option>
+              <option
+                v-for="r in (isEcp ? ECP_RECEIVE : RECEIVE)" :key="r.code" :value="r.code"
+              >{{ r.name }}</option>
             </select>
           </label>
         </div>
       </template>
 
-      <label class="form-field">
+      <label v-if="!isEcp" class="form-field">
         <span>Основание оформления *</span>
         <input v-model="basis" placeholder="Приказ №… / служебная записка" />
       </label>

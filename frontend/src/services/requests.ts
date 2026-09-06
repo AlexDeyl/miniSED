@@ -54,6 +54,19 @@ export const requests = {
     const qs = p.toString()
     return api.get<RegulatoryRequestListItem[]>(`${BASE}/legal_queue/${qs ? `?${qs}` : ''}`)
   },
+  // --- исполнение заявок на ЭЦП (ИТ-специалист объекта) ---
+  itQueue: (scope?: string, q?: string) => {
+    const p = new URLSearchParams()
+    if (scope) p.set('scope', scope)
+    if (q) p.set('q', q)
+    const qs = p.toString()
+    return api.get<RegulatoryRequestListItem[]>(`${BASE}/it_queue/${qs ? `?${qs}` : ''}`)
+  },
+  itTake: (id: number | string) =>
+    api.post<RegulatoryRequestDetail>(`${BASE}/${id}/it_take/`),
+  itExecute: (id: number | string, comment = '') =>
+    api.post<RegulatoryRequestDetail>(`${BASE}/${id}/it_execute/`, { comment }),
+
   take: (id: number | string) => api.post<RegulatoryRequestDetail>(`${BASE}/${id}/take/`),
   toSigning: (id: number | string) => api.post<RegulatoryRequestDetail>(`${BASE}/${id}/to_signing/`),
   execute: (id: number | string, deliveryMethod: string, deliveryComment = '') =>

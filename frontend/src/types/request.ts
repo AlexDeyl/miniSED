@@ -11,6 +11,9 @@ export type RequestStatus =
   | 'to_legal'
   | 'legal_work'
   | 'signing'
+  // Исполнение заявки на ЭЦП: её ведёт не юротдел, а ИТ-специалист объекта.
+  | 'to_it'
+  | 'it_work'
   | 'executed'
   | 'closed'
   | 'canceled'

@@ -12,6 +12,8 @@ export interface AuthProfile {
   organizations?: number[]
   // Исполнитель комплиментов — ему показываем раздел «Заявки для исполнения».
   is_compliment_executor?: boolean
+  /** Исполнитель заявок на ЭЦП — виден раздел «Работа ИТ». */
+  is_it_specialist?: boolean
 }
 
 export interface LoginResult extends AuthProfile {

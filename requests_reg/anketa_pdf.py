@@ -94,8 +94,12 @@ def render_pdf(request) -> bytes:
         ]))
         return t
 
+    is_ecp = request.request_type == C.TYPE_ECP
+
     story = []
-    story.append(Paragraph("ЗАЯВКА на оформление доверенности", h1))
+    story.append(Paragraph(
+        "ЗАЯВКА на оформление ЭЦП" if is_ecp else "ЗАЯВКА на оформление доверенности", h1,
+    ))
     story.append(Paragraph(
         f"№ {request.number} · подана {request.created_at:%d.%m.%Y} · "
         f"{request.organization.short_name}", label,
@@ -104,7 +108,10 @@ def render_pdf(request) -> bytes:
 
     # Шапка
     story.append(kv_table([
-        ("Тип доверенности", _one(C.ANKETA_POA_TYPES, data.get("poa_type"))),
+        # У ЭЦП перечень типов пока не утверждён (согласуется с ИТ), поэтому
+        # печатаем то, что ввёл инициатор, как есть.
+        ("Тип ЭЦП", data.get("ecp_type") or "—") if is_ecp
+        else ("Тип доверенности", _one(C.ANKETA_POA_TYPES, data.get("poa_type"))),
         ("Планируемая дата получения", _fmt_date(data.get("planned_date"))),
         ("Срочность", _one(C.ANKETA_URGENCY, data.get("urgency"))),
     ]))
@@ -140,6 +147,23 @@ def render_pdf(request) -> bytes:
             ("Юридический адрес", legal.get("address") or "—"),
             ("Действует от имени юр.лица", legal.get("acting_person") or "—"),
         ]))
+
+    if is_ecp:
+        # У ЭЦП полномочий и срока действия нет — сразу дополнительные сведения.
+        story.append(Paragraph("Раздел 2. Дополнительные сведения", h2))
+        story.append(kv_table([
+            ("Приложения к заявке",
+             _checks(C.ANKETA_ECP_ATTACHMENTS, data.get("attachments"))),
+            ("Способ получения ЭЦП",
+             _one(C.ANKETA_ECP_RECEIVE, data.get("receive"))),
+        ]))
+        story.append(Spacer(1, 10))
+        story.append(Paragraph(
+            f"Инициатор: {_initiator_name(request)} · "
+            f"Сформировано: {timezone.localtime(timezone.now()):%d.%m.%Y %H:%M}", label,
+        ))
+        doc.build(story)
+        return buffer.getvalue()
 
     # Раздел 2
     story.append(Paragraph("Раздел 2. Полномочия и цель выдачи", h2))

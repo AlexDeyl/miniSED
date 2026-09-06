@@ -94,12 +94,18 @@ def _sync_status(request: RegulatoryRequest) -> None:
             constants.STATUS_DRAFT,
             constants.STATUS_RETURNED,
         ):
-            # финальное утверждение → согласована → автопередача юристам
+            # финальное утверждение → согласована → автопередача исполнителю
             _set(request, constants.STATUS_APPROVED)
             _notify("notify_initiator_status", request)  # инициатору — согласована
-            _set(request, constants.STATUS_TO_LEGAL)
-            log_action("request_approved_to_legal", target=request)
-            _notify("notify_legal_queue", request)  # юристам — новая на исполнение
+            if request.request_type == constants.TYPE_ECP:
+                # ЭЦП исполняет ИТ-специалист объекта, а не юротдел
+                _set(request, constants.STATUS_TO_IT)
+                log_action("request_approved_to_it", target=request)
+                _notify("notify_it_queue", request)
+            else:
+                _set(request, constants.STATUS_TO_LEGAL)
+                log_action("request_approved_to_legal", target=request)
+                _notify("notify_legal_queue", request)  # юристам — новая на исполнение
 
 
 @transaction.atomic
@@ -139,7 +145,9 @@ def submit(request: RegulatoryRequest, participants: list[dict], *, flow_type=No
             )
 
     # Заполненное PDF-заявление прикрепляем к заявке (его получат юристы).
-    if request.request_type in (constants.TYPE_POA, constants.TYPE_MCHD):
+    if request.request_type in (
+        constants.TYPE_POA, constants.TYPE_MCHD, constants.TYPE_ECP,
+    ):
         try:
             from . import anketa_pdf
 
@@ -284,6 +292,33 @@ def execute(request: RegulatoryRequest, *, delivery_method: str, delivery_commen
     )
     log_action("request_executed", target=request,
                new_value={"delivery_method": delivery_method})
+    _notify("notify_initiator_executed", request)  # инициатору — подтвердите получение
+
+
+# --- Исполнение ИТ-специалистом объекта (ЭЦП) -------------------------------
+# Процесс проще, чем у доверенности: взял в работу → исполнил. Ни способа
+# передачи, ни обязательного скана ТЗ здесь не требует.
+def it_take_in_work(request: RegulatoryRequest, *, by_b24_id=None):
+    if request.request_type != constants.TYPE_ECP:
+        raise RequestError("Раздел ИТ исполняет только заявки на ЭЦП.")
+    if request.status != constants.STATUS_TO_IT:
+        raise RequestError("Взять в работу можно только заявку, переданную ИТ-специалисту.")
+    _set(request, constants.STATUS_IT_WORK, executor_b24_id=by_b24_id)
+    log_action("request_it_taken", target=request)
+
+
+def it_execute(request: RegulatoryRequest, *, by_b24_id=None, comment: str = ""):
+    if request.request_type != constants.TYPE_ECP:
+        raise RequestError("Раздел ИТ исполняет только заявки на ЭЦП.")
+    if request.status not in (constants.STATUS_TO_IT, constants.STATUS_IT_WORK):
+        raise RequestError("Исполнить можно заявку, переданную ИТ-специалисту или взятую в работу.")
+    _set(
+        request, constants.STATUS_EXECUTED,
+        executor_b24_id=by_b24_id,
+        delivery_comment=comment or request.delivery_comment,
+        executed_at=timezone.now(),
+    )
+    log_action("request_it_executed", target=request)
     _notify("notify_initiator_executed", request)  # инициатору — подтвердите получение
 
 

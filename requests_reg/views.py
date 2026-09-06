@@ -24,7 +24,7 @@ from core.auth import can_view_all, get_current_b24_id, is_admin_mode, is_lawyer
 from core.search import query_param as _query_param
 
 from . import constants, services
-from .models import PowerTemplate, RegulatoryRequest
+from .models import PowerTemplate, RegulatoryRequest, RoleAssignment
 from .search import search
 from .serializers import (
     RegulatoryRequestDetailSerializer,
@@ -191,12 +191,15 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
         ).exists()
 
     def _can_view(self, req) -> bool:
-        """Кто видит карточку заявки: инициатор, любой её согласующий, юрист."""
+        """Кто видит карточку заявки: инициатор, любой её согласующий, юрист,
+        а для ЭЦП — ещё и ИТ-специалист: он её исполняет, значит должен
+        открывать из своей очереди."""
         return (
             req.initiator_b24_id == self.b24_id
             or self._is_participant(req)
             or is_lawyer(self.b24_id)
             or can_view_all(self.b24_id)
+            or (req.request_type == constants.TYPE_ECP and self._is_it_specialist(req))
         )
 
     def get_object(self):
@@ -347,6 +350,68 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
         )
         qs = search(qs, query)
         return Response(RegulatoryRequestListSerializer(qs, many=True).data)
+
+    # --- исполнение заявок на ЭЦП (ИТ-специалист объекта) ---
+    def _is_it_specialist(self, req=None) -> bool:
+        """Я ИТ-специалист — вообще или именно этого объекта.
+
+        Назначение привязывается к объекту, но общее (без объекта) тоже
+        считается: пока ИТ-специалисты не расписаны по отелям, заявки должны
+        кому-то доставаться."""
+        qs = RoleAssignment.objects.filter(
+            role_code=constants.ROLE_IT_SPECIALIST,
+            user_b24_id=self.b24_id,
+            is_active=True,
+        )
+        if req is not None and req.facility_id:
+            return qs.filter(Q(facility=req.facility) | Q(facility__isnull=True)).exists()
+        return qs.exists()
+
+    def _require_it(self, req=None, *, read_only=False):
+        if self._is_it_specialist(req):
+            return
+        if read_only and can_view_all(self.b24_id):
+            return
+        if is_admin_mode(self.request):
+            return
+        raise PermissionDenied("Раздел доступен только ИТ-специалистам.")
+
+    @action(detail=False, methods=["get"], url_path="it_queue")
+    def it_queue(self, request):
+        """Раздел «Работа ИТ»: заявки на ЭЦП, ждущие исполнения."""
+        self._require_it(read_only=True)
+        scope = (request.query_params.get("scope") or "").strip()
+        query = _query_param(request, "q").strip()
+        # При поиске вкладка не сужает выборку — статус искомой заявки заранее
+        # неизвестен (тот же принцип, что в очереди юротдела).
+        statuses = (
+            constants.IT_ALL_STATUSES if query
+            else constants.IT_SCOPES.get(scope, constants.IT_QUEUE_STATUSES)
+        )
+        qs = (
+            RegulatoryRequest.objects.select_related("organization")
+            .filter(request_type=constants.TYPE_ECP, status__in=statuses)
+            .order_by("-id")
+        )
+        qs = search(qs, query)
+        return Response(RegulatoryRequestListSerializer(qs, many=True).data)
+
+    @action(detail=True, methods=["post"], url_path="it_take")
+    def it_take(self, request, pk=None):
+        req = self.get_object()
+        self._require_it(req)
+        return self._run(
+            lambda: services.it_take_in_work(req, by_b24_id=self.b24_id)
+        ) or self._detail(req)
+
+    @action(detail=True, methods=["post"], url_path="it_execute")
+    def it_execute(self, request, pk=None):
+        req = self.get_object()
+        self._require_it(req)
+        return self._run(lambda: services.it_execute(
+            req, by_b24_id=self.b24_id,
+            comment=(request.data.get("comment") or "").strip(),
+        )) or self._detail(req)
 
     @action(detail=True, methods=["post"], url_path="take")
     def take(self, request, pk=None):

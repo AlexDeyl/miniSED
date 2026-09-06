@@ -112,6 +112,9 @@ class RegulatoryRequest(models.Model):
         "Способ передачи", max_length=20, choices=constants.DELIVERY_CHOICES, blank=True
     )
     delivery_comment = models.CharField("Комментарий к передаче", max_length=500, blank=True)
+    # Кто исполнил заявку. Для ЭЦП это ИТ-специалист объекта, взявший её в
+    # работу (у доверенностей исполнителем выступает юротдел как группа).
+    executor_b24_id = models.IntegerField("Исполнитель (ID Б24)", null=True, blank=True)
     executed_at = models.DateTimeField("Исполнена", null=True, blank=True)
     received_at = models.DateTimeField("Получено инициатором", null=True, blank=True)
 

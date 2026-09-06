@@ -112,6 +112,12 @@ const router = createRouter({
       meta: { title: 'Работа юристов', lawyerOnly: true },
     },
     {
+      path: '/it',
+      name: 'it',
+      component: () => import('@/views/ItQueueView.vue'),
+      meta: { title: 'Работа ИТ' },
+    },
+    {
       path: '/other',
       name: 'other',
       component: () => import('@/views/OtherView.vue'),

@@ -36,6 +36,10 @@ STATUS_APPROVED = "approved"
 STATUS_TO_LEGAL = "to_legal"
 STATUS_LEGAL_WORK = "legal_work"
 STATUS_SIGNING = "signing"
+# ЭЦП исполняет не юротдел, а ИТ-специалист объекта — у него своя пара
+# статусов, иначе в карточке ЭЦП было бы написано «Передана юристам».
+STATUS_TO_IT = "to_it"
+STATUS_IT_WORK = "it_work"
 STATUS_EXECUTED = "executed"
 STATUS_CLOSED = "closed"
 STATUS_CANCELED = "canceled"
@@ -49,6 +53,8 @@ STATUS_CHOICES = [
     (STATUS_TO_LEGAL, "Передана юристам"),
     (STATUS_LEGAL_WORK, "В работе у юристов"),
     (STATUS_SIGNING, "На подписании"),
+    (STATUS_TO_IT, "Передана ИТ-специалисту"),
+    (STATUS_IT_WORK, "В работе у ИТ-специалиста"),
     (STATUS_EXECUTED, "Исполнена"),
     (STATUS_CLOSED, "Закрыта"),
     (STATUS_CANCELED, "Отменена"),
@@ -56,6 +62,20 @@ STATUS_CHOICES = [
 
 # из каких статусов инициатор может отменить заявку (до передачи юристам)
 CANCELABLE_STATUSES = [STATUS_DRAFT, STATUS_ON_APPROVAL, STATUS_RETURNED, STATUS_REJECTED]
+
+# --- раздел «Работа ИТ»: исполнение заявок на ЭЦП ------------------------
+# Устроен так же, как очередь юротдела: Новые / В работе / Архив / Все.
+IT_QUEUE_STATUSES = [STATUS_TO_IT, STATUS_IT_WORK]
+IT_NEW_STATUSES = [STATUS_TO_IT]
+IT_WORK_STATUSES = [STATUS_IT_WORK]
+IT_ARCHIVE_STATUSES = [STATUS_EXECUTED, STATUS_CLOSED, STATUS_REJECTED, STATUS_CANCELED]
+IT_ALL_STATUSES = [c for c, _ in STATUS_CHOICES if c != STATUS_DRAFT]
+IT_SCOPES = {
+    "new": IT_NEW_STATUSES,
+    "work": IT_WORK_STATUSES,
+    "archive": IT_ARCHIVE_STATUSES,
+    "all": IT_ALL_STATUSES,
+}
 
 # статусы, попадающие в раздел юристов (активные)
 LEGAL_QUEUE_STATUSES = [STATUS_TO_LEGAL, STATUS_LEGAL_WORK, STATUS_SIGNING]
@@ -114,6 +134,9 @@ ROLE_HR_HEAD = "hr_head"
 ROLE_TECH_DIRECTOR = "tech_director"
 ROLE_OPS_DIRECTOR = "ops_director"
 ROLE_RESTAURANT_DIRECTOR = "restaurant_director"
+# Исполнитель заявки на ЭЦП — ИТ-специалист ОБЪЕКТА (назначение привязывается
+# к объекту, resolve_role берёт самое специфичное).
+ROLE_IT_SPECIALIST = "it_specialist"
 ROLE_FINANCE_DIRECTOR = "finance_director"
 ROLE_LEGAL_DEPT = "legal_dept"
 ROLE_FINAL_SIGNER = "final_signer"
@@ -130,6 +153,7 @@ ROLE_NAMES = {
     ROLE_TECH_DIRECTOR: "Технический директор",
     ROLE_OPS_DIRECTOR: "Операционный директор",
     ROLE_RESTAURANT_DIRECTOR: "Директор ресторанной службы",
+    ROLE_IT_SPECIALIST: "ИТ-специалист объекта",
     ROLE_FINANCE_DIRECTOR: "Финансовый директор УК",
     ROLE_LEGAL_DEPT: "Юридический отдел",
     ROLE_FINAL_SIGNER: "Финальный подписант / генеральный директор",
@@ -178,6 +202,19 @@ ANKETA_ATTACHMENTS = [
     ("passport", "Копия паспорта представителя (для не-сотрудников)"),
     ("charter", "Копия устава / доверенности (если представитель — юр.лицо)"),
     ("memo", "Служебная записка с обоснованием срочности"),
+]
+# Заявка на ЭЦП: свой список приложений и способов получения (ТЗ, раздел 2).
+ANKETA_ECP_ATTACHMENTS = [
+    ("passport", "Копия паспорта представителя (для не-сотрудников)"),
+    ("snils", "Копия СНИЛС представителя (для не-сотрудников)"),
+    ("inn", "Копия ИНН представителя (для не-сотрудников)"),
+    ("memo", "Служебная записка с обоснованием срочности"),
+    ("other", "Иное"),
+]
+ANKETA_ECP_RECEIVE = [
+    ("personally", "Получить лично"),
+    ("courier", "Получить через курьера (третье лицо)"),
+    ("other", "Иным способом"),
 ]
 ANKETA_RECEIVE = [
     ("electronic", "Электронно (МЧД / файл с ЭП)"),

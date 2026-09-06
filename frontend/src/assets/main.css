@@ -217,6 +217,10 @@ a { color: var(--green-main); text-decoration: none; }
 .status-pill.approved { background: #4caf50; }
 .status-pill.to_legal { background: #7b1fa2; }
 .status-pill.legal_work { background: #1976d2; }
+/* Исполнение ЭЦП ведёт ИТ-специалист — свои цвета, чтобы этапы не путались
+   с юротдельскими. */
+.status-pill.to_it { background: #00838f; }
+.status-pill.it_work { background: #0277bd; }
 .status-pill.signing { background: #0288d1; }
 .status-pill.executed { background: var(--green-main); }
 .status-pill.closed { background: #9e9e9e; }

@@ -48,7 +48,21 @@ def profile_payload(profile: UserProfile | None, user=None) -> dict:
         "organizations": list(profile.organizations.values_list("id", flat=True)),
         # Показывать ли раздел «Заявки для исполнения» (комплименты).
         "is_compliment_executor": _is_compliment_executor(profile.bitrix_id),
+        # Показывать ли раздел «Работа ИТ» (исполнение заявок на ЭЦП).
+        "is_it_specialist": _is_it_specialist(profile.bitrix_id),
     }
+
+
+def _is_it_specialist(b24_id) -> bool:
+    """Назначен ли человек ИТ-специалистом (на объект или без привязки)."""
+    if not b24_id:
+        return False
+    from requests_reg import constants as R
+    from requests_reg.models import RoleAssignment
+
+    return RoleAssignment.objects.filter(
+        role_code=R.ROLE_IT_SPECIALIST, user_b24_id=b24_id, is_active=True
+    ).exists()
 
 
 def _is_compliment_executor(b24_id) -> bool:

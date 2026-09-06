@@ -9,6 +9,7 @@ import { useContractsUiStore, CONTRACT_TABS } from '@/stores/contractsUi'
 import { useComplimentsUiStore, COMPLIMENT_TABS, EXECUTION_TABS } from '@/stores/complimentsUi'
 import { useOtherUiStore, OTHER_TABS } from '@/stores/otherUi'
 import { useAdminModeStore } from '@/stores/adminMode'
+import { useItUiStore, IT_TABS } from '@/stores/itUi'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -20,6 +21,7 @@ const contractsUi = useContractsUiStore()
 const complimentsUi = useComplimentsUiStore()
 const otherUi = useOtherUiStore()
 const adminMode = useAdminModeStore()
+const itUi = useItUiStore()
 
 const pageTitle = computed(() => (route.meta.title as string) || 'Минин-СЭД')
 const bare = computed(() => route.meta.noShell === true)
@@ -31,6 +33,7 @@ const onContracts = computed(() => route.name === 'contracts')
 const onCompliments = computed(() => route.name === 'compliments')
 const onExecution = computed(() => route.name === 'execution')
 const onOther = computed(() => route.name === 'other')
+const onIt = computed(() => route.name === 'it')
 // Открыто из Битрикса (в iframe) — тогда «Выйти» не нужен (авто-вход портала).
 const inBitrix = window.self !== window.top
 
@@ -126,6 +129,19 @@ function tabBadge(code: string): number {
             class="sidebar-subtab" :class="{ active: legalUi.scope === t.code }"
             @click="legalUi.scope = t.code"
           >{{ t.label }}</button>
+        </div>
+
+        <!-- Исполнение заявок на ЭЦП: ИТ-специалист объекта -->
+        <RouterLink v-if="auth.isItSpecialist || auth.canViewAll" to="/it">
+          <span>Работа ИТ</span>
+          <span v-if="itUi.newCount" class="nav-badge" title="Ждут исполнения">{{ itUi.newCount }}</span>
+        </RouterLink>
+        <div v-if="onIt" class="sidebar-subtabs">
+          <button
+            v-for="t in IT_TABS" :key="t.code"
+            class="sidebar-subtab" :class="{ active: itUi.scope === t.code }"
+            @click="itUi.scope = t.code"
+          >{{ t.label }}<span v-if="t.code === 'new' && itUi.newCount" class="subtab-badge">{{ itUi.newCount }}</span></button>
         </div>
 
         <RouterLink to="/deals"><span>Поиск сделок</span></RouterLink>

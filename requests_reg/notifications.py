@@ -207,6 +207,30 @@ def notify_legal_queue(request):
               link=_card_link(request), link_text="Открыть заявку")
 
 
+def notify_it_queue(request):
+    """ИТ-специалистам — заявка на ЭЦП передана на исполнение.
+
+    Зовём тех, кто назначен ИТ-специалистом на объект заявки; если такого
+    назначения нет — всех, у кого эта роль есть вообще, иначе заявка легла бы
+    в очередь молча."""
+    from .models import RoleAssignment
+    from . import constants
+
+    qs = RoleAssignment.objects.filter(
+        role_code=constants.ROLE_IT_SPECIALIST, is_active=True
+    )
+    ids = list(
+        qs.filter(facility=request.facility).values_list("user_b24_id", flat=True)
+    ) if request.facility_id else []
+    if not ids:
+        ids = list(qs.values_list("user_b24_id", flat=True))
+
+    b24, emails = _recipients(ids)
+    _dispatch(b24, emails, "Новая заявка на ЭЦП",
+              f"Заявка передана ИТ-специалисту на исполнение: {_label(request)}",
+              link=_card_link(request), link_text="Открыть заявку")
+
+
 def notify_initiator_executed(request):
     """Инициатору — заявка исполнена, нужно подтвердить получение."""
     b24, emails = _recipients([request.initiator_b24_id])

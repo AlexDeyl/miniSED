@@ -59,15 +59,14 @@ class RoutingTests(TestCase):
         codes = [s["role_code"] for s in routing.build_route(self._req())]
         self.assertNotIn(C.ROLE_FINAL_SIGNER, codes)
 
-    def test_mchd_and_ecp_keep_final_signer(self):
-        """У МЧД и ЭЦП бумажной подписи нет — ГД остаётся согласующим."""
-        for rtype in (C.TYPE_MCHD, C.TYPE_ECP):
-            with self.subTest(request_type=rtype):
-                codes = [s["role_code"] for s in
-                         routing.build_route(self._req(request_type=rtype))]
-                self.assertIn(C.ROLE_FINAL_SIGNER, codes)
-                # и он последний в маршруте — подписант замыкает согласование
-                self.assertEqual(codes[-1], C.ROLE_FINAL_SIGNER)
+    def test_mchd_keeps_final_signer(self):
+        """ГД остаётся согласующим только у МЧД: обычную доверенность он
+        подписывает на бумаге, а в маршруте ЭЦП его по ТЗ нет вовсе."""
+        codes = [s["role_code"] for s in
+                 routing.build_route(self._req(request_type=C.TYPE_MCHD))]
+        self.assertIn(C.ROLE_FINAL_SIGNER, codes)
+        # и он последний в маршруте — подписант замыкает согласование
+        self.assertEqual(codes[-1], C.ROLE_FINAL_SIGNER)
 
     def test_sales_category_adds_sales_head(self):
         codes = [s["role_code"] for s in routing.build_route(self._req(cfo=self.cfo_sales))]
@@ -927,3 +926,125 @@ class MachineReadableDetectionTests(TestCase):
         )
         with self.assertRaises(services.RequestError):
             services.submit(req, [internal(10, 0, C.ROLE_CFO_HEAD)])
+
+
+class EcpRouteAndExecutionTests(TestCase):
+    """Заявка на ЭЦП: маршрут короче доверенности, а исполняет её не юротдел,
+    а ИТ-специалист объекта (ТЗ «Базовый маршрут ЭЦП»)."""
+
+    IT = 700
+    INITIATOR = 1
+
+    def setUp(self):
+        self.org = Organization.objects.create(short_name="УК Норд")
+        self.hotel = Facility.objects.create(name="Отель Введенский", organization=self.org)
+        self.cfo_sales = CFO.objects.create(name="Продажи", organization=self.org, category="sales")
+        RoleAssignment.objects.create(
+            role_code=C.ROLE_IT_SPECIALIST, facility=self.hotel,
+            user_b24_id=self.IT, user_name="ИТ-специалист",
+        )
+
+    def _ecp(self, cfo=None):
+        return services.create_request(
+            request_type=C.TYPE_ECP, organization=self.org, facility=self.hotel,
+            cfo=cfo, initiator_b24_id=self.INITIATOR, subject_name="Петров",
+        )
+
+    # --- маршрут ---
+    def test_route_is_cfo_head_only(self):
+        """Без ЦФО-условий маршрут ЭЦП — один руководитель ЦФО: ни финдиректора,
+        ни юротдела, ни ГД в нём нет."""
+        codes = [s["role_code"] for s in routing.build_route(self._ecp())]
+        self.assertEqual(codes, [C.ROLE_CFO_HEAD])
+
+    def test_conditional_roles_still_apply(self):
+        codes = [s["role_code"] for s in routing.build_route(self._ecp(cfo=self.cfo_sales))]
+        self.assertEqual(codes, [C.ROLE_CFO_HEAD, C.ROLE_SALES_HEAD])
+
+    def test_poa_route_unchanged(self):
+        """Доверенность свой маршрут не потеряла — финдиректор и юротдел на месте."""
+        poa = services.create_request(
+            request_type=C.TYPE_POA, organization=self.org, initiator_b24_id=1,
+        )
+        codes = [s["role_code"] for s in routing.build_route(poa)]
+        self.assertEqual(codes, [C.ROLE_CFO_HEAD, C.ROLE_FINANCE_DIRECTOR, C.ROLE_LEGAL_DEPT])
+
+    def test_mchd_keeps_final_signer_ecp_does_not(self):
+        mchd = services.create_request(
+            request_type=C.TYPE_MCHD, organization=self.org, initiator_b24_id=1,
+            data={"rep": {"inn": "500100732259", "snils": "112-233-445 95"}},
+        )
+        self.assertIn(C.ROLE_FINAL_SIGNER,
+                      [s["role_code"] for s in routing.build_route(mchd)])
+        self.assertNotIn(C.ROLE_FINAL_SIGNER,
+                         [s["role_code"] for s in routing.build_route(self._ecp())])
+
+    # --- исполнение ---
+    def test_approved_ecp_goes_to_it_not_legal(self):
+        req = self._ecp()
+        services.submit(req, [internal(10, 0, C.ROLE_CFO_HEAD)])
+        pid = services.get_approval(req).rounds.first().participants.first().id
+        services.decide(req, pid, "approve")
+        req.refresh_from_db()
+        self.assertEqual(req.status, C.STATUS_TO_IT)
+
+    def test_full_execution_cycle(self):
+        req = self._ecp()
+        services.submit(req, [internal(10, 0, C.ROLE_CFO_HEAD)])
+        pid = services.get_approval(req).rounds.first().participants.first().id
+        services.decide(req, pid, "approve")
+
+        r = api(self.IT).post(f"/api/reg/requests/{req.id}/it_take/", {}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        req.refresh_from_db()
+        self.assertEqual(req.status, C.STATUS_IT_WORK)
+        self.assertEqual(req.executor_b24_id, self.IT)
+
+        r = api(self.IT).post(f"/api/reg/requests/{req.id}/it_execute/",
+                              {"comment": "выдана"}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        req.refresh_from_db()
+        self.assertEqual(req.status, C.STATUS_EXECUTED)
+        self.assertIsNotNone(req.executed_at)
+
+        # инициатор подтверждает получение — заявка закрывается
+        services.confirm_receipt(req, by_b24_id=self.INITIATOR)
+        req.refresh_from_db()
+        self.assertEqual(req.status, C.STATUS_CLOSED)
+
+    def test_queue_and_card_closed_for_strangers(self):
+        req = self._ecp()
+        services.submit(req, [internal(10, 0, C.ROLE_CFO_HEAD)])
+        pid = services.get_approval(req).rounds.first().participants.first().id
+        services.decide(req, pid, "approve")
+
+        self.assertEqual(api(self.IT).get("/api/reg/requests/it_queue/").status_code, 200)
+        self.assertEqual(api(999).get("/api/reg/requests/it_queue/").status_code, 403)
+        # посторонний не исполнит и не откроет карточку
+        self.assertEqual(
+            api(999).post(f"/api/reg/requests/{req.id}/it_take/", {}, format="json").status_code,
+            404,
+        )
+        self.assertEqual(api(self.IT).get(f"/api/reg/requests/{req.id}/").status_code, 200)
+
+    def test_it_queue_holds_only_ecp(self):
+        """Доверенности в очередь ИТ не попадают — у них свой раздел."""
+        poa = services.create_request(
+            request_type=C.TYPE_POA, organization=self.org, initiator_b24_id=1,
+        )
+        services.submit(poa, [internal(10, 0, C.ROLE_CFO_HEAD)])
+        pid = services.get_approval(poa).rounds.first().participants.first().id
+        services.decide(poa, pid, "approve")
+        poa.refresh_from_db()
+        self.assertEqual(poa.status, C.STATUS_TO_LEGAL)
+
+        ids = {x["id"] for x in api(self.IT).get(
+            "/api/reg/requests/it_queue/?scope=all").json()}
+        self.assertNotIn(poa.id, ids)
+
+    def test_it_cannot_execute_foreign_type(self):
+        poa = services.create_request(
+            request_type=C.TYPE_POA, organization=self.org, initiator_b24_id=1,
+        )
+        with self.assertRaises(services.RequestError):
+            services.it_take_in_work(poa, by_b24_id=self.IT)

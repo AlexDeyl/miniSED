@@ -31,6 +31,8 @@ export const useAuthStore = defineStore('auth', () => {
   const canViewAll = computed(() => !!profile.value?.permissions?.includes('view_all'))
   // Исполнитель комплиментов — ему виден раздел «Заявки для исполнения».
   const isComplimentExecutor = computed(() => !!profile.value?.is_compliment_executor)
+  // ИТ-специалист — ему виден раздел «Работа ИТ» (исполнение заявок на ЭЦП).
+  const isItSpecialist = computed(() => !!profile.value?.is_it_specialist)
 
   function ls(key: string, value?: string | null): string | null {
     try {
@@ -146,7 +148,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   return {
     token, profile, b24UserId, ready, isAuthenticated, displayName, isLawyer,
-    canViewAll, isComplimentExecutor,
+    canViewAll, isComplimentExecutor, isItSpecialist,
     login, bitrixLogin, applyToken, logout, init,
   }
 })
