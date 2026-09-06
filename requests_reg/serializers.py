@@ -82,8 +82,8 @@ class RegulatoryRequestWriteSerializer(serializers.ModelSerializer):
         rtype = attrs.get("request_type") or getattr(self.instance, "request_type", None)
         created_at = getattr(self.instance, "created_at", None)
         if (
-            rtype == constants.TYPE_MCHD
-            and isinstance(data, dict)
+            isinstance(data, dict)
+            and validators.is_machine_readable(rtype, data)
             and validators.identifiers_required(created_at)
         ):
             err = validators.mchd_rep_error(data)

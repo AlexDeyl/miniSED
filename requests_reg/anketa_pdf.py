@@ -21,7 +21,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 from approvalflow.sheet import _ensure_font
 from . import constants as C
 from .models import PowerTemplate
-from .validators import format_snils
+from .validators import format_snils, is_machine_readable
 
 
 import re
@@ -114,7 +114,7 @@ def render_pdf(request) -> bytes:
     # ИНН и СНИЛС — обязательные реквизиты МЧД (ими ФНС идентифицирует
     # представителя). Для бумажной доверенности печатаем их, только если
     # инициатор всё же заполнил: там представителя удостоверяет паспорт.
-    is_mchd = request.request_type == C.TYPE_MCHD
+    is_mchd = is_machine_readable(request.request_type, data)
     ids_rows = []
     if is_mchd or rep.get("inn"):
         ids_rows.append(("ИНН", rep.get("inn") or "—"))

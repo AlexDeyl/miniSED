@@ -844,3 +844,54 @@ class RequestScopeTests(TestCase):
             "role": C.ROLE_LEGAL_DEPT,
         }])
         self.assertEqual(self._ids(31, "participant"), {req.id})
+
+
+class MachineReadableDetectionTests(TestCase):
+    """«МЧД» в форме говорится в трёх местах: тип заявки, тип доверенности и
+    форма выдачи. Требование об ИНН/СНИЛС должно срабатывать по любому из них —
+    иначе доверенность, поданная как обычная, но машиночитаемая по анкете,
+    уходила бы к юристам без реквизитов, которых требует ФНС."""
+
+    VALID = {"inn": "500100732259", "snils": "112-233-445 95"}
+
+    def setUp(self):
+        self.org = Organization.objects.create(short_name="УК Норд")
+
+    def test_detection_rule(self):
+        mr = validators.is_machine_readable
+        self.assertTrue(mr(C.TYPE_MCHD, {}))
+        self.assertTrue(mr(C.TYPE_POA, {"poa_type": "mchd"}))
+        self.assertTrue(mr(C.TYPE_POA, {"form": "mchd"}))
+        self.assertFalse(mr(C.TYPE_POA, {"poa_type": "special", "form": "standard"}))
+        self.assertFalse(mr(C.TYPE_POA, None))
+
+    def _post(self, data):
+        return api(1).post("/api/reg/requests/", {
+            "request_type": "poa", "organization": self.org.id,
+            "subject_name": "Петров", "data": data,
+        }, format="json")
+
+    def test_poa_with_mchd_type_requires_identifiers(self):
+        r = self._post({"poa_type": "mchd", "rep": {}})
+        self.assertEqual(r.status_code, 400, r.content)
+        self.assertIn("ИНН", str(r.json()))
+
+    def test_poa_with_mchd_form_requires_identifiers(self):
+        r = self._post({"form": "mchd", "rep": {}})
+        self.assertEqual(r.status_code, 400, r.content)
+
+    def test_plain_poa_still_free(self):
+        r = self._post({"poa_type": "special", "rep": {}})
+        self.assertEqual(r.status_code, 201, r.content)
+
+    def test_poa_with_mchd_type_accepted_when_filled(self):
+        r = self._post({"poa_type": "mchd", "rep": dict(self.VALID)})
+        self.assertEqual(r.status_code, 201, r.content)
+
+    def test_submit_gate_uses_same_rule(self):
+        req = services.create_request(
+            request_type=C.TYPE_POA, organization=self.org, initiator_b24_id=1,
+            data={"poa_type": "mchd"},
+        )
+        with self.assertRaises(services.RequestError):
+            services.submit(req, [internal(10, 0, C.ROLE_CFO_HEAD)])

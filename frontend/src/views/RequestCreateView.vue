@@ -118,8 +118,14 @@ async function uploadAttachments(reqId: number) {
 
 const isAnketa = computed(() => requestType.value === 'poa' || requestType.value === 'mchd')
 // ИНН и СНИЛС нужны только машиночитаемой доверенности: для бумажной
-// представителя удостоверяет паспорт.
-const isMchd = computed(() => requestType.value === 'mchd')
+// представителя удостоверяет паспорт. «МЧД» в форме говорится в трёх местах —
+// тип заявки, тип доверенности и форма выдачи; инициатор пользуется любым,
+// поэтому смотрим на все три (та же логика на сервере).
+const isMchd = computed(() =>
+  requestType.value === 'mchd'
+  || data.poa_type === 'mchd'
+  || data.form === 'mchd',
+)
 
 // СНИЛС приводим к привычному виду XXX-XXX-XXX YY, как код подразделения.
 function onSnilsBlur() {

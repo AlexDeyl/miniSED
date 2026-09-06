@@ -122,9 +122,9 @@ def submit(request: RegulatoryRequest, participants: list[dict], *, flow_type=No
     # быть создана и другим путём — здесь последний рубеж перед маршрутом.
     # Заявки, поданные до введения требования, правило не задевает: анкету
     # поданной заявки не отредактировать, и они бы намертво застряли.
-    if request.request_type == constants.TYPE_MCHD and validators.identifiers_required(
-        request.created_at
-    ):
+    if validators.is_machine_readable(
+        request.request_type, request.data
+    ) and validators.identifiers_required(request.created_at):
         err = validators.mchd_rep_error(request.data)
         if err:
             raise RequestError(err)

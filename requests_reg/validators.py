@@ -68,6 +68,21 @@ def format_snils(value: str | None) -> str:
     return f"{d[0:3]}-{d[3:6]}-{d[6:9]} {d[9:]}"
 
 
+def is_machine_readable(request_type: str, data=None) -> bool:
+    """Машиночитаемая ли доверенность.
+
+    «МЧД» в интерфейсе говорится в трёх местах: тип заявки, «тип доверенности»
+    и «форма выдачи» в анкете. Инициатор пользуется любым из них — на dev уже
+    есть доверенность, поданная как обычная, но с типом и формой МЧД. Для ФНС
+    это одна и та же машиночитаемая доверенность, поэтому и требование об
+    ИНН/СНИЛС одно, по любому из признаков.
+    """
+    if request_type == constants.TYPE_MCHD:
+        return True
+    d = data or {}
+    return d.get("poa_type") == constants.TYPE_MCHD or d.get("form") == constants.TYPE_MCHD
+
+
 def identifiers_required(created_at=None) -> bool:
     """Подпадает ли заявка под требование ИНН/СНИЛС.
 
