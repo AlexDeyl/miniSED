@@ -308,8 +308,8 @@ class UserProfile(models.Model):
 
     class Meta:
         ordering = ["fio"]
-        verbose_name = "Пользователь Минин-СЭД"
-        verbose_name_plural = "Пользователи Минин-СЭД"
+        verbose_name = "Пользователь MiniSED"
+        verbose_name_plural = "Пользователи MiniSED"
 
     def __str__(self):
         return self.fio or (f"USER#{self.bitrix_id}" if self.bitrix_id else f"#{self.pk}")
