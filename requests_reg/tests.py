@@ -1010,3 +1010,41 @@ class EcpRouteAndExecutionTests(TestCase):
         )
         with self.assertRaises(services.RequestError):
             services.it_take_in_work(poa, by_b24_id=self.IT)
+
+
+class MchdPlaceholderTests(TestCase):
+    """Прочерк в графе ИНН/СНИЛС — это «значения нет», а не ошибка.
+
+    Для МЧД через Госуслуги эти данные не нужны, и в бумажных бланках туда
+    ставят прочерк; человек повторяет привычку в форме."""
+
+    def setUp(self):
+        self.org = Organization.objects.create(short_name="УК Норд")
+
+    def _post(self, rep):
+        return api(1).post("/api/reg/requests/", {
+            "request_type": "mchd", "organization": self.org.id,
+            "subject_name": "Петров", "data": {"rep": rep},
+        }, format="json")
+
+    def test_placeholders_accepted(self):
+        for value in ("—", "-", "нет", "н/д", "прочерк", "  "):
+            with self.subTest(value=value):
+                self.assertTrue(validators.is_placeholder(value))
+                self.assertEqual(self._post({"inn": value, "snils": value}).status_code, 201)
+
+    def test_digits_still_checked(self):
+        """Появились цифры — значит человек вводил номер, и опечатку ловим."""
+        self.assertFalse(validators.is_placeholder("500100732250"))
+        self.assertEqual(self._post({"inn": "500100732250"}).status_code, 400)
+        # частично введённый номер — тоже ошибка, а не «прочерк»
+        self.assertEqual(self._post({"snils": "112-233"}).status_code, 400)
+
+    def test_submit_passes_with_placeholders(self):
+        req = services.create_request(
+            request_type=C.TYPE_MCHD, organization=self.org, initiator_b24_id=1,
+            data={"rep": {"inn": "—", "snils": "—"}},
+        )
+        services.submit(req, [internal(10, 0, C.ROLE_CFO_HEAD)])
+        req.refresh_from_db()
+        self.assertEqual(req.status, C.STATUS_ON_APPROVAL)

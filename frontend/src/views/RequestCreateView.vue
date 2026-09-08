@@ -5,7 +5,7 @@ import { requests, type Cfo, type Facility, type Organization } from '@/services
 import { ApiError } from '@/services/api'
 import type { RequestType } from '@/types/request'
 import AddressAutocomplete from '@/components/AddressAutocomplete.vue'
-import { formatSnils, isValidInn, isValidSnils } from '@/utils/personal'
+import { formatSnils, isPlaceholder, isValidInn, isValidSnils } from '@/utils/personal'
 
 const router = useRouter()
 
@@ -151,7 +151,8 @@ const isMchd = computed(() =>
 
 // СНИЛС приводим к привычному виду XXX-XXX-XXX YY, как код подразделения.
 function onSnilsBlur() {
-  rep.snils = formatSnils(rep.snils)
+  // Прочерк оставляем как есть — форматировать нечего.
+  if (!isPlaceholder(rep.snils)) rep.snils = formatSnils(rep.snils)
 }
 
 // Максимальная дата окончания срока — не более 3 лет от даты начала.
@@ -204,14 +205,14 @@ function validate(): string | null {
     if (rep.birth_date > isoMinusYears(18)) return 'Раздел 1: представитель должен быть старше 18 лет.'
     if (!rep.position.trim()) return 'Раздел 1: укажите должность представителя.'
 
-    // МЧД: ИНН и СНИЛС не обязательны — на Госуслугах их не требуют. Но если
-    // заполнены, проверяем контрольные разряды: молча принять опечатку хуже,
-    // чем не иметь поля вовсе — она вскроется отказом ФНС (те же правила на
-    // сервере).
+    // МЧД: ИНН и СНИЛС не обязательны — на Госуслугах их не требуют, и в графу
+    // можно поставить прочерк. Но если введены цифры, проверяем контрольные
+    // разряды: молча принять опечатку хуже, чем не иметь поля вовсе — она
+    // вскроется отказом ФНС (те же правила на сервере).
     if (isMchd.value) {
-      if (rep.inn.trim() && !isValidInn(rep.inn))
+      if (!isPlaceholder(rep.inn) && !isValidInn(rep.inn))
         return 'Раздел 1: проверьте ИНН — должно быть 12 цифр, контрольный разряд не сходится.'
-      if (rep.snils.trim() && !isValidSnils(rep.snils))
+      if (!isPlaceholder(rep.snils) && !isValidSnils(rep.snils))
         return 'Раздел 1: проверьте СНИЛС — должно быть 11 цифр, контрольное число не сходится.'
     }
 
@@ -420,11 +421,11 @@ async function save() {
           </div>
           <div v-if="isMchd" class="form-row">
             <label class="form-field">
-              <span>ИНН представителя</span>
+              <span>ИНН представителя (не обязателен, если Госуслуги)</span>
               <input v-model="rep.inn" inputmode="numeric" maxlength="12" placeholder="12 цифр" />
             </label>
             <label class="form-field">
-              <span>СНИЛС представителя</span>
+              <span>СНИЛС представителя (не обязателен, если Госуслуги)</span>
               <input
                 v-model="rep.snils" @blur="onSnilsBlur"
                 inputmode="numeric" maxlength="14" placeholder="123-456-789 01"
