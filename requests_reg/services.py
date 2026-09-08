@@ -123,14 +123,11 @@ def submit(request: RegulatoryRequest, participants: list[dict], *, flow_type=No
     if not participants:
         raise RequestError("Маршрут пуст — добавьте согласующих.")
 
-    # МЧД без ИНН/СНИЛС представителя отправлять некуда: ФНС такую доверенность
-    # не примет. Сериализатор ловит это при сохранении анкеты, но заявка могла
-    # быть создана и другим путём — здесь последний рубеж перед маршрутом.
-    # Заявки, поданные до введения требования, правило не задевает: анкету
-    # поданной заявки не отредактировать, и они бы намертво застряли.
-    if validators.is_machine_readable(
-        request.request_type, request.data
-    ) and validators.identifiers_required(request.created_at):
+    # ИНН/СНИЛС у МЧД не обязательны, но заполненные с опечаткой отправлять
+    # нельзя: ФНС такую доверенность отклонит. Сериализатор ловит это при
+    # сохранении анкеты, но заявка могла быть создана и другим путём — здесь
+    # последний рубеж перед маршрутом.
+    if validators.is_machine_readable(request.request_type, request.data):
         err = validators.mchd_rep_error(request.data)
         if err:
             raise RequestError(err)

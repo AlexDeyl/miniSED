@@ -204,15 +204,14 @@ function validate(): string | null {
     if (rep.birth_date > isoMinusYears(18)) return 'Раздел 1: представитель должен быть старше 18 лет.'
     if (!rep.position.trim()) return 'Раздел 1: укажите должность представителя.'
 
-    // МЧД: ФНС опознаёт представителя по ИНН и СНИЛС — без них доверенность
-    // не примут, поэтому оба поля обязательны и проверяются по контрольным
-    // разрядам (те же правила на сервере).
+    // МЧД: ИНН и СНИЛС не обязательны — на Госуслугах их не требуют. Но если
+    // заполнены, проверяем контрольные разряды: молча принять опечатку хуже,
+    // чем не иметь поля вовсе — она вскроется отказом ФНС (те же правила на
+    // сервере).
     if (isMchd.value) {
-      if (!rep.inn.trim()) return 'Раздел 1: для МЧД укажите ИНН представителя.'
-      if (!isValidInn(rep.inn))
+      if (rep.inn.trim() && !isValidInn(rep.inn))
         return 'Раздел 1: проверьте ИНН — должно быть 12 цифр, контрольный разряд не сходится.'
-      if (!rep.snils.trim()) return 'Раздел 1: для МЧД укажите СНИЛС представителя.'
-      if (!isValidSnils(rep.snils))
+      if (rep.snils.trim() && !isValidSnils(rep.snils))
         return 'Раздел 1: проверьте СНИЛС — должно быть 11 цифр, контрольное число не сходится.'
     }
 
@@ -421,11 +420,11 @@ async function save() {
           </div>
           <div v-if="isMchd" class="form-row">
             <label class="form-field">
-              <span>ИНН представителя *</span>
+              <span>ИНН представителя</span>
               <input v-model="rep.inn" inputmode="numeric" maxlength="12" placeholder="12 цифр" />
             </label>
             <label class="form-field">
-              <span>СНИЛС представителя *</span>
+              <span>СНИЛС представителя</span>
               <input
                 v-model="rep.snils" @blur="onSnilsBlur"
                 inputmode="numeric" maxlength="14" placeholder="123-456-789 01"

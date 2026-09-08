@@ -76,16 +76,11 @@ class RegulatoryRequestWriteSerializer(serializers.ModelSerializer):
         # Серверная страховка правил анкеты (фронт проверяет то же самое).
         data = attrs.get("data")
 
-        # МЧД: представителя идентифицируют ИНН и СНИЛС — без них ФНС
-        # доверенность не примет. Проверяем, только когда анкету присылают:
-        # PATCH одного поля (например комментария) не должен спотыкаться.
+        # МЧД: ИНН и СНИЛС не обязательны (на Госуслугах их не требуют), но
+        # заполненные — проверяем по контрольным разрядам. Только когда анкету
+        # присылают: PATCH одного поля не должен спотыкаться.
         rtype = attrs.get("request_type") or getattr(self.instance, "request_type", None)
-        created_at = getattr(self.instance, "created_at", None)
-        if (
-            isinstance(data, dict)
-            and validators.is_machine_readable(rtype, data)
-            and validators.identifiers_required(created_at)
-        ):
+        if isinstance(data, dict) and validators.is_machine_readable(rtype, data):
             err = validators.mchd_rep_error(data)
             if err:
                 raise serializers.ValidationError({"detail": err})

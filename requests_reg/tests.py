@@ -717,13 +717,15 @@ class MchdIdentifiersTests(TestCase):
             "subject_name": "Петров", "data": {"rep": rep},
         }, format="json")
 
-    def test_mchd_rejected_without_inn(self):
-        r = self._post("mchd", {"snils": self.VALID["snils"]})
-        self.assertEqual(r.status_code, 400, r.content)
-        self.assertIn("ИНН", str(r.json()))
+    def test_mchd_accepted_without_identifiers(self):
+        """На Госуслугах ИНН и СНИЛС для МЧД не требуют — пустые поля не ошибка."""
+        self.assertEqual(self._post("mchd", {}).status_code, 201)
+        self.assertEqual(self._post("mchd", {"inn": self.VALID["inn"]}).status_code, 201)
+        self.assertEqual(self._post("mchd", {"snils": self.VALID["snils"]}).status_code, 201)
 
-    def test_mchd_rejected_without_snils(self):
-        r = self._post("mchd", {"inn": self.VALID["inn"]})
+    def test_typo_still_rejected(self):
+        """Заполнил — значит проверяем: опечатку ФНС всё равно не пропустит."""
+        r = self._post("mchd", {"snils": "112-233-445 96"})
         self.assertEqual(r.status_code, 400, r.content)
         self.assertIn("СНИЛС", str(r.json()))
 
@@ -748,9 +750,20 @@ class MchdIdentifiersTests(TestCase):
         self.assertEqual(r.status_code, 200, r.content)
 
     # --- гейт на отправке (заявка могла быть создана в обход анкеты) ---
-    def test_submit_blocked_without_identifiers(self):
+    def test_submit_allowed_without_identifiers(self):
+        """Заявку без ИНН/СНИЛС отправить можно — поля не обязательные."""
         req = services.create_request(
             request_type=C.TYPE_MCHD, organization=self.org, initiator_b24_id=1,
+        )
+        services.submit(req, [internal(10, 0, C.ROLE_CFO_HEAD)])
+        req.refresh_from_db()
+        self.assertEqual(req.status, C.STATUS_ON_APPROVAL)
+
+    def test_submit_blocked_on_typo(self):
+        """А вот заполненный с ошибкой ИНН отправку останавливает."""
+        req = services.create_request(
+            request_type=C.TYPE_MCHD, organization=self.org, initiator_b24_id=1,
+            data={"rep": {"inn": "500100732250"}},
         )
         with self.assertRaises(services.RequestError) as ctx:
             services.submit(req, [internal(10, 0, C.ROLE_CFO_HEAD)])
@@ -766,58 +779,6 @@ class MchdIdentifiersTests(TestCase):
         services.submit(req, [internal(10, 0, C.ROLE_CFO_HEAD)])
         req.refresh_from_db()
         self.assertEqual(req.status, C.STATUS_ON_APPROVAL)
-
-
-class MchdIdentifiersGrandfatheringTests(TestCase):
-    """Заявки, поданные до введения требования, правило не задевает.
-
-    Анкету поданной заявки в интерфейсе не отредактировать: примени правило
-    задним числом — и такую заявку нельзя было бы ни отправить, ни исправить."""
-
-    VALID = {"inn": "500100732259", "snils": "112-233-445 95"}
-
-    def setUp(self):
-        self.org = Organization.objects.create(short_name="УК Норд")
-
-    def _mchd(self, created: date, data=None):
-        req = services.create_request(
-            request_type=C.TYPE_MCHD, organization=self.org, initiator_b24_id=1,
-            data=data or {},
-        )
-        # created_at — auto_now_add, поэтому переставляем датой напрямую
-        moment = timezone.make_aware(datetime(created.year, created.month, created.day, 12, 0))
-        RegulatoryRequest.objects.filter(id=req.id).update(created_at=moment)
-        req.refresh_from_db()
-        return req
-
-    def test_old_request_submits_without_identifiers(self):
-        cutoff = C.MCHD_IDENTIFIERS_REQUIRED_FROM
-        req = self._mchd(cutoff - timedelta(days=1))
-        services.submit(req, [internal(10, 0, C.ROLE_CFO_HEAD)])
-        req.refresh_from_db()
-        self.assertEqual(req.status, C.STATUS_ON_APPROVAL)
-
-    def test_request_from_cutoff_day_requires_identifiers(self):
-        """В сам день введения правило уже действует."""
-        req = self._mchd(C.MCHD_IDENTIFIERS_REQUIRED_FROM)
-        with self.assertRaises(services.RequestError):
-            services.submit(req, [internal(10, 0, C.ROLE_CFO_HEAD)])
-
-    def test_old_request_can_be_patched_without_identifiers(self):
-        """Старую заявку можно править, не заполняя ИНН/СНИЛС."""
-        req = self._mchd(C.MCHD_IDENTIFIERS_REQUIRED_FROM - timedelta(days=5),
-                         data={"rep": {"last_name": "Петров"}})
-        r = api(1).patch(f"/api/reg/requests/{req.id}/",
-                         {"data": {"rep": {"last_name": "Петров-Водкин"}}}, format="json")
-        self.assertEqual(r.status_code, 200, r.content)
-
-    def test_new_request_still_requires_identifiers(self):
-        """Новые заявки создаются уже по новому правилу."""
-        r = api(1).post("/api/reg/requests/", {
-            "request_type": "mchd", "organization": self.org.id,
-            "subject_name": "Петров", "data": {"rep": {}},
-        }, format="json")
-        self.assertEqual(r.status_code, 400, r.content)
 
 
 class RequestScopeTests(TestCase):
@@ -902,13 +863,14 @@ class MachineReadableDetectionTests(TestCase):
             "subject_name": "Петров", "data": data,
         }, format="json")
 
-    def test_poa_with_mchd_type_requires_identifiers(self):
-        r = self._post({"poa_type": "mchd", "rep": {}})
+    def test_poa_with_mchd_type_checks_filled_identifiers(self):
+        """Признак машиночитаемости включает проверку, но не обязательность."""
+        self.assertEqual(self._post({"poa_type": "mchd", "rep": {}}).status_code, 201)
+        r = self._post({"poa_type": "mchd", "rep": {"inn": "500100732250"}})
         self.assertEqual(r.status_code, 400, r.content)
-        self.assertIn("ИНН", str(r.json()))
 
-    def test_poa_with_mchd_form_requires_identifiers(self):
-        r = self._post({"form": "mchd", "rep": {}})
+    def test_poa_with_mchd_form_checks_filled_identifiers(self):
+        r = self._post({"form": "mchd", "rep": {"snils": "112-233-445 96"}})
         self.assertEqual(r.status_code, 400, r.content)
 
     def test_plain_poa_still_free(self):
@@ -922,7 +884,7 @@ class MachineReadableDetectionTests(TestCase):
     def test_submit_gate_uses_same_rule(self):
         req = services.create_request(
             request_type=C.TYPE_POA, organization=self.org, initiator_b24_id=1,
-            data={"poa_type": "mchd"},
+            data={"poa_type": "mchd", "rep": {"snils": "112-233-445 96"}},
         )
         with self.assertRaises(services.RequestError):
             services.submit(req, [internal(10, 0, C.ROLE_CFO_HEAD)])
