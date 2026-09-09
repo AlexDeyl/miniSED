@@ -2,9 +2,13 @@
 /**
  * Поиск и выбор сотрудника текстом (вместо длинного выпадающего списка).
  *
- * Локальная матрица (UserProfile) фильтруется МГНОВЕННО по мере ввода.
- * Поиск в Битриксе — по явной кнопке «Искать в Битриксе» (не на каждую букву):
- * так не тормозит ввод и не держит воркеры, если портал недоступен/медленный.
+ * Печатаешь ФИО — подсказки приходят СРАЗУ из двух источников: локальная
+ * матрица (UserProfile) фильтруется мгновенно, портал Битрикса опрашивается
+ * с задержкой BX_DEBOUNCE, чтобы не дёргать его на каждую букву. Ответы
+ * нумеруются: пришедший позже ответ на устаревший запрос отбрасывается.
+ *
+ * Если портал недоступен или медленный, авто-поиск выключается до конца
+ * сессии и остаётся кнопка «Искать в Битриксе» — ввод не тормозит.
  *
  * v-model — строковый b24_user_id ('' = не выбран). @pick — полная запись.
  */
@@ -17,14 +21,21 @@ const emit = defineEmits<{ 'update:modelValue': [v: string]; pick: [u: UserOptio
 
 interface Item { bitrix_id: number; fio: string; position: string; source: 'matrix' | 'bitrix' }
 
+const MIN_CHARS = 2       // с одной буквы искать в портале бессмысленно
+const BX_DEBOUNCE = 350   // мс тишины в наборе перед запросом к Битриксу
+
 const query = ref('')
 const local = ref<Item[]>([])
 const bx = ref<Item[]>([])
 const bxLoading = ref(false)
 const bxSearched = ref(false)
+// Портал ответил ошибкой — дальше не дёргаем его автоматически, показываем кнопку.
+const bxAuto = ref(true)
 const open = ref(false)
 const active = ref(-1)
 let timer: ReturnType<typeof setTimeout> | null = null
+let bxTimer: ReturnType<typeof setTimeout> | null = null
+let bxSeq = 0 // номер запроса: ответ на устаревший запрос игнорируем
 
 function labelFor(id: string): string {
   const u = props.users.find((x) => String(x.bitrix_id) === id)
@@ -45,7 +56,7 @@ function localMatches(q: string): Item[] {
 }
 
 const items = computed<Item[]>(() => [...local.value, ...bx.value])
-const canBitrix = computed(() => query.value.trim().length >= 2)
+const canBitrix = computed(() => query.value.trim().length >= MIN_CHARS)
 
 function onInput(e: Event) {
   query.value = (e.target as HTMLInputElement).value
@@ -54,18 +65,28 @@ function onInput(e: Event) {
   bxSearched.value = false
   active.value = -1
   if (timer) clearTimeout(timer)
+  if (bxTimer) clearTimeout(bxTimer)
   const v = query.value.trim()
-  if (!v) { local.value = []; open.value = false; return }
+  if (!v) { local.value = []; open.value = false; bxLoading.value = false; return }
   timer = setTimeout(() => { local.value = localMatches(v); open.value = true }, 120)
+  // Битрикс — тем же набором, только с задержкой: пока человек печатает,
+  // запрос не уходит, а уйдёт один — на то, что он в итоге набрал.
+  if (bxAuto.value && v.length >= MIN_CHARS) {
+    bxLoading.value = true // сразу показываем «Поиск в Битриксе…», без мигания
+    bxTimer = setTimeout(() => { void searchBitrix() }, BX_DEBOUNCE)
+  } else {
+    bxLoading.value = false
+  }
 }
 
 async function searchBitrix() {
   const q = query.value.trim()
-  if (q.length < 2) return
+  if (q.length < MIN_CHARS) { bxLoading.value = false; return }
+  const seq = ++bxSeq
   bxLoading.value = true
-  bxSearched.value = true
   try {
     const { results } = await bitrix.searchUsers(q)
+    if (seq !== bxSeq) return // пока ждали, набрали дальше — ответ протух
     const seen = new Set(local.value.map((x) => x.bitrix_id))
     bx.value = results
       .map((u) => ({
@@ -75,10 +96,14 @@ async function searchBitrix() {
         source: 'bitrix' as const,
       }))
       .filter((x) => x.bitrix_id && !seen.has(x.bitrix_id))
+    bxSearched.value = true
   } catch {
+    if (seq !== bxSeq) return
     bx.value = []
+    bxSearched.value = true
+    bxAuto.value = false // портал недоступен — дальше только по кнопке
   } finally {
-    bxLoading.value = false
+    if (seq === bxSeq) bxLoading.value = false
   }
 }
 
@@ -96,7 +121,7 @@ function onKeydown(e: KeyboardEvent) {
   else if (e.key === 'ArrowUp') { e.preventDefault(); active.value = Math.max(active.value - 1, 0) }
   else if (e.key === 'Enter') {
     if (active.value >= 0 && active.value < n) { e.preventDefault(); pick(items.value[active.value]) }
-    else if (canBitrix.value && !bxSearched.value) { e.preventDefault(); searchBitrix() }
+    else if (canBitrix.value && !bxSearched.value) { e.preventDefault(); void searchBitrix() }
   } else if (e.key === 'Escape') { open.value = false }
 }
 function onBlur() { setTimeout(() => { open.value = false }, 180) }
@@ -126,13 +151,14 @@ function onBlur() { setTimeout(() => { open.value = false }, 180) }
         <span class="uac-src" :class="it.source">{{ it.source === 'bitrix' ? 'Битрикс' : 'матрица' }}</span>
       </li>
 
-      <li v-if="!local.length && !bxSearched" class="uac-note">В матрице не найдено</li>
+      <li v-if="!local.length && !bxSearched && !bxLoading" class="uac-note">В матрице не найдено</li>
 
-      <li v-if="canBitrix && !bxSearched && !bxLoading" class="uac-action" @mousedown.prevent="searchBitrix">
+      <li v-if="bxLoading" class="uac-note">Поиск в Битриксе…</li>
+      <li v-if="!bxAuto && canBitrix && !bxSearched && !bxLoading" class="uac-action" @mousedown.prevent="searchBitrix">
         🔍 Искать «{{ query.trim() }}» в Битриксе
       </li>
-      <li v-if="bxLoading" class="uac-note">Поиск в Битриксе…</li>
-      <li v-if="bxSearched && !bxLoading && !bx.length" class="uac-note">В Битриксе не найдено</li>
+      <li v-if="bxSearched && !bxLoading && !bx.length && !bxAuto" class="uac-note">Битрикс недоступен</li>
+      <li v-if="bxSearched && !bxLoading && !bx.length && bxAuto && !local.length" class="uac-note">В Битриксе тоже не найдено</li>
     </ul>
   </div>
 </template>
