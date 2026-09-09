@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { RouterLink, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { requests, type Cfo, type Facility, type Organization } from '@/services/requests'
 import { ApiError } from '@/services/api'
 import type { RegulatoryRequestListItem, RequestType } from '@/types/request'
@@ -9,6 +9,7 @@ import PoaSearchSelect from '@/components/PoaSearchSelect.vue'
 import { formatSnils, isPlaceholder, isValidInn, isValidSnils } from '@/utils/personal'
 
 const router = useRouter()
+const route = useRoute()
 
 // --- справочники анкеты (совпадают с backend requests_reg/constants.py) ---
 const POA_TYPES = [
@@ -75,7 +76,20 @@ const RECEIVE = [
   { code: 'edo', name: 'Направить по ЭДО' },
 ]
 
-const requestType = ref<RequestType>('poa')
+// Тип заявки приходит из раздела (?type=): нажал «Создать» на вкладке МЧД —
+// форма открывается на МЧД. Без параметра (вкладка «Все») — доверенность,
+// самый частый случай. Переключить тип всё равно можно, поле не блокируется.
+const TYPES: { code: RequestType; name: string }[] = [
+  { code: 'poa', name: 'Заявка на доверенность' },
+  { code: 'mchd', name: 'Заявка на МЧД' },
+  { code: 'ecp', name: 'Заявка на ЭЦП' },
+  { code: 'revoke', name: 'Заявка на отзыв доверенности/МЧД' },
+]
+function typeFromQuery(): RequestType {
+  const q = String(route.query.type || '')
+  return TYPES.some((t) => t.code === q) ? (q as RequestType) : 'poa'
+}
+const requestType = ref<RequestType>(typeFromQuery())
 const organization = ref<number | null>(null)
 const facility = ref<number | null>(null)
 const cfo = ref<number | null>(null)
@@ -385,7 +399,11 @@ async function save() {
 <template>
   <section>
     <RouterLink to="/requests" class="back-link">← К заявкам</RouterLink>
-    <h1 class="page-title" style="margin-bottom:14px">Новая регламентная заявка</h1>
+    <!-- Заголовок называет тип: так видно, что вкладка раздела подхватилась,
+         и не надо сверяться с полем ниже. -->
+    <h1 class="page-title" style="margin-bottom:14px">
+      {{ TYPES.find((t) => t.code === requestType)?.name || 'Новая регламентная заявка' }}
+    </h1>
 
     <div class="form" style="max-width:760px">
       <!-- Базовое -->
@@ -393,10 +411,7 @@ async function save() {
         <label class="form-field">
           <span>Тип заявки</span>
           <select v-model="requestType">
-            <option value="poa">Заявка на доверенность</option>
-            <option value="mchd">Заявка на МЧД</option>
-            <option value="ecp">Заявка на ЭЦП</option>
-            <option value="revoke">Заявка на отзыв доверенности/МЧД</option>
+            <option v-for="t in TYPES" :key="t.code" :value="t.code">{{ t.name }}</option>
           </select>
         </label>
         <label class="form-field">

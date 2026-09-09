@@ -11,7 +11,7 @@ export const REQUEST_TYPE_TABS: { code: RequestTypeFilter; label: string }[] = [
   { code: 'ecp', label: 'ЭЦП' },
   { code: 'mchd', label: 'МЧД' },
   { code: 'poa', label: 'Доверенности' },
-  { code: 'revoke', label: 'Отзывы' },
+  { code: 'revoke', label: 'Отзыв доверенности' },
 ]
 
 export const useRequestsUiStore = defineStore('requestsUi', () => {

@@ -39,9 +39,14 @@ onMounted(load)
 
 <template>
   <section>
-    <!-- Основная кнопка — в фиксированной шапке приложения -->
+    <!-- Основная кнопка — в фиксированной шапке приложения. Тип заявки несём
+         с собой: нажали «Создать» на вкладке МЧД — форма и откроется на МЧД,
+         а не заставит выбирать его заново в списке. -->
     <Teleport to="#header-actions">
-      <RouterLink to="/requests/new" class="btn btn--primary">Создать</RouterLink>
+      <RouterLink
+        :to="reqUi.typeFilter ? `/requests/new?type=${reqUi.typeFilter}` : '/requests/new'"
+        class="btn btn--primary"
+      >Создать</RouterLink>
     </Teleport>
 
     <SearchBox v-model="query" placeholder="Поиск: номер, ФИО, паспорт, организация, имя файла" />
