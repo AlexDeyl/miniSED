@@ -26,6 +26,13 @@ export const requests = {
     const qs = p.toString()
     return api.get<RegulatoryRequestListItem[]>(`${BASE}/${qs ? `?${qs}` : ''}`)
   },
+  // Доверенности и МЧД, которые можно отозвать — для привязки к заявке на
+  // отзыв. Отдаёт только выданные, и только видимые мне (свои, где я
+  // согласующий, и — руководителю ЦФО — доверенности его ЦФО).
+  revocable: (q?: string) =>
+    api.get<RegulatoryRequestListItem[]>(
+      `${BASE}/revocable/${q ? `?q=${encodeURIComponent(q)}` : ''}`,
+    ),
   // Заявки, ждущие моего решения — для общего списка «Требует действия».
   todo: () => api.get<RegulatoryRequestListItem[]>(`${BASE}/todo/`),
   get: (id: number | string) => api.get<RegulatoryRequestDetail>(`${BASE}/${id}/`),
@@ -91,6 +98,8 @@ export const requests = {
       statuses: { code: string; name: string }[]
       delivery_methods: { code: string; name: string }[]
       roles?: { code: string; name: string }[]
+      revoke_reasons?: { code: string; name: string }[]
+      revoke_kinds?: { code: string; name: string }[]
     }>(`${BASE}/types/`),
 
   powerTemplates: () =>

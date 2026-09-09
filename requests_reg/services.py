@@ -7,6 +7,10 @@
      исполнена (файл + способ передачи) → инициатор подтверждает получение →
      закрыта.
 
+Заявка на ОТЗЫВ идёт тем же путём, но первый этап у неё может отсутствовать:
+маршрут отзыва — один руководитель ЦФО, и когда он сам инициатор, согласовывать
+нечего. Тогда submit() переводит заявку сразу к юристам (см. _submit_to_legal).
+
 Маршрут строится по правилам (routing.build_route); ручной выбор согласующего
 фиксируется в аудите (core.log_action).
 """
@@ -120,8 +124,17 @@ def submit(request: RegulatoryRequest, participants: list[dict], *, flow_type=No
         constants.STATUS_REJECTED,
     ):
         raise RequestError("Отправить можно черновик, возвращённую или отклонённую заявку.")
-    if not participants:
+
+    # Отзыв без согласования (инициатор = руководитель ЦФО) — единственный
+    # случай пустого маршрута; во всех остальных пустой маршрут это ошибка.
+    skip_approval = not participants and routing.approval_free(request)
+    if not participants and not skip_approval:
         raise RequestError("Маршрут пуст — добавьте согласующих.")
+
+    if request.request_type == constants.TYPE_REVOKE:
+        err = validators.revoke_error(request)
+        if err:
+            raise RequestError(err)
 
     # ИНН/СНИЛС у МЧД не обязательны, но заполненные с опечаткой отправлять
     # нельзя: ФНС такую доверенность отклонит. Сериализатор ловит это при
@@ -144,6 +157,7 @@ def submit(request: RegulatoryRequest, participants: list[dict], *, flow_type=No
     # Заполненное PDF-заявление прикрепляем к заявке (его получат юристы).
     if request.request_type in (
         constants.TYPE_POA, constants.TYPE_MCHD, constants.TYPE_ECP,
+        constants.TYPE_REVOKE,
     ):
         try:
             from . import anketa_pdf
@@ -151,6 +165,9 @@ def submit(request: RegulatoryRequest, participants: list[dict], *, flow_type=No
             anketa_pdf.generate_and_attach(request)
         except Exception as e:  # генерация PDF не должна блокировать отправку
             print("[anketa] generate error:", e)
+
+    if skip_approval:
+        return _submit_to_legal(request)
 
     approval = get_approval(request)
     if approval is None:
@@ -170,6 +187,24 @@ def submit(request: RegulatoryRequest, participants: list[dict], *, flow_type=No
     _sync_status(request)
     _notify("notify_current_approver", request)  # тому, чья очередь
     return approval
+
+
+def _submit_to_legal(request: RegulatoryRequest):
+    """Отправка в обход согласования: сразу в очередь юротдела.
+
+    Круг согласования не создаётся вовсе — иначе в карточке висел бы пустой
+    круг, а лист согласования печатался бы без единой подписи. Статус
+    «Согласована» ставим транзитом, чтобы история заявки читалась так же, как
+    у прошедших маршрут."""
+    _set(request, constants.STATUS_APPROVED)
+    _set(request, constants.STATUS_TO_LEGAL)
+    log_action(
+        "request_submitted_without_approval", target=request,
+        new_value={"reason": "initiator_is_cfo_head"},
+    )
+    _notify("notify_initiator_status", request)
+    _notify("notify_legal_queue", request)
+    return None
 
 
 def current_pending_participant(approval: Approval | None) -> ApprovalParticipant | None:
@@ -276,11 +311,16 @@ def execute(request: RegulatoryRequest, *, delivery_method: str, delivery_commen
         raise RequestError("Исполнить можно заявку в работе у юристов или на подписании.")
     if not delivery_method:
         raise RequestError("Укажите способ передачи документа.")
-    # нужен реальный скан доверенности, а не автосформированная анкета
+    # нужен реальный документ, а не автосформированная анкета: у доверенности
+    # это скан, у отзыва — уведомление об отзыве / подтверждение от ФНС
     if not request.documents.filter(deleted_at__isnull=True).exclude(
         document_type="anketa"
     ).exists():
-        raise RequestError("Прикрепите файл/скан доверенности перед исполнением.")
+        raise RequestError(
+            "Прикрепите документ об отзыве (уведомление, подтверждение ФНС) перед исполнением."
+            if request.request_type == constants.TYPE_REVOKE
+            else "Прикрепите файл/скан доверенности перед исполнением."
+        )
     _set(
         request, constants.STATUS_EXECUTED,
         delivery_method=delivery_method,

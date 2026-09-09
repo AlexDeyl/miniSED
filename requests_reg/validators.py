@@ -111,3 +111,28 @@ def mchd_rep_error(data) -> str | None:
     if not is_placeholder(snils) and not is_valid_snils(snils):
         return "Проверьте СНИЛС представителя: должно быть 11 цифр, контрольное число не сходится."
     return None
+
+
+def revoke_error(request) -> str | None:
+    """Ошибка заявки на отзыв доверенности/МЧД, либо None.
+
+    Юристу нужно однозначно понимать, ЧТО отзывать. Источник — либо карточка
+    доверенности в системе, либо, если её нет (бумажная, выданная до MiniSED),
+    номер и дата, введённые руками. И то и другое пусто — заявка бессмысленна.
+
+    Причину отзыва требуем всегда: она попадает в уведомление контрагенту и в
+    приказ, а «отозвать без причины» юротдел всё равно вернёт на доработку.
+    """
+    source = (request.data or {}).get("source") or {}
+    if not request.source_request_id and not (source.get("number") or "").strip():
+        return (
+            "Укажите отзываемую доверенность: выберите карточку в системе "
+            "или заполните её номер и дату вручную."
+        )
+    if not (request.data or {}).get("revoke_reason"):
+        return "Укажите причину отзыва."
+    if (request.data or {}).get("revoke_reason") == "other" and not (
+        (request.data or {}).get("revoke_reason_text") or ""
+    ).strip():
+        return "Причина «иная» — опишите её в поле обоснования."
+    return None

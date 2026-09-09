@@ -3,8 +3,9 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { requests, type Cfo, type Facility, type Organization } from '@/services/requests'
 import { ApiError } from '@/services/api'
-import type { RequestType } from '@/types/request'
+import type { RegulatoryRequestListItem, RequestType } from '@/types/request'
 import AddressAutocomplete from '@/components/AddressAutocomplete.vue'
+import PoaSearchSelect from '@/components/PoaSearchSelect.vue'
 import { formatSnils, isPlaceholder, isValidInn, isValidSnils } from '@/utils/personal'
 
 const router = useRouter()
@@ -55,6 +56,19 @@ const ECP_RECEIVE = [
   { code: 'courier', name: 'Получить через курьера (третье лицо)' },
   { code: 'other', name: 'Иным способом' },
 ]
+// Отзыв доверенности/МЧД (совпадает с backend ANKETA_REVOKE_*).
+const REVOKE_REASONS = [
+  { code: 'dismissal', name: 'Увольнение / перевод представителя' },
+  { code: 'powers_changed', name: 'Изменение полномочий или должности' },
+  { code: 'task_done', name: 'Задача выполнена, доверенность больше не нужна' },
+  { code: 'lost', name: 'Утрата бланка доверенности' },
+  { code: 'trust_lost', name: 'Утрата доверия к представителю' },
+  { code: 'other', name: 'Иная причина' },
+]
+const REVOKE_KINDS = [
+  { code: 'poa', name: 'Доверенность (бумажная)' },
+  { code: 'mchd', name: 'МЧД (машиночитаемая)' },
+]
 const RECEIVE = [
   { code: 'electronic', name: 'Электронно (МЧД / файл с ЭП)' },
   { code: 'paper', name: 'Бумажный (лично / курьером)' },
@@ -85,6 +99,29 @@ async function onDeptCode() {
   } catch {
     deptMsg.value = ''
   }
+}
+
+// --- заявка на отзыв ---
+// Отзываем либо карточку из системы, либо бумажную доверенность, выданную до
+// MiniSED: у неё карточки нет, и реквизиты инициатор вводит руками.
+const sourceRequest = ref<number | null>(null)
+const sourcePicked = ref<RegulatoryRequestListItem | null>(null)
+const revoke = reactive({
+  reason: 'dismissal',
+  reason_text: '',
+  revoke_date: new Date().toISOString().slice(0, 10),
+  urgency: 'standard',
+  subject_name: '',
+  comment: '',
+  // реквизиты бумажной доверенности (когда карточки нет)
+  source: { kind: 'poa', number: '', issued_at: '', valid_until: '', subject_name: '', note: '' },
+})
+function onPickSource(r: RegulatoryRequestListItem) {
+  sourcePicked.value = r
+  // Организацию и ФИО берём из отзываемой доверенности: отзыв оформляется тем
+  // же юрлицом, и переспрашивать инициатора об этом незачем.
+  if (r.organization) organization.value = r.organization
+  revoke.subject_name = r.subject_name
 }
 
 const data = reactive<Record<string, unknown>>({
@@ -135,6 +172,7 @@ async function uploadAttachments(reqId: number) {
 
 // Анкета (сведения о представителе) одинакова у всех трёх типов; различаются
 // только «параметры» сверху и дополнительный раздел снизу.
+const isRevoke = computed(() => requestType.value === 'revoke')
 const isAnketa = computed(() => ['poa', 'mchd', 'ecp'].includes(requestType.value))
 const isEcp = computed(() => requestType.value === 'ecp')
 // Список приложений зависит от типа заявки, механика загрузки файлов общая.
@@ -195,6 +233,21 @@ watch(organization, () => { facility.value = null; cfo.value = null; loadContext
 // Проверка формы. Возвращает текст первой ошибки или null, если всё верно.
 function validate(): string | null {
   if (!organization.value) return 'Выберите организацию.'
+
+  // Отзыв — короткая заявка со своими правилами; анкета представителя тут не
+  // заполняется, поэтому выходим сразу.
+  if (isRevoke.value) {
+    if (!sourceRequest.value && !revoke.source.number.trim())
+      return 'Укажите отзываемую доверенность: выберите карточку или заполните её номер вручную.'
+    if (!sourceRequest.value && !revoke.source.issued_at)
+      return 'Укажите дату выдачи отзываемой доверенности.'
+    if (!revoke.reason) return 'Укажите причину отзыва.'
+    if (revoke.reason === 'other' && !revoke.reason_text.trim())
+      return 'Причина «иная» — опишите её в поле обоснования.'
+    if (!revoke.revoke_date) return 'Укажите дату, с которой доверенность отзывается.'
+    if (!cfo.value) return 'Укажите ЦФО — по нему определяется руководитель, согласующий отзыв.'
+    return null
+  }
 
   if (isAnketa.value) {
     // Раздел 1 — представитель
@@ -283,7 +336,9 @@ async function save() {
   error.value = null
   const problem = validate()
   if (problem) { error.value = problem; return }
-  const subject = [rep.last_name, rep.first_name, rep.middle_name].filter(Boolean).join(' ')
+  const subject = isRevoke.value
+    ? (revoke.subject_name || revoke.source.subject_name)
+    : [rep.last_name, rep.first_name, rep.middle_name].filter(Boolean).join(' ')
   saving.value = true
   let created
   try {
@@ -293,8 +348,23 @@ async function save() {
       facility: facility.value,
       cfo: cfo.value,
       subject_name: subject,
-      position: rep.position,
-      basis: basis.value.trim(),
+      position: isRevoke.value ? '' : rep.position,
+      basis: isRevoke.value ? '' : basis.value.trim(),
+      ...(isRevoke.value
+        ? {
+            comment: revoke.comment.trim(),
+            source_request: sourceRequest.value,
+            data: {
+              revoke_reason: revoke.reason,
+              revoke_reason_text: revoke.reason_text.trim(),
+              revoke_date: revoke.revoke_date,
+              urgency: revoke.urgency,
+              // Реквизиты вручную нужны только без карточки — иначе в анкете
+              // лежали бы две версии правды об одной доверенности.
+              ...(sourceRequest.value ? {} : { source: { ...revoke.source } }),
+            },
+          }
+        : {}),
       ...(isAnketa.value ? { data: JSON.parse(JSON.stringify(data)) } : {}),
     } as never)
   } catch (e) {
@@ -326,6 +396,7 @@ async function save() {
             <option value="poa">Заявка на доверенность</option>
             <option value="mchd">Заявка на МЧД</option>
             <option value="ecp">Заявка на ЭЦП</option>
+            <option value="revoke">Заявка на отзыв доверенности/МЧД</option>
           </select>
         </label>
         <label class="form-field">
@@ -351,6 +422,102 @@ async function save() {
           </select>
         </label>
       </div>
+
+      <!-- Заявка на отзыв: короткая форма. Анкета представителя здесь не
+           нужна — она уже есть в отзываемой доверенности. -->
+      <template v-if="isRevoke">
+        <div class="detail-card">
+          <div class="detail-card-header">Что отзываем</div>
+          <div class="form-field" style="margin-bottom:10px">
+            <span>Доверенность в системе</span>
+            <PoaSearchSelect v-model="sourceRequest" @pick="onPickSource" />
+            <div class="attach-hint">
+              Показаны выданные доверенности и МЧД, которые вам доступны.
+              Руководителю ЦФО видны все доверенности его ЦФО.
+            </div>
+          </div>
+
+          <div v-if="sourcePicked && sourceRequest" class="revoke-picked">
+            <strong>{{ sourcePicked.number }}</strong> · {{ sourcePicked.type_display }}
+            · {{ sourcePicked.subject_name || '—' }}
+            <span class="ag-muted">({{ sourcePicked.status_display }})</span>
+          </div>
+
+          <!-- Бумажная доверенность, выданная до MiniSED: карточки нет -->
+          <template v-if="!sourceRequest">
+            <div class="attach-hint" style="margin-bottom:6px">
+              Карточки нет (доверенность выдана до MiniSED) — заполните реквизиты вручную:
+            </div>
+            <div class="form-row">
+              <label class="form-field">
+                <span>Вид документа</span>
+                <select v-model="revoke.source.kind">
+                  <option v-for="k in REVOKE_KINDS" :key="k.code" :value="k.code">{{ k.name }}</option>
+                </select>
+              </label>
+              <label class="form-field">
+                <span>Номер *</span>
+                <input v-model="revoke.source.number" placeholder="12/2023" />
+              </label>
+              <label class="form-field">
+                <span>Дата выдачи *</span>
+                <input v-model="revoke.source.issued_at" type="date" />
+              </label>
+            </div>
+            <div class="form-row">
+              <label class="form-field">
+                <span>Действует по</span>
+                <input v-model="revoke.source.valid_until" type="date" />
+              </label>
+              <label class="form-field">
+                <span>Выдана на имя</span>
+                <input v-model="revoke.source.subject_name" placeholder="Петров Пётр Петрович" />
+              </label>
+            </div>
+            <label class="form-field">
+              <span>Где хранится / кем удостоверена</span>
+              <input v-model="revoke.source.note" placeholder="оригинал у представителя, нотариальная" />
+            </label>
+          </template>
+        </div>
+
+        <div class="detail-card">
+          <div class="detail-card-header">Основание отзыва</div>
+          <div class="form-row">
+            <label class="form-field">
+              <span>Причина *</span>
+              <select v-model="revoke.reason">
+                <option v-for="r in REVOKE_REASONS" :key="r.code" :value="r.code">{{ r.name }}</option>
+              </select>
+            </label>
+            <label class="form-field">
+              <span>Отозвать с даты *</span>
+              <input v-model="revoke.revoke_date" type="date" />
+            </label>
+            <label class="form-field">
+              <span>Срочность</span>
+              <select v-model="revoke.urgency">
+                <option v-for="u in URGENCY" :key="u.code" :value="u.code">{{ u.name }}</option>
+              </select>
+            </label>
+          </div>
+          <label class="form-field" style="margin-bottom:10px">
+            <span>Обоснование{{ revoke.reason === 'other' ? ' *' : '' }}</span>
+            <textarea v-model="revoke.reason_text" rows="2"
+                      placeholder="что произошло — попадёт в заявление для юристов" />
+          </label>
+          <label class="form-field" style="margin-bottom:10px">
+            <span>Комментарий юристам</span>
+            <textarea v-model="revoke.comment" rows="2"
+                      placeholder="уведомить контрагента, забрать оригинал и т.п." />
+          </label>
+          <div class="form-field">
+            <span>Приложения (по необходимости)</span>
+            <input type="file" multiple @change="onExtraFiles" />
+            <span v-if="extraFiles.length" class="attach-ok">Выбрано файлов: {{ extraFiles.length }}</span>
+          </div>
+        </div>
+      </template>
 
       <template v-if="isAnketa">
         <!-- Параметры ЭЦП -->
@@ -543,7 +710,7 @@ async function save() {
         </div>
       </template>
 
-      <label v-if="!isEcp" class="form-field">
+      <label v-if="!isEcp && !isRevoke" class="form-field">
         <span>Основание оформления *</span>
         <input v-model="basis" placeholder="Приказ №… / служебная записка" />
       </label>
@@ -559,6 +726,7 @@ async function save() {
 </template>
 
 <style scoped>
+.revoke-picked { margin-bottom: 10px; padding: 7px 10px; border-radius: 6px; background: #eef6f0; font-size: 13.5px; }
 .check { display: block; font-size: 13px; margin: 3px 0; cursor: pointer; }
 .check input { margin-right: 6px; }
 .attach-hint { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }

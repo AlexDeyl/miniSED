@@ -5,6 +5,12 @@
 или проекту. Для каждой роли ищем исполнителя (RoleAssignment) по самому
 специфичному контексту; если не найден обязательный — слот помечается как
 требующий ручного выбора инициатором (что затем фиксируется в истории).
+
+Особняком стоит заявка на ОТЗЫВ доверенности/МЧД: у неё маршрут не по таблице
+ролей, а из одного согласующего — руководителя ЦФО. Отзыв срочен по своей
+природе (уволенный сотрудник ходит с действующей доверенностью), поэтому
+длинная цепочка тут во вред. А если заявку заводит сам руководитель ЦФО,
+согласовывать нечего — маршрут пустой, заявка уходит прямо юристам.
 """
 
 from __future__ import annotations
@@ -61,6 +67,42 @@ ROUTE_RULES = [
 ]
 
 
+def _slot(order: int, role_code: str, assignment: RoleAssignment | None) -> dict:
+    """Слот маршрута под конкретную роль (не групповой)."""
+    return {
+        "order": order,
+        "role_code": role_code,
+        "role_name": C.ROLE_NAMES[role_code],
+        "required": True,
+        "group": False,
+        "resolved": assignment is not None,
+        "b24_user_id": assignment.user_b24_id if assignment else None,
+        "user_name": assignment.user_name if assignment else "",
+        "needs_manual": assignment is None,
+    }
+
+
+def approval_free(request: RegulatoryRequest) -> bool:
+    """Можно ли отправить заявку в обход согласования.
+
+    Пока это только отзыв, поданный самим руководителем ЦФО: он единственный
+    согласующий в маршруте отзыва, и визировать собственную заявку — пустой
+    круг. Сравниваем с руководителем ТОГО ЦФО, к которому отнесена заявка:
+    руководитель соседнего ЦФО согласование не отменяет.
+    """
+    if request.request_type != C.TYPE_REVOKE or not request.initiator_b24_id:
+        return False
+    head = resolve_role(C.ROLE_CFO_HEAD, request)
+    return head is not None and head.user_b24_id == request.initiator_b24_id
+
+
+def revoke_route(request: RegulatoryRequest) -> list[dict]:
+    """Маршрут отзыва: руководитель ЦФО — или ничего, если он же инициатор."""
+    if approval_free(request):
+        return []
+    return [_slot(0, C.ROLE_CFO_HEAD, resolve_role(C.ROLE_CFO_HEAD, request))]
+
+
 def resolve_role(role_code: str, request: RegulatoryRequest) -> RoleAssignment | None:
     """Находит исполнителя роли по самому специфичному контексту (ЦФО→объект→орг→глобально)."""
     qs = RoleAssignment.objects.filter(role_code=role_code, is_active=True)
@@ -86,6 +128,9 @@ def build_route(request: RegulatoryRequest) -> list[dict]:
       [{role_code, role_name, required, resolved(bool),
         b24_user_id|None, user_name, needs_manual(bool)}]
     """
+    if request.request_type == C.TYPE_REVOKE:
+        return revoke_route(request)
+
     route = []
     order = 0
     for role_code, condition in ROUTE_RULES:
@@ -119,19 +164,7 @@ def build_route(request: RegulatoryRequest) -> list[dict]:
             assignment = _org_final_signer(request)
         else:
             assignment = resolve_role(role_code, request)
-        route.append(
-            {
-                "order": order,
-                "role_code": role_code,
-                "role_name": C.ROLE_NAMES[role_code],
-                "required": True,
-                "group": False,
-                "resolved": assignment is not None,
-                "b24_user_id": assignment.user_b24_id if assignment else None,
-                "user_name": assignment.user_name if assignment else "",
-                "needs_manual": assignment is None,
-            }
-        )
+        route.append(_slot(order, role_code, assignment))
         order += 1
     return route
 

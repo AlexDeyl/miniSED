@@ -79,6 +79,7 @@ async function load() {
 async function loadRoute() {
   const { route: slots } = await requests.routePreview(props.id)
   route.value = slots.map((s) => ({ ...s, manual: '' }))
+  routeLoaded.value = true
 }
 
 // ФИО согласующего по его bitrix_id (для отображения авто-выбранных слотов)
@@ -157,6 +158,12 @@ async function run(fn: () => Promise<RegulatoryRequestDetail>) {
 // Пояснение инициатора согласующим при направлении круга (в т.ч. повторном).
 const submitComment = ref('')
 
+// Пустой маршрут бывает только у отзыва, поданного руководителем ЦФО: он сам
+// единственный согласующий, круга не будет — заявка уйдёт прямо юристам.
+// routeLoaded отличает «маршрут пуст» от «маршрут ещё не приехал».
+const routeLoaded = ref(false)
+const noApprovalNeeded = computed(() => routeLoaded.value && route.value.length === 0)
+
 function submit() {
   const participants: ParticipantInput[] = []
   for (const [i, s] of route.value.entries()) {
@@ -170,6 +177,7 @@ function submit() {
   run(async () => {
     const r = await requests.submit(props.id, participants, submitComment.value.trim())
     route.value = []
+    routeLoaded.value = false
     submitComment.value = ''
     return r
   })
@@ -229,6 +237,24 @@ const doverennostDocs = computed(
   () => (req.value?.documents || []).filter((d) => d.document_type !== 'anketa' && d.download_url),
 )
 const isAnketaType = computed(() => req.value && (req.value.request_type === 'poa' || req.value.request_type === 'mchd'))
+const isRevoke = computed(() => req.value?.request_type === 'revoke')
+// У отзыва своё заявление (что отзываем, почему, с какой даты) — юрист
+// работает именно с ним, поэтому показываем его так же, как анкету.
+const hasAnketaPdf = computed(() => isAnketaType.value || isRevoke.value)
+
+// Человекочитаемая причина отзыва из анкеты.
+const REVOKE_REASON_NAMES: Record<string, string> = {
+  dismissal: 'Увольнение / перевод представителя',
+  powers_changed: 'Изменение полномочий или должности',
+  task_done: 'Задача выполнена, доверенность больше не нужна',
+  lost: 'Утрата бланка доверенности',
+  trust_lost: 'Утрата доверия к представителю',
+  other: 'Иная причина',
+}
+const revokeData = computed(() => (req.value?.data || {}) as Record<string, string>)
+const revokeSource = computed(
+  () => (revokeData.value.source || {}) as unknown as Record<string, string>,
+)
 // Тот же адрес, что у кнопки «Скачать заявление» — PDF собирается на лету,
 // поэтому просмотр всегда показывает актуальную анкету.
 const anketaUrl = computed(() => (req.value ? requests.anketaPdfUrl(req.value.id) : ''))
@@ -307,12 +333,66 @@ onMounted(load)
         <!-- Заявление (анкета) прямо на странице: раньше её приходилось
              скачивать каждый раз, чтобы просто посмотреть. -->
         <PdfPreview
-          v-if="isAnketaType" class="req-preview"
+          v-if="hasAnketaPdf" class="req-preview"
           :src="anketaUrl" title="Заявление (анкета)"
           :filename="`Заявление_${req.number}.pdf`"
         />
 
         <div class="req-cards">
+      <!-- Отзыв: что именно отзываем и на каком основании -->
+      <div v-if="isRevoke" class="detail-card">
+        <div class="detail-card-header">Отзываемая доверенность</div>
+        <table class="round-table">
+          <tbody>
+            <tr v-if="req.source_request_info">
+              <td>Документ</td>
+              <td>
+                <RouterLink :to="`/requests/${req.source_request_info.id}`" class="src-link">
+                  {{ req.source_request_info.number }} · {{ req.source_request_info.type_display }}
+                </RouterLink>
+                <span class="ag-muted"> — {{ req.source_request_info.subject_name || '—' }}
+                  ({{ req.source_request_info.status_display }})</span>
+              </td>
+            </tr>
+            <!-- Бумажная доверенность до MiniSED: карточки нет, есть реквизиты -->
+            <template v-else>
+              <tr><td>Номер</td><td>{{ revokeSource.number || '—' }}</td></tr>
+              <tr><td>Дата выдачи</td><td>{{ revokeSource.issued_at || '—' }}</td></tr>
+              <tr v-if="revokeSource.subject_name">
+                <td>Выдана на имя</td><td>{{ revokeSource.subject_name }}</td>
+              </tr>
+              <tr v-if="revokeSource.note"><td>Примечание</td><td>{{ revokeSource.note }}</td></tr>
+            </template>
+            <tr>
+              <td>Причина</td>
+              <td>{{ REVOKE_REASON_NAMES[revokeData.revoke_reason] || '—' }}</td>
+            </tr>
+            <tr v-if="revokeData.revoke_reason_text">
+              <td>Обоснование</td>
+              <td style="white-space:pre-line">{{ revokeData.revoke_reason_text }}</td>
+            </tr>
+            <tr v-if="revokeData.revoke_date">
+              <td>Отозвать с даты</td><td>{{ revokeData.revoke_date }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Обратная связка: открыв доверенность, видно, что её отзывают -->
+      <div v-if="req.revocations && req.revocations.length" class="detail-card">
+        <div class="detail-card-header">Заявки на отзыв этой доверенности</div>
+        <table class="round-table">
+          <tbody>
+            <tr v-for="r in req.revocations" :key="r.id">
+              <td>
+                <RouterLink :to="`/requests/${r.id}`" class="src-link">{{ r.number }}</RouterLink>
+              </td>
+              <td>{{ r.status_display }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
       <!-- Суть заявки: основание и комментарий инициатора -->
       <div v-if="req.basis || req.comment || req.position || req.department" class="detail-card">
         <div class="detail-card-header">Заявка</div>
@@ -332,8 +412,14 @@ onMounted(load)
 
       <!-- Предпросмотр маршрута + отправка -->
       <div v-if="canSubmit" class="detail-card">
-        <div class="detail-card-header">Маршрут согласования (последовательный)</div>
-        <table class="round-table">
+        <div class="detail-card-header">
+          {{ noApprovalNeeded ? 'Согласование не требуется' : 'Маршрут согласования (последовательный)' }}
+        </div>
+        <p v-if="noApprovalNeeded" class="detail-meta" style="margin:0 0 4px">
+          Отзыв согласует руководитель ЦФО — а заявку подали вы. Согласовывать
+          нечего: заявка уйдёт сразу юристам на исполнение.
+        </p>
+        <table v-else class="round-table">
           <tbody>
             <tr v-for="s in route" :key="s.order">
               <td>{{ s.order + 1 }}. {{ s.role_name }}</td>
@@ -354,7 +440,7 @@ onMounted(load)
         </table>
         <!-- Пояснение согласующим: с чем направляем круг (что изменилось
              после доработки). Необязательное — перезапуск в один клик сохранён. -->
-        <div style="margin-top:12px">
+        <div v-if="!noApprovalNeeded" style="margin-top:12px">
           <div class="detail-meta" style="margin-bottom:4px">
             {{ rounds.length
               ? 'Комментарий согласующим — что изменилось после доработки (необязательно)'
@@ -368,7 +454,11 @@ onMounted(load)
 
         <div style="margin-top:10px">
           <button class="btn btn--primary" :disabled="busy" @click="submit">
-            {{ req.status === 'rejected' ? 'Перезапустить согласование (новый круг)' : 'Отправить на согласование' }}
+            {{ noApprovalNeeded
+              ? 'Передать юристам'
+              : req.status === 'rejected'
+                ? 'Перезапустить согласование (новый круг)'
+                : 'Отправить на согласование' }}
           </button>
         </div>
       </div>
@@ -426,7 +516,7 @@ onMounted(load)
         @add-version="pickVersion" @edit="(id) => (editingDocId = id)"
       >
         <template #actions>
-          <button v-if="isAnketaType" class="btn btn--ghost" @click="downloadAnketa">Скачать заявление (PDF)</button>
+          <button v-if="hasAnketaPdf" class="btn btn--ghost" @click="downloadAnketa">Скачать заявление (PDF)</button>
         </template>
       </DocumentsCard>
       <input ref="fileInput" type="file" style="display:none" @change="uploadFile" />
@@ -484,6 +574,8 @@ onMounted(load)
 </template>
 
 <style scoped>
+.src-link { color: #1976d2; text-decoration: none; font-weight: 500; }
+.src-link:hover { text-decoration: underline; }
 /* Две колонки на широком экране: слева анкета, справа карточки заявки.
    Узкий экран (в т.ч. iframe Битрикса) — одна колонка, анкета уходит вниз:
    сначала суть заявки и действия, просмотр — следом. */

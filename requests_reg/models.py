@@ -91,6 +91,16 @@ class RegulatoryRequest(models.Model):
 
     initiator_b24_id = models.IntegerField("Инициатор (ID Б24)", null=True, blank=True)
 
+    # Заявка на отзыв ссылается на карточку отзываемой доверенности/МЧД.
+    # Необязательная: бумажную доверенность, выданную до MiniSED, карточкой не
+    # опишешь — её реквизиты инициатор вводит руками (data["source"]).
+    # SET_NULL, а не CASCADE: отзыв — самостоятельный юридический факт и должен
+    # пережить удаление карточки-первоисточника.
+    source_request = models.ForeignKey(
+        "self", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="revocations", verbose_name="Отзываемая доверенность",
+    )
+
     # сотрудник, на которого оформляется ЭЦП/МЧД/доверенность
     subject_name = models.CharField("ФИО сотрудника", max_length=255, blank=True)
     subject_b24_id = models.IntegerField("Сотрудник (ID Б24)", null=True, blank=True)

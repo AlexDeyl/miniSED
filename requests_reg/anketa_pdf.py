@@ -4,6 +4,10 @@
 Это тот самый документ, который в заполненном виде получают юристы. Данные
 берутся из анкеты (RegulatoryRequest.data), выбранные полномочия — из матрицы
 шаблонов (PowerTemplate). Верстка повторяет структуру бумажной формы.
+
+Заявление на ОТЗЫВ верстается отдельно (_render_revoke): там нет ни паспорта
+представителя, ни полномочий — только что отзываем, почему и с какой даты.
+Класть отзыв в общую форму значило бы печатать лист прочерков.
 """
 
 from __future__ import annotations
@@ -62,13 +66,8 @@ def _initiator_name(request) -> str:
     return f"ID Б24 {request.initiator_b24_id or '—'}"
 
 
-def render_pdf(request) -> bytes:
-    font = _ensure_font()
-    data = request.data or {}
-    rep = data.get("rep", {}) or {}
-    legal = data.get("rep_legal", {}) or {}
-
-    buffer = io.BytesIO()
+def _doc(buffer, request, font):
+    """Общий каркас документа и набор стилей (одинаков у всех заявлений)."""
     doc = SimpleDocTemplate(
         buffer, pagesize=A4,
         leftMargin=16 * mm, rightMargin=16 * mm, topMargin=14 * mm, bottomMargin=14 * mm,
@@ -93,6 +92,84 @@ def render_pdf(request) -> bytes:
             ("LINEBELOW", (0, 0), (-1, -1), 0.3, colors.HexColor("#eeeeee")),
         ]))
         return t
+
+    return doc, base, label, h1, h2, kv_table
+
+
+def _revoked_poa_rows(request) -> list[tuple[str, str]]:
+    """Реквизиты отзываемой доверенности — из привязанной карточки либо из
+    полей, введённых руками (бумажная доверенность до MiniSED)."""
+    source = (request.data or {}).get("source") or {}
+    card = request.source_request
+    if card is not None:
+        return [
+            ("Отзываемый документ", f"{card.number} — {card.get_request_type_display()}"),
+            ("Выдана на имя", card.subject_name or "—"),
+            ("Должность", card.position or "—"),
+            ("Действует с / по", f"{_fmt_date(card.valid_from)} — {_fmt_date(card.valid_until)}"),
+            ("Статус карточки", card.status_label()),
+        ]
+    return [
+        ("Вид документа", _one(C.ANKETA_REVOKE_KINDS, source.get("kind"))),
+        ("Номер", source.get("number") or "—"),
+        ("Дата выдачи", _fmt_date(source.get("issued_at"))),
+        ("Действует по", _fmt_date(source.get("valid_until"))),
+        ("Выдана на имя", source.get("subject_name") or "—"),
+        ("Кем удостоверена / где хранится", source.get("note") or "—"),
+    ]
+
+
+def _render_revoke(request) -> bytes:
+    """Заявление об отзыве доверенности/МЧД — то, с чем работает юрист."""
+    font = _ensure_font()
+    data = request.data or {}
+
+    buffer = io.BytesIO()
+    doc, base, label, h1, h2, kv_table = _doc(buffer, request, font)
+
+    story = [
+        Paragraph("ЗАЯВЛЕНИЕ об отзыве доверенности / МЧД", h1),
+        Paragraph(
+            f"№ {request.number} · подана {request.created_at:%d.%m.%Y} · "
+            f"{request.organization.short_name}", label,
+        ),
+        Spacer(1, 6),
+        Paragraph("Раздел 1. Отзываемый документ", h2),
+        kv_table(_revoked_poa_rows(request)),
+        Paragraph("Раздел 2. Основание отзыва", h2),
+        kv_table([
+            ("Причина", _one(C.ANKETA_REVOKE_REASONS, data.get("revoke_reason"))),
+            ("Обоснование", data.get("revoke_reason_text") or "—"),
+            ("Отозвать с даты", _fmt_date(data.get("revoke_date"))),
+            ("Срочность", _one(C.ANKETA_URGENCY, data.get("urgency"))),
+        ]),
+        Paragraph("Раздел 3. Инициатор", h2),
+        kv_table([
+            ("Инициатор", _initiator_name(request)),
+            ("ЦФО", request.cfo.name if request.cfo_id else "—"),
+            ("Объект", request.facility.name if request.facility_id else "—"),
+            ("Комментарий", request.comment or "—"),
+        ]),
+        Spacer(1, 10),
+        Paragraph(
+            f"Сформировано: {timezone.localtime(timezone.now()):%d.%m.%Y %H:%M}", label,
+        ),
+    ]
+    doc.build(story)
+    return buffer.getvalue()
+
+
+def render_pdf(request) -> bytes:
+    if request.request_type == C.TYPE_REVOKE:
+        return _render_revoke(request)
+
+    font = _ensure_font()
+    data = request.data or {}
+    rep = data.get("rep", {}) or {}
+    legal = data.get("rep_legal", {}) or {}
+
+    buffer = io.BytesIO()
+    doc, base, label, h1, h2, kv_table = _doc(buffer, request, font)
 
     is_ecp = request.request_type == C.TYPE_ECP
 

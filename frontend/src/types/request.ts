@@ -1,7 +1,7 @@
 import type { ApprovalDetail } from './approval'
 import type { DocumentVersion } from './document'
 
-export type RequestType = 'poa' | 'mchd' | 'ecp'
+export type RequestType = 'poa' | 'mchd' | 'ecp' | 'revoke'
 export type RequestStatus =
   | 'draft'
   | 'on_approval'
@@ -27,6 +27,17 @@ export interface RouteSlot {
   b24_user_id: number | null
   user_name: string
   needs_manual: boolean
+}
+
+// Короткая ссылка на карточку заявки: связка отзыв ↔ отзываемая доверенность.
+export interface RequestCardRef {
+  id: number
+  number: string
+  request_type: RequestType
+  type_display: string
+  status: RequestStatus
+  status_display: string
+  subject_name: string
 }
 
 export interface RequestDocument {
@@ -72,6 +83,11 @@ export interface RegulatoryRequestDetail extends RegulatoryRequestListItem {
   received_at: string | null
   external_1c_id: string
   external_diadoc_id: string
+  // Отзываемая доверенность (в заявке на отзыв) и, наоборот, заявки на отзыв
+  // этой доверенности (в карточке самой доверенности).
+  source_request: number | null
+  source_request_info: RequestCardRef | null
+  revocations: RequestCardRef[]
   updated_at: string
   approval: ApprovalDetail | null
   documents: RequestDocument[]
@@ -86,4 +102,8 @@ export interface RequestCreatePayload {
   position?: string
   department?: string
   basis?: string
+  comment?: string
+  // Заявка на отзыв: карточка отзываемой доверенности, если она есть в системе.
+  source_request?: number | null
+  data?: Record<string, unknown>
 }

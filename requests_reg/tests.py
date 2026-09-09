@@ -1048,3 +1048,181 @@ class MchdPlaceholderTests(TestCase):
         services.submit(req, [internal(10, 0, C.ROLE_CFO_HEAD)])
         req.refresh_from_db()
         self.assertEqual(req.status, C.STATUS_ON_APPROVAL)
+
+class RevokeRequestTests(TestCase):
+    """Заявка на отзыв доверенности/МЧД.
+
+    Маршрут — один руководитель ЦФО; если он же и подаёт заявку, согласования
+    нет вовсе и заявка уходит прямо юристам. Отзываемая доверенность
+    привязывается карточкой, а для бумажной (выданной до MiniSED) — реквизитами
+    вручную."""
+
+    CFO_HEAD = 501
+    EMPLOYEE = 502
+
+    def setUp(self):
+        self.org = Organization.objects.create(short_name="УК Норд")
+        self.cfo = CFO.objects.create(name="Продажи", organization=self.org, category="sales")
+        RoleAssignment.objects.create(
+            role_code=C.ROLE_CFO_HEAD, cfo=self.cfo,
+            user_b24_id=self.CFO_HEAD, user_name="Руководитель ЦФО",
+        )
+        # доверенность, которую будем отзывать (уже выдана)
+        self.poa = services.create_request(
+            request_type=C.TYPE_POA, organization=self.org, cfo=self.cfo,
+            initiator_b24_id=self.EMPLOYEE, subject_name="Петров П.П.",
+        )
+        self.poa.status = C.STATUS_EXECUTED
+        self.poa.save(update_fields=["status"])
+
+    def _revoke(self, initiator, *, source=True, data=None):
+        payload = {"revoke_reason": "dismissal", "revoke_date": "2026-09-10"}
+        payload.update(data or {})
+        return services.create_request(
+            request_type=C.TYPE_REVOKE, organization=self.org, cfo=self.cfo,
+            initiator_b24_id=initiator, subject_name=self.poa.subject_name,
+            source_request=self.poa if source else None, data=payload,
+        )
+
+    # --- маршрут ---
+    def test_route_is_cfo_head_only(self):
+        route = routing.build_route(self._revoke(self.EMPLOYEE))
+        self.assertEqual([s["role_code"] for s in route], [C.ROLE_CFO_HEAD])
+        self.assertEqual(route[0]["b24_user_id"], self.CFO_HEAD)
+
+    def test_route_empty_for_cfo_head(self):
+        """Руководитель ЦФО сам себе согласующим не нужен."""
+        req = self._revoke(self.CFO_HEAD)
+        self.assertEqual(routing.build_route(req), [])
+        self.assertTrue(routing.approval_free(req))
+
+    def test_other_cfo_head_does_not_skip_approval(self):
+        """Руководитель СОСЕДНЕГО ЦФО согласование не отменяет."""
+        other = CFO.objects.create(name="Бухгалтерия", organization=self.org, category="accounting")
+        RoleAssignment.objects.create(
+            role_code=C.ROLE_CFO_HEAD, cfo=other, user_b24_id=999, user_name="Другой",
+        )
+        req = self._revoke(999)
+        self.assertFalse(routing.approval_free(req))
+        self.assertEqual([s["role_code"] for s in routing.build_route(req)], [C.ROLE_CFO_HEAD])
+
+    def test_poa_route_unchanged(self):
+        """Маршрут самой доверенности отзыв не задел."""
+        codes = [s["role_code"] for s in routing.build_route(self.poa)]
+        self.assertIn(C.ROLE_LEGAL_DEPT, codes)
+        self.assertIn(C.ROLE_FINANCE_DIRECTOR, codes)
+
+    # --- отправка ---
+    def test_cfo_head_submit_goes_straight_to_legal(self):
+        req = self._revoke(self.CFO_HEAD)
+        services.submit(req, [], actor_b24_id=self.CFO_HEAD)
+        req.refresh_from_db()
+        self.assertEqual(req.status, C.STATUS_TO_LEGAL)
+        # круга согласования не создаётся вовсе — печатать было бы нечего
+        self.assertIsNone(services.get_approval(req))
+        self.assertTrue(
+            AuditLog.objects.filter(action="request_submitted_without_approval").exists()
+        )
+
+    def test_employee_submit_needs_cfo_head_approval(self):
+        req = self._revoke(self.EMPLOYEE)
+        services.submit(req, [internal(self.CFO_HEAD, role=C.ROLE_CFO_HEAD)],
+                        actor_b24_id=self.EMPLOYEE)
+        req.refresh_from_db()
+        self.assertEqual(req.status, C.STATUS_ON_APPROVAL)
+        pending = services.current_pending_participant(services.get_approval(req))
+        self.assertEqual(pending.b24_user_id, self.CFO_HEAD)
+
+    def test_approved_revoke_goes_to_legal(self):
+        req = self._revoke(self.EMPLOYEE)
+        services.submit(req, [internal(self.CFO_HEAD, role=C.ROLE_CFO_HEAD)],
+                        actor_b24_id=self.EMPLOYEE)
+        pending = services.current_pending_participant(services.get_approval(req))
+        services.decide(req, pending.id, "approve", actor_b24_id=self.CFO_HEAD)
+        req.refresh_from_db()
+        self.assertEqual(req.status, C.STATUS_TO_LEGAL)
+
+    def test_empty_route_rejected_for_ordinary_initiator(self):
+        """Пустой маршрут — привилегия руководителя ЦФО, а не всех подряд."""
+        req = self._revoke(self.EMPLOYEE)
+        with self.assertRaises(services.RequestError):
+            services.submit(req, [], actor_b24_id=self.EMPLOYEE)
+
+    # --- что именно отзываем ---
+    def test_source_required(self):
+        req = self._revoke(self.CFO_HEAD, source=False)
+        with self.assertRaises(services.RequestError):
+            services.submit(req, [], actor_b24_id=self.CFO_HEAD)
+
+    def test_manual_source_accepted(self):
+        """Бумажная доверенность до MiniSED: карточки нет, есть реквизиты."""
+        req = self._revoke(
+            self.CFO_HEAD, source=False,
+            data={"source": {"kind": C.TYPE_POA, "number": "12/2023",
+                             "issued_at": "2023-05-01", "subject_name": "Сидоров"}},
+        )
+        services.submit(req, [], actor_b24_id=self.CFO_HEAD)
+        req.refresh_from_db()
+        self.assertEqual(req.status, C.STATUS_TO_LEGAL)
+
+    def test_reason_required(self):
+        req = self._revoke(self.CFO_HEAD, data={"revoke_reason": ""})
+        with self.assertRaises(services.RequestError):
+            services.submit(req, [], actor_b24_id=self.CFO_HEAD)
+
+    def test_other_reason_needs_text(self):
+        req = self._revoke(self.CFO_HEAD, data={"revoke_reason": "other"})
+        with self.assertRaises(services.RequestError):
+            services.submit(req, [], actor_b24_id=self.CFO_HEAD)
+        req.data["revoke_reason_text"] = "переезд представителя"
+        req.save(update_fields=["data"])
+        services.submit(req, [], actor_b24_id=self.CFO_HEAD)
+        req.refresh_from_db()
+        self.assertEqual(req.status, C.STATUS_TO_LEGAL)
+
+    # --- связка карточек и API ---
+    def test_link_visible_from_both_sides(self):
+        req = self._revoke(self.EMPLOYEE)
+        c = api(self.EMPLOYEE)
+        revoke_card = c.get(f"/api/reg/requests/{req.id}/").json()
+        self.assertEqual(revoke_card["source_request_info"]["number"], self.poa.number)
+        poa_card = c.get(f"/api/reg/requests/{self.poa.id}/").json()
+        self.assertEqual([r["number"] for r in poa_card["revocations"]], [req.number])
+
+    def test_cannot_link_non_revocable(self):
+        ecp = services.create_request(
+            request_type=C.TYPE_ECP, organization=self.org, initiator_b24_id=self.EMPLOYEE,
+        )
+        resp = api(self.EMPLOYEE).post("/api/reg/requests/", {
+            "request_type": C.TYPE_REVOKE, "organization": self.org.id,
+            "source_request": ecp.id,
+        }, format="json")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_source_request_only_on_revoke(self):
+        resp = api(self.EMPLOYEE).post("/api/reg/requests/", {
+            "request_type": C.TYPE_POA, "organization": self.org.id,
+            "source_request": self.poa.id,
+        }, format="json")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_revocable_list_shows_issued_poa_to_its_cfo_head(self):
+        """Руководителю ЦФО видны доверенности его ЦФО — он отзывает их за
+        уволившимся сотрудником, хотя заявку заводил не он."""
+        resp = api(self.CFO_HEAD).get("/api/reg/requests/revocable/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(self.poa.id, [r["id"] for r in resp.json()])
+
+    def test_revocable_list_hides_foreign_drafts(self):
+        draft = services.create_request(
+            request_type=C.TYPE_POA, organization=self.org, initiator_b24_id=self.EMPLOYEE,
+            subject_name="Черновиков",
+        )
+        ids = [r["id"] for r in api(self.CFO_HEAD).get("/api/reg/requests/revocable/").json()]
+        self.assertNotIn(draft.id, ids)
+
+    def test_revoke_pdf_renders(self):
+        from . import anketa_pdf
+
+        pdf = anketa_pdf.render_pdf(self._revoke(self.EMPLOYEE))
+        self.assertTrue(pdf.startswith(b"%PDF"))

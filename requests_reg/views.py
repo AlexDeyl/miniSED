@@ -450,7 +450,47 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
             "statuses": [{"code": c, "name": n} for c, n in constants.STATUS_CHOICES],
             "delivery_methods": [{"code": c, "name": n} for c, n in constants.DELIVERY_CHOICES],
             "roles": [{"code": c, "name": n} for c, n in constants.ROLE_NAMES.items()],
+            "revoke_reasons": [
+                {"code": c, "name": n} for c, n in constants.ANKETA_REVOKE_REASONS
+            ],
+            "revoke_kinds": [
+                {"code": c, "name": n} for c, n in constants.ANKETA_REVOKE_KINDS
+            ],
         })
+
+    # --- выбор отзываемой доверенности (для заявки на отзыв) ----------------
+    def _cfo_ids_i_head(self):
+        """ЦФО, где я руководитель: их доверенности мне и отзывать."""
+        return RoleAssignment.objects.filter(
+            role_code=constants.ROLE_CFO_HEAD, user_b24_id=self.b24_id,
+            is_active=True, cfo__isnull=False,
+        ).values_list("cfo_id", flat=True)
+
+    @action(detail=False, methods=["get"])
+    def revocable(self, request):
+        """Доверенности и МЧД, которые можно отозвать (для привязки к отзыву).
+
+        Отзывают уже выданное, поэтому черновики и заявки на согласовании сюда
+        не попадают. Видимость — как у обычного списка (свои + где я
+        согласующий), плюс руководителю ЦФО видны доверенности его ЦФО: он
+        отзывает за уволенным сотрудником, а заводил заявку не он."""
+        query = _query_param(request, "q").strip()
+        qs = (
+            RegulatoryRequest.objects.select_related("organization")
+            .filter(
+                request_type__in=constants.REVOCABLE_TYPES,
+                status__in=constants.REVOCABLE_STATUSES,
+            )
+            .order_by("-id")
+        )
+        if not (is_lawyer(self.b24_id) or can_view_all(self.b24_id) or is_admin_mode(request)):
+            qs = qs.filter(
+                Q(initiator_b24_id=self.b24_id)
+                | Q(id__in=self._participant_request_ids())
+                | Q(cfo_id__in=self._cfo_ids_i_head())
+            )
+        qs = search(qs, query)
+        return Response(RegulatoryRequestListSerializer(qs[:50], many=True).data)
 
     @action(detail=True, methods=["get"], url_path="sheet_pdf")
     def sheet_pdf(self, request, pk=None):
