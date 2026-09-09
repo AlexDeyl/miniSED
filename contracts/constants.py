@@ -28,6 +28,10 @@ STATUS_CHOICES = [
 # из каких статусов инициатор может отменить договор
 CANCELABLE_STATUSES = [STATUS_DRAFT, STATUS_ON_APPROVAL, STATUS_RETURNED, STATUS_REJECTED]
 
+# Из каких статусов инициатор может править карточку договора: пока он не на
+# круге и не согласован. Вернули на доработку — правим и отправляем заново.
+EDITABLE_STATUSES = [STATUS_DRAFT, STATUS_RETURNED, STATUS_REJECTED]
+
 NUMBER_PREFIX = "ДОГ"
 
 # --- Классы роли в маршруте (пока единый поток) -----------------------------

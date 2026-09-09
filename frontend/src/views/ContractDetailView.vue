@@ -26,7 +26,10 @@ const loading = ref(true)
 const error = ref<string | null>(null)
 const busy = ref(false)
 
-const route = ref<(ContractRouteSlot & { manual: string })[]>([])
+// Слот маршрута + выбранный вручную согласующий (manual) и признак замены
+// автоподобранного (replacing).
+type RouteRow = ContractRouteSlot & { manual: string; replacing: boolean }
+const route = ref<RouteRow[]>([])
 // Дополнительные согласующие, добавленные инициатором вручную (напр. главбух).
 // after — order авто-этапа, ПОСЛЕ которого вставить (или -1 = в самом начале).
 const extras = ref<{ uid: string; after: number }[]>([])
@@ -51,6 +54,21 @@ const canCancel = computed(
 )
 const canDelete = computed(() => isInitiator.value && contract.value?.status === 'canceled')
 const canReturn = computed(() => isInitiator.value && contract.value?.status === 'on_approval')
+// Править карточку можно там же, где отправлять: черновик, возвращённый и
+// отклонённый (contracts EDITABLE_STATUSES).
+const canEdit = canSubmit
+
+// Замена согласующего, подобранного матрицей ролей (руководитель в отпуске,
+// назначение устарело). Явным действием — случайный клик не должен молча
+// переписать маршрут.
+function startReplace(s: RouteRow) {
+  s.replacing = true
+  s.manual = ''
+}
+function cancelReplace(s: RouteRow) {
+  s.replacing = false
+  s.manual = ''
+}
 
 async function load() {
   loading.value = true
@@ -77,7 +95,7 @@ async function load() {
 
 async function loadRoute() {
   const { route: slots } = await contracts.routePreview(props.id)
-  route.value = slots.map((s) => ({ ...s, manual: '' }))
+  route.value = slots.map((s) => ({ ...s, manual: '', replacing: false }))
   extras.value = []
 }
 
@@ -155,9 +173,11 @@ function buildParticipants(): ParticipantInput[] | null {
     if (s.group) {
       list.push({ b24_user_id: null, role: s.role_code })
     } else {
-      const uid = s.resolved ? s.b24_user_id! : parseInt(s.manual, 10)
+      const uid = s.resolved && !s.replacing ? s.b24_user_id! : parseInt(s.manual, 10)
       if (Number.isNaN(uid)) {
-        error.value = `Укажите согласующего для роли «${s.role_name}».`
+        error.value = s.replacing
+          ? `Выберите, кем заменить согласующего в роли «${s.role_name}».`
+          : `Укажите согласующего для роли «${s.role_name}».`
         return null
       }
       list.push({ b24_user_id: uid, role: s.role_code })
@@ -343,16 +363,26 @@ onMounted(load)
               </td>
               <td>
                 <template v-if="s.group">Юридический отдел (любой юрист)</template>
-                <template v-else-if="s.resolved">
+                <template v-else-if="s.resolved && !s.replacing">
                   {{ s.user_name || nameByBid(s.b24_user_id) || `USER #${s.b24_user_id}` }}
+                  <button
+                    v-if="s.replaceable" type="button" class="link-btn"
+                    @click="startReplace(s)"
+                  >заменить</button>
                 </template>
-                <UserSearchSelect
-                  v-else v-model="s.manual" :users="users"
-                  placeholder="найти согласующего…" @pick="onPickUser"
-                />
+                <template v-else>
+                  <UserSearchSelect
+                    v-model="s.manual" :users="users"
+                    placeholder="найти согласующего…" @pick="onPickUser"
+                  />
+                  <button v-if="s.resolved" type="button" class="link-btn" @click="cancelReplace(s)">
+                    вернуть автоподбор
+                  </button>
+                </template>
               </td>
               <td>
                 <span v-if="s.needs_manual" class="participant-pill" style="background:#ffe0b2">ручной выбор</span>
+                <span v-else-if="s.replacing" class="participant-pill" style="background:#e3f2fd">замена</span>
               </td>
             </tr>
           </tbody>
@@ -404,15 +434,22 @@ onMounted(load)
       </div>
 
       <!-- Управление -->
-      <div v-if="canCancel || canDelete || canReturn" class="detail-card">
+      <div v-if="canCancel || canDelete || canReturn || canEdit" class="detail-card">
         <div class="detail-card-header">Управление</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <RouterLink v-if="canEdit" :to="`/contracts/${contract.id}/edit`" class="btn btn--primary">
+            Редактировать договор
+          </RouterLink>
           <button v-if="canReturn" class="btn btn--soft" :disabled="busy" @click="returnForRevision">Вернуть на доработку</button>
           <button v-if="canCancel" class="btn btn--soft" :disabled="busy" @click="cancelContract">Отменить договор</button>
           <button v-if="canDelete" class="btn btn--danger" :disabled="busy" @click="removeContract">Удалить договор</button>
         </div>
         <div v-if="canReturn" class="detail-meta" style="margin-top:6px">
           Возврат снимает договор с текущего круга — после правок его можно отправить заново.
+        </div>
+        <div v-else-if="canEdit" class="detail-meta" style="margin-top:6px">
+          Карточка открыта для правки, пока договор не на согласовании. После
+          правок отправьте его на согласование заново.
         </div>
       </div>
 
@@ -465,6 +502,11 @@ onMounted(load)
 .submit-comment {
   width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #d0d0d0;
   border-radius: 6px; font: inherit; font-size: 13px; resize: vertical;
+}
+.link-btn {
+  background: none; border: none; padding: 0; margin-left: 8px;
+  color: var(--green-main); cursor: pointer; font: inherit; font-size: 12px;
+  text-decoration: underline;
 }
 .extras { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--gray-border); }
 .extras-title { font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 8px; }

@@ -102,6 +102,30 @@ def _sync_status(compliment: Compliment) -> None:
             _notify("notify_executor", compliment)
 
 
+def _log_route_overrides(compliment: Compliment, participants: list[dict], *,
+                         actor_b24_id=None) -> None:
+    """Пишет в аудит ручной выбор и замену согласующих перед стартом круга.
+
+    Маршрут комплимента жёстко задан категорией, поэтому любое отклонение от
+    автоподбора — сознательное решение инициатора, и оно должно быть видно."""
+    auto = {s["role_code"]: s for s in routing.build_route(compliment)}
+    for p in participants:
+        slot = auto.get(p.get("role"))
+        if slot is None:
+            continue
+        if slot["needs_manual"]:
+            log_action(
+                "compliment_manual_approver_selected", target=compliment,
+                new_value={"role": p.get("role"), "b24_user_id": p.get("b24_user_id")},
+            )
+        elif slot["b24_user_id"] != p.get("b24_user_id"):
+            log_action(
+                "compliment_approver_replaced", target=compliment,
+                old_value={"role": p.get("role"), "b24_user_id": slot["b24_user_id"]},
+                new_value={"b24_user_id": p.get("b24_user_id"), "by_b24_id": actor_b24_id},
+            )
+
+
 @transaction.atomic
 def submit(compliment: Compliment, participants: list[dict], *, actor_b24_id=None,
            comment: str = "") -> Approval:
@@ -117,6 +141,8 @@ def submit(compliment: Compliment, participants: list[dict], *, actor_b24_id=Non
         raise ComplimentError("Отправить можно черновик, возвращённую или отклонённую заявку.")
     if not participants:
         raise ComplimentError("Маршрут пуст — добавьте согласующих.")
+
+    _log_route_overrides(compliment, participants, actor_b24_id=actor_b24_id)
 
     # Исполнитель: если инициатор не выбрал — берём по роли категории.
     if not compliment.executor_b24_id:

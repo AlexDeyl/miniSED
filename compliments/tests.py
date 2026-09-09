@@ -289,6 +289,65 @@ class ApiTests(BaseData):
         })
 
 
+class EditTests(BaseData):
+    """Правка полей заявки инициатором после возврата на доработку."""
+
+    def _returned(self, status=constants.STATUS_RETURNED):
+        c = self._compliment()
+        Compliment.objects.filter(pk=c.pk).update(status=status)
+        c.refresh_from_db()
+        return c
+
+    def test_initiator_edits_returned_compliment(self):
+        c = self._returned()
+        r = api(1).patch(f"/api/compliments/{c.id}/", {
+            "title": "Комплимент партнёру (ред. 2)", "needs_ceo": True,
+        }, format="json")
+        self.assertEqual(r.status_code, 200)
+        c.refresh_from_db()
+        self.assertEqual(c.title, "Комплимент партнёру (ред. 2)")
+        self.assertTrue(c.needs_ceo)
+        self.assertEqual(r.json()["title"], "Комплимент партнёру (ред. 2)")
+
+    def test_edit_forbidden_on_approval(self):
+        c = self._returned(status=constants.STATUS_ON_APPROVAL)
+        r = api(1).patch(f"/api/compliments/{c.id}/", {"title": "х"}, format="json")
+        self.assertEqual(r.status_code, 403)
+        c.refresh_from_db()
+        self.assertEqual(c.title, "Комплимент партнёру")
+
+    def test_edit_forbidden_for_non_initiator(self):
+        c = self._returned()
+        # руководитель продаж видит все заявки, но править чужую не может
+        r = api(DARIA).patch(f"/api/compliments/{c.id}/", {"title": "х"}, format="json")
+        self.assertEqual(r.status_code, 403)
+        c.refresh_from_db()
+        self.assertEqual(c.title, "Комплимент партнёру")
+
+
+class ApproverReplacementTests(BaseData):
+    """Замена согласующего, подобранного по категории, фиксируется в аудите."""
+
+    def test_replacement_logged(self):
+        from core.models import AuditLog
+
+        c = self._compliment(constants.CATEGORY_CONFECTIONERY)
+        parts = [
+            {"type": "internal",
+             "b24_user_id": 777 if s["role_code"] == R.ROLE_SALES_HEAD else s["b24_user_id"],
+             "role": s["role_code"], "order": i}
+            for i, s in enumerate(
+                s for s in routing.build_route(c)
+                if s["role_class"] == constants.CLASS_APPROVER
+            )
+        ]
+        services.submit(c, parts, actor_b24_id=1)
+        log = AuditLog.objects.filter(action="compliment_approver_replaced").first()
+        self.assertIsNotNone(log)
+        self.assertEqual(log.old_value["b24_user_id"], DARIA)
+        self.assertEqual(log.new_value["b24_user_id"], 777)
+
+
 class SearchTests(BaseData):
     """Поиск по комплиментам (раздел и очередь исполнения) — как в
     доверенностях/МЧД, включая поиск по имени прикреплённого файла."""

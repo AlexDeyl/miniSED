@@ -81,6 +81,9 @@ def _slot(order: int, role_code: str, role_class: str, compliment) -> dict:
         "b24_user_id": assignment.user_b24_id if assignment else None,
         "user_name": assignment.user_name if assignment else "",
         "needs_manual": assignment is None,
+        # Согласующего инициатор может заменить (отпуск, устаревшее
+        # назначение); исполнителя — нет, он определяется категорией.
+        "replaceable": role_class == K.CLASS_APPROVER,
     }
 
 

@@ -38,6 +38,10 @@ export const requests = {
   get: (id: number | string) => api.get<RegulatoryRequestDetail>(`${BASE}/${id}/`),
   create: (payload: RequestCreatePayload) =>
     api.post<RegulatoryRequestDetail>(`${BASE}/`, payload),
+  // Правка полей заявки инициатором: сервер пускает только черновик,
+  // возвращённую на доработку и отклонённую (requests_reg EDITABLE_STATUSES).
+  update: (id: number | string, payload: Partial<RequestCreatePayload>) =>
+    api.patch<RegulatoryRequestDetail>(`${BASE}/${id}/`, payload),
 
   routePreview: (id: number | string) =>
     api.get<{ route: RouteSlot[] }>(`${BASE}/${id}/route_preview/`),

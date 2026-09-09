@@ -87,6 +87,27 @@ def _sync_status(contract: Contract) -> None:
             _notify("notify_initiator_result", contract)  # инициатору — согласован
 
 
+def _log_route_overrides(contract: Contract, participants: list[dict], *,
+                         actor_b24_id=None) -> None:
+    """Пишет в аудит ручной выбор и замену согласующих перед стартом круга."""
+    auto = {s["role_code"]: s for s in routing.build_route(contract)}
+    for p in participants:
+        slot = auto.get(p.get("role"))
+        if slot is None:
+            continue
+        if slot["needs_manual"]:
+            log_action(
+                "contract_manual_approver_selected", target=contract,
+                new_value={"role": p.get("role"), "b24_user_id": p.get("b24_user_id")},
+            )
+        elif not slot.get("group") and slot["b24_user_id"] != p.get("b24_user_id"):
+            log_action(
+                "contract_approver_replaced", target=contract,
+                old_value={"role": p.get("role"), "b24_user_id": slot["b24_user_id"]},
+                new_value={"b24_user_id": p.get("b24_user_id"), "by_b24_id": actor_b24_id},
+            )
+
+
 @transaction.atomic
 def submit(contract: Contract, participants: list[dict], *, flow_type=None,
            actor_b24_id=None, comment: str = "") -> Approval:
@@ -102,14 +123,9 @@ def submit(contract: Contract, participants: list[dict], *, flow_type=None,
     if not participants:
         raise ContractError("Маршрут пуст — добавьте согласующих.")
 
-    # зафиксировать ручной выбор для слотов, которые система не разрешила
-    manual_roles = {s["role_code"] for s in routing.build_route(contract) if s["needs_manual"]}
-    for p in participants:
-        if p.get("role") in manual_roles:
-            log_action(
-                "contract_manual_approver_selected", target=contract,
-                new_value={"role": p.get("role"), "b24_user_id": p.get("b24_user_id")},
-            )
+    # Зафиксировать всё, что инициатор поставил не по матрице ролей: и ручной
+    # выбор (роль не разрешилась), и замену автоподобранного согласующего.
+    _log_route_overrides(contract, participants, actor_b24_id=actor_b24_id)
 
     approval = get_approval(contract)
     if approval is None:

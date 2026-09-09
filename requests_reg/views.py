@@ -220,6 +220,32 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
         )
         return Response(RegulatoryRequestDetailSerializer(req).data, status=201)
 
+    def update(self, request, *args, **kwargs):
+        """Правка полей заявки инициатором (PATCH из формы редактирования).
+
+        Возвращённую на доработку заявку нужно чем-то дорабатывать — иначе
+        единственным способом исправить опечатку в анкете остаётся завести
+        заявку заново. Правим только до круга: на согласовании и дальше
+        карточка заморожена, чтобы визировали ровно то, что видели."""
+        req = self.get_object()
+        self._require_editable(req)
+        ser = self.get_serializer(req, data=request.data, partial=kwargs.get("partial", False))
+        ser.is_valid(raise_exception=True)
+        ser.save()
+        log_action(
+            "request_edited", target=req, request=request,
+            new_value={"fields": sorted(ser.validated_data.keys()), "by_b24_id": self.b24_id},
+        )
+        return self._detail(req)
+
+    def _require_editable(self, req):
+        self._require_initiator(req)
+        if req.status not in constants.EDITABLE_STATUSES:
+            raise PermissionDenied(
+                "Править заявку можно, пока она черновик, возвращена на доработку "
+                "или отклонена."
+            )
+
     def _detail(self, req):
         req.refresh_from_db()
         return Response(RegulatoryRequestDetailSerializer(req).data)

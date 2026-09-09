@@ -27,6 +27,9 @@ export const compliments = {
   get: (id: number | string) => api.get<ComplimentDetail>(`${BASE}/${id}/`),
   create: (payload: ComplimentCreatePayload) =>
     api.post<ComplimentDetail>(`${BASE}/`, payload),
+  // Правка полей заявки инициатором (черновик / возвращена / отклонена).
+  update: (id: number | string, payload: Partial<ComplimentCreatePayload>) =>
+    api.patch<ComplimentDetail>(`${BASE}/${id}/`, payload),
 
   routePreview: (id: number | string) =>
     api.get<{ route: ComplimentRouteSlot[] }>(`${BASE}/${id}/route_preview/`),

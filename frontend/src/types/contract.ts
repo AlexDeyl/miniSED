@@ -16,6 +16,9 @@ export interface ContractRouteSlot {
   role_class: 'approver' | 'signer'
   required: boolean
   group: boolean
+  // можно ли заменить подобранного матрицей согласующего (у финдиректора и
+  // юротдела — нельзя: так задан маршрут договора)
+  replaceable: boolean
   resolved: boolean
   b24_user_id: number | null
   user_name: string

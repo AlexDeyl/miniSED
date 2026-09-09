@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { requests, type Cfo, type Facility, type Organization } from '@/services/requests'
 import { ApiError } from '@/services/api'
@@ -7,6 +7,13 @@ import type { RegulatoryRequestListItem, RequestType } from '@/types/request'
 import AddressAutocomplete from '@/components/AddressAutocomplete.vue'
 import PoaSearchSelect from '@/components/PoaSearchSelect.vue'
 import { formatSnils, isPlaceholder, isValidInn, isValidSnils } from '@/utils/personal'
+
+// id приходит только с /requests/:id/edit — та же форма правит уже созданную
+// заявку (черновик, возвращённую на доработку, отклонённую). Отдельная форма
+// редактирования разошлась бы с формой создания — а анкета здесь длинная, и
+// расхождение вылезло бы у юристов, а не у нас.
+const props = defineProps<{ id?: string }>()
+const isEdit = computed(() => !!props.id)
 
 const router = useRouter()
 const route = useRoute()
@@ -233,16 +240,78 @@ async function loadContext() {
   )
 }
 
+// Пока переливаем заявку в форму, смена организации не должна сбрасывать
+// объект и ЦФО: они приходят из самой заявки, а не выбираются заново.
+const prefilling = ref(false)
+
+// Заполняет форму существующей заявкой (режим правки).
+async function prefill(id: string) {
+  prefilling.value = true
+  try {
+    const r = await requests.get(id)
+    requestType.value = r.request_type
+    organization.value = r.organization
+    basis.value = r.basis || ''
+    await loadContext()
+    facility.value = r.facility
+    cfo.value = r.cfo
+
+    const src = (r.data || {}) as Record<string, unknown>
+    if (r.request_type === 'revoke') {
+      sourceRequest.value = r.source_request
+      if (r.source_request_info) {
+        sourcePicked.value = {
+          ...r.source_request_info,
+          organization: r.organization,
+          organization_name: r.organization_name,
+          created_at: r.created_at,
+        }
+      }
+      revoke.reason = (src.revoke_reason as string) || 'dismissal'
+      revoke.reason_text = (src.revoke_reason_text as string) || ''
+      revoke.revoke_date = (src.revoke_date as string) || revoke.revoke_date
+      revoke.urgency = (src.urgency as string) || 'standard'
+      revoke.subject_name = r.subject_name || ''
+      revoke.comment = r.comment || ''
+      Object.assign(revoke.source, (src.source as object) || {})
+    } else {
+      // Анкета совпадает по форме с локальной моделью; вложенные объекты
+      // (представитель, юрлицо-представитель) сливаем, а не подменяем —
+      // на них смотрят const-псевдонимы rep и legal.
+      for (const [k, v] of Object.entries(src)) {
+        if ((k === 'rep' || k === 'rep_legal') && v && typeof v === 'object') {
+          Object.assign(data[k] as Record<string, unknown>, v as Record<string, unknown>)
+        } else {
+          data[k] = v
+        }
+      }
+    }
+  } finally {
+    // watch(organization) отрабатывает отложенно — снимаем флаг после него
+    await nextTick()
+    prefilling.value = false
+  }
+}
+
 onMounted(async () => {
   try {
     orgs.value = await requests.organizations()
     if (orgs.value.length) organization.value = orgs.value[0].id
     templates.value = await requests.powerTemplates()
     await loadContext()
-  } catch { /* ошибку покажем при сохранении */ }
+    if (props.id) await prefill(props.id)
+  } catch (e) {
+    if (props.id) error.value = e instanceof ApiError ? e.message : 'Не удалось загрузить заявку'
+    /* иначе ошибку справочников покажем при сохранении */
+  }
 })
 
-watch(organization, () => { facility.value = null; cfo.value = null; loadContext() })
+watch(organization, () => {
+  if (prefilling.value) return
+  facility.value = null
+  cfo.value = null
+  loadContext()
+})
 
 // Проверка формы. Возвращает текст первой ошибки или null, если всё верно.
 function validate(): string | null {
@@ -307,9 +376,13 @@ function validate(): string | null {
     if (isEcp.value) {
       if (!cfo.value) return 'Укажите ЦФО — по нему строится маршрут согласования.'
       if (!data.planned_date) return 'Укажите планируемую дату получения.'
-      for (const a of attachmentList.value) {
-        if ((data.attachments as string[]).includes(a.code) && !attachmentFiles[a.code])
-          return `Приложите файл для «${a.name}» или снимите отметку.`
+      // При правке файлы отмеченных приложений уже лежат в карточке заявки —
+      // требовать приложить их заново значило бы плодить дубли.
+      if (!isEdit.value) {
+        for (const a of attachmentList.value) {
+          if ((data.attachments as string[]).includes(a.code) && !attachmentFiles[a.code])
+            return `Приложите файл для «${a.name}» или снимите отметку.`
+        }
       }
       return null
     }
@@ -334,10 +407,13 @@ function validate(): string | null {
       if (to > max) return 'Раздел 2: срок доверенности не может превышать 3 года.'
     }
 
-    // Раздел 3 — отмеченное приложение обязано иметь файл
-    for (const a of attachmentList.value) {
-      if ((data.attachments as string[]).includes(a.code) && !attachmentFiles[a.code])
-        return `Раздел 3: приложите файл для «${a.name}» или снимите отметку.`
+    // Раздел 3 — отмеченное приложение обязано иметь файл. При правке файлы
+    // уже загружены в карточку, поэтому проверка снимается.
+    if (!isEdit.value) {
+      for (const a of attachmentList.value) {
+        if ((data.attachments as string[]).includes(a.code) && !attachmentFiles[a.code])
+          return `Раздел 3: приложите файл для «${a.name}» или снимите отметку.`
+      }
     }
   }
 
@@ -354,9 +430,9 @@ async function save() {
     ? (revoke.subject_name || revoke.source.subject_name)
     : [rep.last_name, rep.first_name, rep.middle_name].filter(Boolean).join(' ')
   saving.value = true
-  let created
+  let saved
   try {
-    created = await requests.create({
+    const payload = {
       request_type: requestType.value,
       organization: organization.value,
       facility: facility.value,
@@ -380,30 +456,43 @@ async function save() {
           }
         : {}),
       ...(isAnketa.value ? { data: JSON.parse(JSON.stringify(data)) } : {}),
-    } as never)
+    }
+    saved = props.id
+      ? await requests.update(props.id, payload as never)
+      : await requests.create(payload as never)
   } catch (e) {
-    error.value = e instanceof ApiError ? e.message : 'Не удалось создать'
+    error.value = e instanceof ApiError
+      ? e.message
+      : props.id ? 'Не удалось сохранить' : 'Не удалось создать'
     saving.value = false
     return
   }
-  // Заявка создана — прикладываем файлы (не блокируем переход, если часть не загрузилась).
+  // Заявка сохранена — прикладываем файлы (не блокируем переход, если часть
+  // не загрузилась). При правке это добавление к уже загруженным.
   try {
-    await uploadAttachments(created.id)
+    await uploadAttachments(saved.id)
   } catch {
-    error.value = 'Заявка создана, но некоторые файлы не загрузились — добавьте их в карточке заявки.'
+    error.value = 'Заявка сохранена, но некоторые файлы не загрузились — добавьте их в карточке заявки.'
   }
-  router.push(`/requests/${created.id}`)
+  router.push(`/requests/${saved.id}`)
 }
 </script>
 
 <template>
   <section>
-    <RouterLink to="/requests" class="back-link">← К заявкам</RouterLink>
+    <RouterLink :to="isEdit ? `/requests/${props.id}` : '/requests'" class="back-link">
+      {{ isEdit ? '← К заявке' : '← К заявкам' }}
+    </RouterLink>
     <!-- Заголовок называет тип: так видно, что вкладка раздела подхватилась,
          и не надо сверяться с полем ниже. -->
     <h1 class="page-title" style="margin-bottom:14px">
+      <template v-if="isEdit">Правка: </template>
       {{ TYPES.find((t) => t.code === requestType)?.name || 'Новая регламентная заявка' }}
     </h1>
+    <p v-if="isEdit" class="detail-meta" style="margin:-8px 0 14px">
+      Правки сохраняются в карточку. Чтобы заявка снова пошла по маршруту,
+      отправьте её на согласование из карточки.
+    </p>
 
     <div class="form" style="max-width:760px">
       <!-- Базовое -->
@@ -731,10 +820,13 @@ async function save() {
       </label>
 
       <p v-if="error" class="state state--error">{{ error }}</p>
-      <div>
+      <div class="row-actions">
         <button class="btn btn--primary" :disabled="saving" @click="save">
-          {{ saving ? 'Сохранение…' : 'Создать черновик' }}
+          {{ saving ? 'Сохранение…' : isEdit ? 'Сохранить' : 'Создать черновик' }}
         </button>
+        <RouterLink v-if="isEdit" :to="`/requests/${props.id}`" class="btn btn--ghost">
+          Отмена
+        </RouterLink>
       </div>
     </div>
   </section>

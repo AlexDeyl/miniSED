@@ -36,6 +36,10 @@ STATUS_CHOICES = [
 # меняется (решение заказчика — «ничего не делаем»).
 CANCELABLE_STATUSES = [STATUS_DRAFT, STATUS_ON_APPROVAL, STATUS_RETURNED, STATUS_REJECTED]
 
+# Из каких статусов инициатор может править поля заявки: до круга и после
+# возврата на доработку. На согласовании и в исполнении карточка заморожена.
+EDITABLE_STATUSES = [STATUS_DRAFT, STATUS_RETURNED, STATUS_REJECTED]
+
 # Раздел «Заявки для исполнения»: новые / в работе / архив.
 EXECUTION_NEW_STATUSES = [STATUS_APPROVED]
 EXECUTION_WORK_STATUSES = [STATUS_IN_WORK]

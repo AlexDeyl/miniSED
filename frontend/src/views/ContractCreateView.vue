@@ -1,10 +1,17 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { contracts, type Cfo, type Organization } from '@/services/contracts'
 import { bitrix, type BitrixDeal } from '@/services/bitrix'
 import { ApiError } from '@/services/api'
 import BitrixSearchModal from '@/components/BitrixSearchModal.vue'
+
+// id приходит только с /contracts/:id/edit — та же форма правит существующий
+// договор. Отдельная форма редактирования разошлась бы с формой создания
+// (поля, подсказки, валидация), и вернувшийся с доработки инициатор видел бы
+// не то, что заполнял.
+const props = defineProps<{ id?: string }>()
+const isEdit = computed(() => !!props.id)
 
 const router = useRouter()
 
@@ -40,6 +47,21 @@ async function load() {
       contracts.cfos(),
     ])
     try { portalDomain.value = (await bitrix.status()).domain || '' } catch { /* не критично */ }
+    if (props.id) {
+      const c = await contracts.get(props.id)
+      form.value = {
+        title: c.title,
+        organization: c.organization,
+        cfo: c.cfo,
+        // сумма приходит строкой «150000.00» — в поле type=number пустая
+        // строка означает «не указана», и такой её и отправим обратно
+        amount: c.amount == null ? '' : String(c.amount),
+        is_nonstandard: c.is_nonstandard,
+        has_disagreement_protocol: c.has_disagreement_protocol,
+        crm_link: c.crm_link || '',
+        comment: c.comment || '',
+      }
+    }
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Не удалось загрузить справочники'
   } finally {
@@ -64,7 +86,7 @@ function onPickDeal(d: BitrixDeal) {
   showDealPicker.value = false
 }
 
-async function create() {
+async function save() {
   error.value = null
   if (!form.value.title.trim()) {
     error.value = 'Укажите название договора'
@@ -75,24 +97,30 @@ async function create() {
     return
   }
   busy.value = true
+  const payload = {
+    title: form.value.title.trim(),
+    organization: form.value.organization,
+    cfo: form.value.cfo,
+    amount: form.value.amount || null,
+    is_nonstandard: form.value.is_nonstandard,
+    has_disagreement_protocol: form.value.has_disagreement_protocol,
+    crm_link: form.value.crm_link.trim(),
+    comment: form.value.comment,
+  }
   try {
-    const c = await contracts.create({
-      title: form.value.title.trim(),
-      organization: form.value.organization,
-      cfo: form.value.cfo,
-      amount: form.value.amount || null,
-      is_nonstandard: form.value.is_nonstandard,
-      has_disagreement_protocol: form.value.has_disagreement_protocol,
-      crm_link: form.value.crm_link.trim(),
-      comment: form.value.comment,
-    })
-    // прикреплённые файлы загружаем к созданному договору
+    const c = props.id
+      ? await contracts.update(props.id, payload)
+      : await contracts.create(payload)
+    // прикреплённые файлы загружаем к договору (при правке — как дополнение:
+    // ранее загруженные остаются на месте)
     for (const f of files.value) {
       await contracts.uploadDocument(c.id, f, f.name)
     }
     router.push(`/contracts/${c.id}`)
   } catch (e) {
-    error.value = e instanceof ApiError ? e.message : 'Не удалось создать договор'
+    error.value = e instanceof ApiError
+      ? e.message
+      : props.id ? 'Не удалось сохранить договор' : 'Не удалось создать договор'
     busy.value = false
   }
 }
@@ -102,8 +130,10 @@ onMounted(load)
 
 <template>
   <section class="detail-narrow">
-    <RouterLink to="/contracts" class="back-link">← К списку</RouterLink>
-    <h1 class="detail-title">Новый договор</h1>
+    <RouterLink :to="isEdit ? `/contracts/${props.id}` : '/contracts'" class="back-link">
+      {{ isEdit ? '← К договору' : '← К списку' }}
+    </RouterLink>
+    <h1 class="detail-title">{{ isEdit ? 'Редактирование договора' : 'Новый договор' }}</h1>
 
     <p v-if="error" class="state state--error">{{ error }}</p>
     <p v-if="loading" class="state">Загрузка…</p>
@@ -182,12 +212,22 @@ onMounted(load)
       </label>
 
       <div class="row-actions" style="margin-top:12px">
-        <button class="btn btn--primary" :disabled="busy" @click="create">Создать</button>
-        <RouterLink to="/contracts" class="btn btn--ghost">Отмена</RouterLink>
+        <button class="btn btn--primary" :disabled="busy" @click="save">
+          {{ isEdit ? 'Сохранить' : 'Создать' }}
+        </button>
+        <RouterLink :to="isEdit ? `/contracts/${props.id}` : '/contracts'" class="btn btn--ghost">
+          Отмена
+        </RouterLink>
       </div>
       <p class="muted" style="margin:10px 0 0;font-size:12px">
-        После создания маршрут согласования построится автоматически по ЮО и ЦФО —
-        его можно будет проверить и отправить на согласование.
+        <template v-if="isEdit">
+          Маршрут пересобирается по ЮО и ЦФО при отправке — после правок проверьте
+          его в карточке договора и отправьте на согласование заново.
+        </template>
+        <template v-else>
+          После создания маршрут согласования построится автоматически по ЮО и ЦФО —
+          его можно будет проверить и отправить на согласование.
+        </template>
       </p>
     </div>
 

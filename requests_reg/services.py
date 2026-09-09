@@ -112,6 +112,27 @@ def _sync_status(request: RegulatoryRequest) -> None:
                 _notify("notify_legal_queue", request)  # юристам — новая на исполнение
 
 
+def _log_route_overrides(request: RegulatoryRequest, participants: list[dict], *,
+                         actor_b24_id=None) -> None:
+    """Пишет в аудит ручной выбор и замену согласующих перед стартом круга."""
+    auto = {s["role_code"]: s for s in routing.build_route(request)}
+    for p in participants:
+        slot = auto.get(p.get("role"))
+        if slot is None:
+            continue
+        if slot["needs_manual"]:
+            log_action(
+                "manual_approver_selected", target=request,
+                new_value={"role": p.get("role"), "b24_user_id": p.get("b24_user_id")},
+            )
+        elif not slot.get("group") and slot["b24_user_id"] != p.get("b24_user_id"):
+            log_action(
+                "approver_replaced", target=request,
+                old_value={"role": p.get("role"), "b24_user_id": slot["b24_user_id"]},
+                new_value={"b24_user_id": p.get("b24_user_id"), "by_b24_id": actor_b24_id},
+            )
+
+
 @transaction.atomic
 def submit(request: RegulatoryRequest, participants: list[dict], *, flow_type=None,
            actor_b24_id=None, comment: str = ""):
@@ -145,14 +166,11 @@ def submit(request: RegulatoryRequest, participants: list[dict], *, flow_type=No
         if err:
             raise RequestError(err)
 
-    # зафиксировать ручной выбор согласующих (слоты, которые система не разрешила)
-    manual_roles = {s["role_code"] for s in routing.build_route(request) if s["needs_manual"]}
-    for p in participants:
-        if p.get("role") in manual_roles:
-            log_action(
-                "manual_approver_selected", target=request,
-                new_value={"role": p.get("role"), "b24_user_id": p.get("b24_user_id")},
-            )
+    # Зафиксировать в аудите всё, что инициатор поставил не по матрице ролей:
+    # и ручной выбор (роль не разрешилась), и замену автоподобранного
+    # согласующего. Кто ушёл с маршрута и кто встал вместо него — вопрос,
+    # который задают post factum, а ответ на него есть только здесь.
+    _log_route_overrides(request, participants, actor_b24_id=actor_b24_id)
 
     # Заполненное PDF-заявление прикрепляем к заявке (его получат юристы).
     if request.request_type in (

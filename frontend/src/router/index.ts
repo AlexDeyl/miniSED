@@ -54,6 +54,14 @@ const router = createRouter({
       meta: { title: 'Новая заявка' },
     },
     {
+      // Правка возвращённой/отклонённой заявки — та же форма, что и создание.
+      path: '/requests/:id/edit',
+      name: 'request-edit',
+      component: () => import('@/views/RequestCreateView.vue'),
+      props: true,
+      meta: { title: 'Редактирование заявки' },
+    },
+    {
       path: '/requests/:id',
       name: 'request-detail',
       component: () => import('@/views/RequestDetailView.vue'),
@@ -74,6 +82,13 @@ const router = createRouter({
       meta: { title: 'Новый договор' },
     },
     {
+      path: '/contracts/:id/edit',
+      name: 'contract-edit',
+      component: () => import('@/views/ContractCreateView.vue'),
+      props: true,
+      meta: { title: 'Редактирование договора' },
+    },
+    {
       path: '/contracts/:id',
       name: 'contract-detail',
       component: () => import('@/views/ContractDetailView.vue'),
@@ -91,6 +106,13 @@ const router = createRouter({
       name: 'compliment-new',
       component: () => import('@/views/ComplimentCreateView.vue'),
       meta: { title: 'Новая заявка на комплимент' },
+    },
+    {
+      path: '/compliments/:id/edit',
+      name: 'compliment-edit',
+      component: () => import('@/views/ComplimentCreateView.vue'),
+      props: true,
+      meta: { title: 'Редактирование заявки на комплимент' },
     },
     {
       path: '/compliments/:id',

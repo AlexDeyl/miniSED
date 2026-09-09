@@ -167,6 +167,30 @@ class ComplimentViewSet(viewsets.ModelViewSet):
         )
         return Response(ComplimentDetailSerializer(compliment).data, status=201)
 
+    def update(self, request, *args, **kwargs):
+        """Правка полей заявки инициатором (PATCH из формы редактирования).
+
+        Вернули на доработку — заявку нужно чем-то дорабатывать. На круге и в
+        исполнении карточка заморожена: согласующие визируют то, что видели."""
+        compliment = self.get_object()
+        self._require_editable(compliment)
+        ser = self.get_serializer(compliment, data=request.data, partial=kwargs.get("partial", False))
+        ser.is_valid(raise_exception=True)
+        ser.save()
+        log_action(
+            "compliment_edited", target=compliment, request=request,
+            new_value={"fields": sorted(ser.validated_data.keys()), "by_b24_id": self.b24_id},
+        )
+        return self._detail(compliment)
+
+    def _require_editable(self, compliment):
+        self._require_initiator(compliment)
+        if compliment.status not in constants.EDITABLE_STATUSES:
+            raise PermissionDenied(
+                "Править заявку можно, пока она черновик, возвращена на доработку "
+                "или отклонена."
+            )
+
     def _detail(self, compliment):
         compliment.refresh_from_db()
         return Response(ComplimentDetailSerializer(compliment).data)

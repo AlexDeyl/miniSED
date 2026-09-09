@@ -203,6 +203,91 @@ class FlowTests(TestCase):
         )
 
 
+class EditTests(TestCase):
+    """Правка полей заявки инициатором после возврата на доработку."""
+
+    def setUp(self):
+        self.org = Organization.objects.create(short_name="УК Норд")
+
+    def _req(self, status=C.STATUS_RETURNED):
+        req = services.create_request(
+            request_type=C.TYPE_POA, organization=self.org, initiator_b24_id=1,
+            subject_name="Иванов", basis="Приказ №1",
+        )
+        RegulatoryRequest.objects.filter(pk=req.pk).update(status=status)
+        req.refresh_from_db()
+        return req
+
+    def test_initiator_edits_returned_request(self):
+        req = self._req()
+        r = api(1).patch(f"/api/reg/requests/{req.id}/", {
+            "basis": "Приказ №2", "comment": "уточнили основание",
+        }, format="json")
+        self.assertEqual(r.status_code, 200)
+        req.refresh_from_db()
+        self.assertEqual(req.basis, "Приказ №2")
+        # ответ — карточка целиком, форме есть что показать после сохранения
+        self.assertEqual(r.json()["basis"], "Приказ №2")
+        self.assertTrue(AuditLog.objects.filter(action="request_edited").exists())
+
+    def test_anketa_edit_keeps_validation(self):
+        """Правка не обходит проверки анкеты: битый СНИЛС не сохранится."""
+        req = self._req()
+        RegulatoryRequest.objects.filter(pk=req.pk).update(request_type=C.TYPE_MCHD)
+        r = api(1).patch(f"/api/reg/requests/{req.id}/", {
+            "data": {"rep": {"snils": "123-456-789 00", "inn": ""}},
+        }, format="json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_edit_forbidden_on_approval(self):
+        req = self._req(status=C.STATUS_ON_APPROVAL)
+        r = api(1).patch(f"/api/reg/requests/{req.id}/", {"basis": "х"}, format="json")
+        self.assertEqual(r.status_code, 403)
+        req.refresh_from_db()
+        self.assertEqual(req.basis, "Приказ №1")
+
+    def test_edit_forbidden_for_non_initiator(self):
+        req = self._req()
+        # согласующий заявку видит, но править её не может
+        services.get_approval(req)
+        r = api(99).patch(f"/api/reg/requests/{req.id}/", {"basis": "х"}, format="json")
+        self.assertIn(r.status_code, (403, 404))
+        req.refresh_from_db()
+        self.assertEqual(req.basis, "Приказ №1")
+
+
+class ApproverReplacementTests(TestCase):
+    """Инициатор заменяет согласующего, подобранного матрицей ролей."""
+
+    def setUp(self):
+        self.org = Organization.objects.create(short_name="УК Норд")
+        RoleAssignment.objects.create(
+            role_code=C.ROLE_CFO_HEAD, user_b24_id=10, user_name="Рук ЦФО"
+        )
+
+    def test_replacement_is_used_and_logged(self):
+        req = services.create_request(
+            request_type=C.TYPE_POA, organization=self.org, initiator_b24_id=1,
+            subject_name="Иванов",
+        )
+        # маршрут подобрал 10 — отправляем с 55 на той же роли
+        services.submit(req, [internal(55, 0, C.ROLE_CFO_HEAD)], actor_b24_id=1)
+        parts = services.get_approval(req).rounds.first().participants.all()
+        self.assertEqual([p.b24_user_id for p in parts], [55])
+        log = AuditLog.objects.filter(action="approver_replaced").first()
+        self.assertIsNotNone(log)
+        self.assertEqual(log.old_value["b24_user_id"], 10)
+        self.assertEqual(log.new_value["b24_user_id"], 55)
+
+    def test_auto_pick_is_not_logged_as_replacement(self):
+        req = services.create_request(
+            request_type=C.TYPE_POA, organization=self.org, initiator_b24_id=1,
+            subject_name="Иванов",
+        )
+        services.submit(req, [internal(10, 0, C.ROLE_CFO_HEAD)], actor_b24_id=1)
+        self.assertFalse(AuditLog.objects.filter(action="approver_replaced").exists())
+
+
 class ApiTests(TestCase):
     def setUp(self):
         self.org = Organization.objects.create(short_name="УК Норд")

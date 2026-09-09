@@ -109,6 +109,8 @@ def build_route(contract) -> list[dict]:
                 "b24_user_id": None,
                 "user_name": "Юридический отдел",
                 "needs_manual": False,
+                # согласует любой юрист — заменять некого
+                "replaceable": False,
             })
             order += 1
             continue
@@ -139,6 +141,9 @@ def build_route(contract) -> list[dict]:
             "b24_user_id": assignment.user_b24_id if auto else None,
             "user_name": assignment.user_name if auto else "",
             "needs_manual": not auto,
+            # Финдиректора инициатор не выбирает и не заменяет (AUTO_ROLES) —
+            # это решение по маршруту договора, а не техническое ограничение.
+            "replaceable": role_code not in AUTO_ROLES,
         })
         order += 1
     return route

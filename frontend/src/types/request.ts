@@ -23,6 +23,11 @@ export interface RouteSlot {
   role_code: string
   role_name: string
   required: boolean
+  // групповой этап (юротдел): согласует любой юрист, персонально не назначаем
+  // и заменять некого
+  group: boolean
+  // можно ли поставить вместо подобранного матрицей другого сотрудника
+  replaceable: boolean
   resolved: boolean
   b24_user_id: number | null
   user_name: string

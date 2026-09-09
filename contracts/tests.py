@@ -355,6 +355,84 @@ class ApiTests(TestCase):
         self.assertIn(f"/api/documents/{doc_id}/versions/", doc["download_url"])
 
 
+class EditTests(TestCase):
+    """Правка карточки договора инициатором после возврата на доработку."""
+
+    def setUp(self):
+        self.org = Organization.objects.create(short_name="АО Отель Введенский")
+
+    def _contract(self, status=constants.STATUS_RETURNED):
+        c = services.create_contract(
+            organization=self.org, initiator_b24_id=1, title="Договор поставки",
+            comment="как есть",
+        )
+        Contract.objects.filter(pk=c.pk).update(status=status)
+        c.refresh_from_db()
+        return c
+
+    def test_initiator_edits_returned_contract(self):
+        c = self._contract()
+        r = api(1).patch(f"/api/contracts/{c.id}/", {
+            "title": "Договор поставки (ред. 2)", "is_nonstandard": True,
+        }, format="json")
+        self.assertEqual(r.status_code, 200)
+        c.refresh_from_db()
+        self.assertEqual(c.title, "Договор поставки (ред. 2)")
+        self.assertTrue(c.is_nonstandard)
+        self.assertEqual(r.json()["title"], "Договор поставки (ред. 2)")
+
+    def test_edit_forbidden_on_approval(self):
+        c = self._contract(status=constants.STATUS_ON_APPROVAL)
+        r = api(1).patch(f"/api/contracts/{c.id}/", {"title": "х"}, format="json")
+        self.assertEqual(r.status_code, 403)
+        c.refresh_from_db()
+        self.assertEqual(c.title, "Договор поставки")
+
+    def test_edit_forbidden_for_non_initiator(self):
+        c = self._contract()
+        r = api(99).patch(f"/api/contracts/{c.id}/", {"title": "х"}, format="json")
+        self.assertIn(r.status_code, (403, 404))
+        c.refresh_from_db()
+        self.assertEqual(c.title, "Договор поставки")
+
+
+class RouteSlotFlagsTests(TestCase):
+    """Что инициатору можно менять в маршруте, а что подставлено жёстко."""
+
+    def setUp(self):
+        self.org = Organization.objects.create(short_name="АО Отель Введенский")
+        self.cfo = CFO.objects.create(name="Отдел продаж", category="sales")
+        RoleAssignment.objects.create(role_code=R.ROLE_FINANCE_DIRECTOR, user_b24_id=500)
+        RoleAssignment.objects.create(role_code=R.ROLE_CFO_HEAD, cfo=self.cfo, user_b24_id=501)
+
+    def test_finance_director_and_legal_are_not_replaceable(self):
+        """Финдиректор подставляется без права выбора, юротдел — групповой."""
+        c = services.create_contract(
+            organization=self.org, cfo=self.cfo, initiator_b24_id=1, title="Договор",
+            is_nonstandard=True,
+        )
+        flags = {s["role_code"]: s["replaceable"] for s in services.build_route(c)}
+        self.assertFalse(flags[R.ROLE_FINANCE_DIRECTOR])
+        self.assertFalse(flags[R.ROLE_LEGAL_DEPT])
+        # остальных согласующих инициатор выбирает и меняет сам
+        self.assertTrue(flags[R.ROLE_CFO_HEAD])
+
+    def test_manual_choice_logged(self):
+        from core.models import AuditLog
+
+        c = services.create_contract(
+            organization=self.org, cfo=self.cfo, initiator_b24_id=1, title="Договор",
+        )
+        parts = [
+            {"type": "internal", "b24_user_id": 777, "role": s["role_code"], "order": s["order"]}
+            for s in services.build_route(c)
+        ]
+        services.submit(c, parts, actor_b24_id=1)
+        self.assertTrue(
+            AuditLog.objects.filter(action="contract_manual_approver_selected").exists()
+        )
+
+
 class SearchTests(TestCase):
     """Поиск по договорам — как в доверенностях/МЧД, включая поиск по имени
     прикреплённого файла (подписанный скан ищут именно по нему)."""

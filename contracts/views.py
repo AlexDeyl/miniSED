@@ -162,6 +162,31 @@ class ContractViewSet(viewsets.ModelViewSet):
         )
         return Response(ContractDetailSerializer(contract).data, status=201)
 
+    def update(self, request, *args, **kwargs):
+        """Правка карточки договора инициатором (PATCH из формы редактирования).
+
+        Вернули на доработку — договор нужно чем-то дорабатывать. На круге и
+        после согласования карточка заморожена: иначе визировали бы одну
+        редакцию, а в силу вступала другая."""
+        contract = self.get_object()
+        self._require_editable(contract)
+        ser = self.get_serializer(contract, data=request.data, partial=kwargs.get("partial", False))
+        ser.is_valid(raise_exception=True)
+        ser.save()
+        log_action(
+            "contract_edited", target=contract, request=request,
+            new_value={"fields": sorted(ser.validated_data.keys()), "by_b24_id": self.b24_id},
+        )
+        return self._detail(contract)
+
+    def _require_editable(self, contract):
+        self._require_initiator(contract)
+        if contract.status not in constants.EDITABLE_STATUSES:
+            raise PermissionDenied(
+                "Править договор можно, пока он черновик, возвращён на доработку "
+                "или отклонён."
+            )
+
     def _detail(self, contract):
         contract.refresh_from_db()
         return Response(ContractDetailSerializer(contract).data)

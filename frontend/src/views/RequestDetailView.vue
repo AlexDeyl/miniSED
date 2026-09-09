@@ -36,8 +36,10 @@ const loading = ref(true)
 const error = ref<string | null>(null)
 const busy = ref(false)
 
-// маршрут для отправки (слоты + ручной выбор согласующего)
-const route = ref<(RouteSlot & { manual: string })[]>([])
+// Маршрут для отправки: слот + выбранный вручную согласующий (manual) и
+// признак, что автоподобранного согласующего инициатор решил заменить.
+type RouteRow = RouteSlot & { manual: string; replacing: boolean }
+const route = ref<RouteRow[]>([])
 // справочник сотрудников для выбора согласующих по ФИО
 const users = ref<UserOption[]>([])
 // названия процессных ролей (код → человекочитаемое)
@@ -78,8 +80,20 @@ async function load() {
 
 async function loadRoute() {
   const { route: slots } = await requests.routePreview(props.id)
-  route.value = slots.map((s) => ({ ...s, manual: '' }))
+  route.value = slots.map((s) => ({ ...s, manual: '', replacing: false }))
   routeLoaded.value = true
+}
+
+// Замена согласующего, которого подобрала матрица ролей: руководитель в
+// отпуске, роль сменила хозяина, назначение устарело. Делается явным
+// действием — иначе один промах по списку молча переписал бы маршрут.
+function startReplace(s: RouteRow) {
+  s.replacing = true
+  s.manual = ''
+}
+function cancelReplace(s: RouteRow) {
+  s.replacing = false
+  s.manual = ''
 }
 
 // ФИО согласующего по его bitrix_id (для отображения авто-выбранных слотов)
@@ -118,6 +132,10 @@ const canSubmit = computed(
   () => isInitiator.value &&
     ['draft', 'returned', 'rejected'].includes(req.value?.status || ''),
 )
+// Править поля можно там же, где отправлять: черновик, возвращённая и
+// отклонённая (requests_reg EDITABLE_STATUSES). Вернули на доработку —
+// значит есть что дорабатывать.
+const canEdit = canSubmit
 const isLegalStage = computed(() => req.value && LEGAL_STATUSES.includes(req.value.status))
 // Отмена доступна до передачи юристам; удаление — только у отменённой.
 const canCancel = computed(
@@ -167,9 +185,13 @@ const noApprovalNeeded = computed(() => routeLoaded.value && route.value.length 
 function submit() {
   const participants: ParticipantInput[] = []
   for (const [i, s] of route.value.entries()) {
-    const uid = s.resolved ? s.b24_user_id! : parseInt(s.manual, 10)
+    // Групповой этап (юротдел) уходит без персонального согласующего —
+    // b24_user_id null там не ошибка, а норма.
+    const uid = s.resolved && !s.replacing ? s.b24_user_id! : parseInt(s.manual, 10)
     if (Number.isNaN(uid)) {
-      error.value = `Укажите согласующего для роли «${s.role_name}»`
+      error.value = s.replacing
+        ? `Выберите, кем заменить согласующего в роли «${s.role_name}»`
+        : `Укажите согласующего для роли «${s.role_name}»`
       return
     }
     participants.push({ type: 'internal', b24_user_id: uid, role: s.role_code, order: i })
@@ -424,16 +446,28 @@ onMounted(load)
             <tr v-for="s in route" :key="s.order">
               <td>{{ s.order + 1 }}. {{ s.role_name }}</td>
               <td>
-                <template v-if="s.resolved">
+                <!-- Юротдел — групповой этап: согласует любой юрист, менять некого -->
+                <template v-if="s.group">{{ s.user_name || 'Юридический отдел' }}</template>
+                <template v-else-if="s.resolved && !s.replacing">
                   {{ s.user_name || nameByBid(s.b24_user_id) || `USER #${s.b24_user_id}` }}
+                  <button
+                    v-if="s.replaceable" type="button" class="link-btn"
+                    @click="startReplace(s)"
+                  >заменить</button>
                 </template>
-                <UserSearchSelect
-                  v-else v-model="s.manual" :users="users"
-                  placeholder="найти согласующего…" @pick="onPickUser"
-                />
+                <template v-else>
+                  <UserSearchSelect
+                    v-model="s.manual" :users="users"
+                    placeholder="найти согласующего…" @pick="onPickUser"
+                  />
+                  <button v-if="s.resolved" type="button" class="link-btn" @click="cancelReplace(s)">
+                    вернуть автоподбор
+                  </button>
+                </template>
               </td>
               <td>
                 <span v-if="s.needs_manual" class="participant-pill" style="background:#ffe0b2">ручной выбор</span>
+                <span v-else-if="s.replacing" class="participant-pill" style="background:#e3f2fd">замена</span>
               </td>
             </tr>
           </tbody>
@@ -463,16 +497,23 @@ onMounted(load)
         </div>
       </div>
 
-      <!-- Управление: возврат / отмена / удаление -->
-      <div v-if="canCancel || canDelete || canReturn" class="detail-card">
+      <!-- Управление: правка / возврат / отмена / удаление -->
+      <div v-if="canCancel || canDelete || canReturn || canEdit" class="detail-card">
         <div class="detail-card-header">Управление</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <RouterLink v-if="canEdit" :to="`/requests/${req.id}/edit`" class="btn btn--primary">
+            Редактировать заявку
+          </RouterLink>
           <button v-if="canReturn" class="btn btn--soft" :disabled="busy" @click="returnForRevision">Вернуть на доработку</button>
           <button v-if="canCancel" class="btn btn--soft" :disabled="busy" @click="cancelRequest">Отменить заявку</button>
           <button v-if="canDelete" class="btn btn--danger" :disabled="busy" @click="removeRequest">Удалить заявку</button>
         </div>
         <div class="detail-meta" style="margin-top:6px">
           <template v-if="canDelete">Заявка отменена — её можно удалить безвозвратно.</template>
+          <template v-else-if="canEdit">
+            Поля заявки открыты для правки, пока она не на согласовании. После
+            правок отправьте её на согласование заново.
+          </template>
           <template v-else>Отменить можно до передачи юристам. Отменённую заявку затем можно удалить.</template>
         </div>
       </div>
@@ -593,5 +634,10 @@ onMounted(load)
 .submit-comment {
   width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #d0d0d0;
   border-radius: 6px; font: inherit; font-size: 13px; resize: vertical;
+}
+.link-btn {
+  background: none; border: none; padding: 0; margin-left: 8px;
+  color: var(--green-main); cursor: pointer; font: inherit; font-size: 12px;
+  text-decoration: underline;
 }
 </style>

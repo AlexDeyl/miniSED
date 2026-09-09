@@ -31,6 +31,9 @@ export const contracts = {
   get: (id: number | string) => api.get<ContractDetail>(`${BASE}/${id}/`),
   create: (payload: ContractCreatePayload) =>
     api.post<ContractDetail>(`${BASE}/`, payload),
+  // Правка карточки инициатором (черновик / возвращён / отклонён).
+  update: (id: number | string, payload: Partial<ContractCreatePayload>) =>
+    api.patch<ContractDetail>(`${BASE}/${id}/`, payload),
 
   routePreview: (id: number | string) =>
     api.get<{ route: ContractRouteSlot[] }>(`${BASE}/${id}/route_preview/`),

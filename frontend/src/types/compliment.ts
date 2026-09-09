@@ -20,6 +20,8 @@ export interface ComplimentRouteSlot {
   role_name: string
   role_class: 'approver' | 'executor'
   required: boolean
+  // согласующего можно заменить, исполнителя — нет (он от категории)
+  replaceable: boolean
   resolved: boolean
   b24_user_id: number | null
   user_name: string

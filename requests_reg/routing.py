@@ -68,7 +68,11 @@ ROUTE_RULES = [
 
 
 def _slot(order: int, role_code: str, assignment: RoleAssignment | None) -> dict:
-    """Слот маршрута под конкретную роль (не групповой)."""
+    """Слот маршрута под конкретную роль (не групповой).
+
+    replaceable — можно ли поставить вместо подобранного матрицей человека
+    другого сотрудника. У персональных ролей можно всегда: руководитель бывает
+    в отпуске, а назначение — устаревшим."""
     return {
         "order": order,
         "role_code": role_code,
@@ -79,6 +83,7 @@ def _slot(order: int, role_code: str, assignment: RoleAssignment | None) -> dict
         "b24_user_id": assignment.user_b24_id if assignment else None,
         "user_name": assignment.user_name if assignment else "",
         "needs_manual": assignment is None,
+        "replaceable": True,
     }
 
 
@@ -151,6 +156,8 @@ def build_route(request: RegulatoryRequest) -> list[dict]:
                     "b24_user_id": None,
                     "user_name": "Юридический отдел",
                     "needs_manual": False,
+                    # согласует любой юрист — заменять некого
+                    "replaceable": False,
                 }
             )
             order += 1
