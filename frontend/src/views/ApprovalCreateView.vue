@@ -1,11 +1,23 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { approvalflow } from '@/services/approvalflow'
+import { contracts, type UserOption } from '@/services/contracts'
 import { ApiError } from '@/services/api'
+import UserSearchSelect from '@/components/UserSearchSelect.vue'
 import type { FlowType, ParticipantInput } from '@/types/approval'
 
 const router = useRouter()
+
+// Справочник сотрудников: согласующего выбирают поиском по ФИО, а не вводом
+// ID Б24. Кого нет в матрице — находится тем же полем в Битриксе.
+const users = ref<UserOption[]>([])
+onMounted(async () => {
+  try { users.value = await contracts.users() } catch { /* не критично */ }
+})
+function onPickUser(u: UserOption) {
+  if (!users.value.some((x) => x.bitrix_id === u.bitrix_id)) users.value.push(u)
+}
 
 const title = ref('')
 const approvalType = ref('generic')
@@ -37,7 +49,7 @@ async function save() {
     return
   }
   if (participants.length === 0) {
-    error.value = 'Добавьте хотя бы одного согласующего (ID Б24)'
+    error.value = 'Добавьте хотя бы одного согласующего'
     return
   }
 
@@ -83,9 +95,12 @@ async function save() {
       </div>
 
       <div class="form-field">
-        <span>Согласующие (ID сотрудника Б24)</span>
+        <span>Согласующие</span>
         <div v-for="(row, i) in rows" :key="i" class="form-participant">
-          <input v-model="row.b24_user_id" type="number" placeholder="ID Б24" />
+          <UserSearchSelect
+            v-model="row.b24_user_id" :users="users"
+            placeholder="найти согласующего…" @pick="onPickUser"
+          />
           <input v-model="row.role" type="text" placeholder="роль (опц.)" />
           <button type="button" class="btn btn--ghost" :disabled="rows.length === 1" @click="removeRow(i)">✕</button>
         </div>

@@ -9,6 +9,7 @@ import { useAuthStore } from '@/stores/auth'
 import type { RegulatoryRequestDetail, RouteSlot } from '@/types/request'
 import type { ApprovalParticipant, ParticipantInput } from '@/types/approval'
 import { fmtDateTime, isGroupLegal, useApprovalCard } from '@/composables/useApprovalCard'
+import UserSearchSelect from '@/components/UserSearchSelect.vue'
 import DocumentEditor from '@/components/DocumentEditor.vue'
 import PdfPreview from '@/components/PdfPreview.vue'
 import DocumentsCard from '@/components/DocumentsCard.vue'
@@ -84,6 +85,12 @@ async function loadRoute() {
 function nameByBid(bid: number | null | undefined): string {
   const u = users.value.find((x) => x.bitrix_id === bid)
   return u ? u.fio : ''
+}
+
+// Выбрали сотрудника в поиске — добавим его в локальный справочник, чтобы
+// дальше (в кругах согласования) он резолвился в ФИО, а не «USER #id».
+function onPickUser(u: UserOption) {
+  if (!users.value.some((x) => x.bitrix_id === u.bitrix_id)) users.value.push(u)
 }
 
 // Участника могли выбрать поиском по Битриксу — в матрице сотрудников
@@ -334,13 +341,10 @@ onMounted(load)
                 <template v-if="s.resolved">
                   {{ s.user_name || nameByBid(s.b24_user_id) || `USER #${s.b24_user_id}` }}
                 </template>
-                <select v-else v-model="s.manual"
-                        style="padding:5px 8px;border:1px solid var(--gray-border);border-radius:6px;min-width:220px">
-                  <option value="">— выберите согласующего —</option>
-                  <option v-for="u in users" :key="u.id" :value="String(u.bitrix_id)">
-                    {{ u.fio }}<template v-if="u.position_name"> — {{ u.position_name }}</template>
-                  </option>
-                </select>
+                <UserSearchSelect
+                  v-else v-model="s.manual" :users="users"
+                  placeholder="найти согласующего…" @pick="onPickUser"
+                />
               </td>
               <td>
                 <span v-if="s.needs_manual" class="participant-pill" style="background:#ffe0b2">ручной выбор</span>
