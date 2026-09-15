@@ -147,6 +147,10 @@ function onPickSource(r: RegulatoryRequestListItem) {
 
 const data = reactive<Record<string, unknown>>({
   poa_type: 'single', urgency: 'standard', planned_date: '',
+  // МЧД через Госуслуги: там доверенность выпускают по ФИО и должности, а
+  // паспорт, дату рождения, СНИЛС, ИНН и адрес регистрации не спрашивают —
+  // при этом флажке они не показываются и не сохраняются.
+  gosuslugi: false,
   // ЭЦП: тип пока свободным текстом — перечень согласуется с ИТ (ТЗ: «нужно
   // обсудить с ИТ»), поэтому жёсткого справочника здесь намеренно нет.
   ecp_type: '',
@@ -207,6 +211,27 @@ const isMchd = computed(() =>
   || data.poa_type === 'mchd'
   || data.form === 'mchd',
 )
+
+// Флажок «Госуслуги» имеет смысл только у МЧД: у бумажной доверенности
+// паспорт нужен всегда. Смотрим на оба условия, чтобы забытый флажок не
+// прятал поля после переключения типа заявки обратно на доверенность.
+const isGosuslugi = computed(() => isMchd.value && data.gosuslugi === true)
+
+// Поля, которых при оформлении через Госуслуги не существует. Держим списком:
+// по нему и чистим анкету, и проверяем форму.
+const GOSUSLUGI_HIDDEN = [
+  'birth_date', 'inn', 'snils',
+  'passport', 'passport_department_code', 'passport_issued_by',
+  'passport_issue_date', 'reg_address',
+]
+
+// Поставили флажок — введённые ПДн стираем сразу, а не прячем: иначе паспорт
+// уедет юристам в JSON заявки, хотя в заявлении его не будет.
+watch(isGosuslugi, (on) => {
+  if (!on) return
+  GOSUSLUGI_HIDDEN.forEach((k) => { rep[k] = '' })
+  deptMsg.value = ''
+})
 
 // СНИЛС приводим к привычному виду XXX-XXX-XXX YY, как код подразделения.
 function onSnilsBlur() {
@@ -336,16 +361,18 @@ function validate(): string | null {
     // Раздел 1 — представитель
     if (!rep.last_name.trim()) return 'Раздел 1: укажите фамилию представителя.'
     if (!rep.first_name.trim()) return 'Раздел 1: укажите имя представителя.'
-    if (!rep.birth_date) return 'Раздел 1: укажите дату рождения представителя.'
-    if (rep.birth_date > todayStr) return 'Раздел 1: дата рождения не может быть в будущем.'
-    if (rep.birth_date > isoMinusYears(18)) return 'Раздел 1: представитель должен быть старше 18 лет.'
+    if (!isGosuslugi.value) {
+      if (!rep.birth_date) return 'Раздел 1: укажите дату рождения представителя.'
+      if (rep.birth_date > todayStr) return 'Раздел 1: дата рождения не может быть в будущем.'
+      if (rep.birth_date > isoMinusYears(18)) return 'Раздел 1: представитель должен быть старше 18 лет.'
+    }
     if (!rep.position.trim()) return 'Раздел 1: укажите должность представителя.'
 
     // МЧД: ИНН и СНИЛС не обязательны — на Госуслугах их не требуют, и в графу
     // можно поставить прочерк. Но если введены цифры, проверяем контрольные
     // разряды: молча принять опечатку хуже, чем не иметь поля вовсе — она
     // вскроется отказом ФНС (те же правила на сервере).
-    if (isMchd.value) {
+    if (isMchd.value && !isGosuslugi.value) {
       if (!isPlaceholder(rep.inn) && !isValidInn(rep.inn))
         return 'Раздел 1: проверьте ИНН — должно быть 12 цифр, контрольный разряд не сходится.'
       if (!isPlaceholder(rep.snils) && !isValidSnils(rep.snils))
@@ -359,17 +386,22 @@ function validate(): string | null {
     if (rep.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rep.email.trim()))
       return 'Раздел 1: некорректный email.'
 
-    if (!rep.passport.trim()) return 'Раздел 1: укажите паспорт представителя (серия, №).'
-    if (!/^[0-9 ]+$/.test(rep.passport.trim()))
-      return 'Раздел 1: серия и номер паспорта — только цифры.'
-    if (rep.passport.replace(/\s/g, '').length !== 10)
-      return 'Раздел 1: серия и номер паспорта — 10 цифр (серия 4 + номер 6).'
-    if (!rep.passport_issued_by.trim()) return 'Раздел 1: укажите, кем выдан паспорт.'
-    if (!rep.passport_issue_date) return 'Раздел 1: укажите дату выдачи паспорта.'
-    if (rep.passport_issue_date > todayStr) return 'Раздел 1: дата выдачи паспорта не может быть в будущем.'
-    if (rep.passport_issue_date <= rep.birth_date)
-      return 'Раздел 1: дата выдачи паспорта должна быть позже даты рождения.'
-    if (!rep.reg_address.trim()) return 'Раздел 1: укажите адрес регистрации представителя.'
+    // Паспорт и адрес регистрации: при оформлении через Госуслуги этих полей
+    // в анкете нет — требовать их значило бы блокировать отправку из-за
+    // данных, которые МЧД не нужны.
+    if (!isGosuslugi.value) {
+      if (!rep.passport.trim()) return 'Раздел 1: укажите паспорт представителя (серия, №).'
+      if (!/^[0-9 ]+$/.test(rep.passport.trim()))
+        return 'Раздел 1: серия и номер паспорта — только цифры.'
+      if (rep.passport.replace(/\s/g, '').length !== 10)
+        return 'Раздел 1: серия и номер паспорта — 10 цифр (серия 4 + номер 6).'
+      if (!rep.passport_issued_by.trim()) return 'Раздел 1: укажите, кем выдан паспорт.'
+      if (!rep.passport_issue_date) return 'Раздел 1: укажите дату выдачи паспорта.'
+      if (rep.passport_issue_date > todayStr) return 'Раздел 1: дата выдачи паспорта не может быть в будущем.'
+      if (rep.passport_issue_date <= rep.birth_date)
+        return 'Раздел 1: дата выдачи паспорта должна быть позже даты рождения.'
+      if (!rep.reg_address.trim()) return 'Раздел 1: укажите адрес регистрации представителя.'
+    }
 
     // У ЭЦП своего «раздела полномочий» нет: по ТЗ там только сведения о
     // представителе, приложения и способ получения.
@@ -510,6 +542,17 @@ async function save() {
           </select>
         </label>
       </div>
+      <!-- Госуслуги: только у МЧД. На портале доверенность выпускают по ФИО и
+           должности, поэтому флажок убирает из анкеты паспорт, дату рождения,
+           СНИЛС, ИНН и адрес регистрации. -->
+      <label v-if="isMchd" class="gos-check">
+        <input type="checkbox" v-model="data.gosuslugi" />
+        <span>
+          <b>Госуслуги</b>
+          <em>МЧД оформляется через портал: паспортные данные, дата рождения,
+            СНИЛС, ИНН и адрес регистрации не требуются</em>
+        </span>
+      </label>
       <div class="form-row">
         <label class="form-field">
           <span>Проект / объект</span>
@@ -677,7 +720,7 @@ async function save() {
             <label class="form-field"><span>Отчество</span><input v-model="rep.middle_name" /></label>
           </div>
           <div class="form-row">
-            <label class="form-field"><span>Дата рождения *</span><input v-model="rep.birth_date" type="date" :max="todayStr" /></label>
+            <label v-if="!isGosuslugi" class="form-field"><span>Дата рождения *</span><input v-model="rep.birth_date" type="date" :max="todayStr" /></label>
             <label class="form-field">
               <span>Статус</span>
               <select v-model="rep.status">
@@ -690,34 +733,40 @@ async function save() {
             <label class="form-field"><span>Телефон</span><input v-model="rep.phone" /></label>
             <label class="form-field"><span>Email</span><input v-model="rep.email" type="email" /></label>
           </div>
-          <div v-if="isMchd" class="form-row">
+          <div v-if="isMchd && !isGosuslugi" class="form-row">
             <label class="form-field">
-              <span>ИНН представителя (не обязателен, если Госуслуги)</span>
+              <span>ИНН представителя (не обязателен)</span>
               <input v-model="rep.inn" inputmode="numeric" maxlength="12" placeholder="12 цифр" />
             </label>
             <label class="form-field">
-              <span>СНИЛС представителя (не обязателен, если Госуслуги)</span>
+              <span>СНИЛС представителя (не обязателен)</span>
               <input
                 v-model="rep.snils" @blur="onSnilsBlur"
                 inputmode="numeric" maxlength="14" placeholder="123-456-789 01"
               />
             </label>
           </div>
-          <div class="form-row">
-            <label class="form-field"><span>Паспорт (серия, №) *</span><input v-model="rep.passport" inputmode="numeric" maxlength="11" placeholder="1234 567890" /></label>
+          <template v-if="!isGosuslugi">
+            <div class="form-row">
+              <label class="form-field"><span>Паспорт (серия, №) *</span><input v-model="rep.passport" inputmode="numeric" maxlength="11" placeholder="1234 567890" /></label>
+              <label class="form-field">
+                <span>Код подразделения</span>
+                <input v-model="rep.passport_department_code" @change="onDeptCode" @blur="onDeptCode" inputmode="numeric" maxlength="7" placeholder="770-053" />
+              </label>
+              <label class="form-field"><span>Дата выдачи *</span><input v-model="rep.passport_issue_date" type="date" :max="todayStr" /></label>
+            </div>
             <label class="form-field">
-              <span>Код подразделения</span>
-              <input v-model="rep.passport_department_code" @change="onDeptCode" @blur="onDeptCode" inputmode="numeric" maxlength="7" placeholder="770-053" />
+              <span>Кем выдан *<template v-if="deptMsg"> — <em style="color:#6b7a8d;font-style:normal">{{ deptMsg }}</em></template></span>
+              <input v-model="rep.passport_issued_by" />
             </label>
-            <label class="form-field"><span>Дата выдачи *</span><input v-model="rep.passport_issue_date" type="date" :max="todayStr" /></label>
-          </div>
-          <label class="form-field">
-            <span>Кем выдан *<template v-if="deptMsg"> — <em style="color:#6b7a8d;font-style:normal">{{ deptMsg }}</em></template></span>
-            <input v-model="rep.passport_issued_by" />
-          </label>
-          <label class="form-field"><span>Адрес регистрации *</span>
-            <AddressAutocomplete v-model="rep.reg_address" placeholder="Начните вводить адрес…" />
-          </label>
+            <label class="form-field"><span>Адрес регистрации *</span>
+              <AddressAutocomplete v-model="rep.reg_address" placeholder="Начните вводить адрес…" />
+            </label>
+          </template>
+          <p v-else class="gos-note">
+            Паспортные данные, дата рождения, СНИЛС, ИНН и адрес регистрации
+            не заполняются: МЧД оформляется через Госуслуги.
+          </p>
         </div>
 
         <!-- Раздел 2: полномочия (у ЭЦП полномочий нет) -->
@@ -841,4 +890,14 @@ async function save() {
 .attach-file { margin: 2px 0 8px 22px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .attach-file input[type=file] { font-size: 12px; }
 .attach-ok { font-size: 12px; color: var(--green-main); }
+/* Флажок «Госуслуги» — заметная плашка: он убирает из анкеты половину
+   раздела о представителе, и поставить его случайно не должно получиться. */
+.gos-check { display: flex; gap: 9px; align-items: flex-start; margin: 2px 0 12px;
+  padding: 9px 12px; border: 1px solid var(--green-main); border-radius: 6px;
+  background: #eef6f0; cursor: pointer; }
+.gos-check input { margin-top: 2px; }
+.gos-check b { font-size: 13.5px; }
+.gos-check em { display: block; font-style: normal; font-size: 12px;
+  color: var(--text-muted); margin-top: 2px; }
+.gos-note { margin: 4px 0 0; font-size: 12.5px; color: var(--text-muted); }
 </style>

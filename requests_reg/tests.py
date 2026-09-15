@@ -18,7 +18,7 @@ from core.models import CFO, Facility, Organization
 from core.models import AuditLog, Role, UserProfile
 from documents import services as docsvc
 from . import constants as C
-from . import it_mail, routing, services, validators
+from . import anketa_pdf, it_mail, routing, services, validators
 from .models import RegulatoryRequest, RoleAssignment
 
 
@@ -1222,6 +1222,117 @@ class EcpItDepartmentMailTests(TestCase):
         self.assertEqual(msg.attachments, [])
         self.assertIn("Не вложены из-за размера письма", msg.body)
         self.assertIn("passport.pdf", msg.body)
+
+
+class MchdGosuslugiTests(TestCase):
+    """МЧД через Госуслуги: на портале доверенность выпускают по ФИО и
+    должности, поэтому паспорт, дату рождения, СНИЛС, ИНН и адрес регистрации
+    анкета не собирает и заявление не печатает."""
+
+    PII_LABELS = [
+        "Дата рождения", "ИНН", "СНИЛС",
+        "Паспорт (серия, №)", "Код подразделения", "Кем и когда выдан",
+        "Адрес регистрации",
+    ]
+
+    def setUp(self):
+        self.org = Organization.objects.create(short_name="УК Норд")
+
+    def _mchd(self, gosuslugi, request_type=C.TYPE_MCHD, **extra):
+        rep = {
+            "last_name": "Петров", "first_name": "Пётр", "position": "Администратор",
+            "birth_date": "1988-03-17", "inn": "500100732259",
+            "snils": "112-233-445 95", "passport": "40 18 123456",
+            "passport_issued_by": "ТП №41", "passport_issue_date": "2008-04-22",
+            "reg_address": "г. Санкт-Петербург, ул. Введенская, д. 1",
+        }
+        rep.update(extra.pop("rep", {}))
+        data = {"poa_type": "mchd", "urgency": "standard", "rep": rep, **extra}
+        if gosuslugi:
+            data["gosuslugi"] = True
+        return services.create_request(
+            request_type=request_type, organization=self.org,
+            initiator_b24_id=1, subject_name="Петров Пётр", data=data,
+        )
+
+    # --- состав заявления ---
+    def test_pii_rows_dropped_from_anketa(self):
+        labels = [k for k, _v in anketa_pdf.rep_rows(self._mchd(True))]
+        for pii in self.PII_LABELS:
+            self.assertNotIn(pii, labels, pii)
+        # то, ради чего заявка существует, остаётся на месте
+        self.assertEqual(labels, ["ФИО", "Статус", "Должность", "Телефон", "Email"])
+
+    def test_pii_rows_kept_without_flag(self):
+        labels = [k for k, _v in anketa_pdf.rep_rows(self._mchd(False))]
+        for pii in self.PII_LABELS:
+            self.assertIn(pii, labels, pii)
+
+    def test_head_explains_gosuslugi(self):
+        head = dict(anketa_pdf.head_rows(self._mchd(True)))
+        self.assertIn("Госуслуги", head.get("Способ оформления", ""))
+        self.assertNotIn("Способ оформления", dict(anketa_pdf.head_rows(self._mchd(False))))
+
+    def test_pdf_still_renders(self):
+        pdf = anketa_pdf.render_pdf(self._mchd(True))
+        self.assertTrue(pdf.startswith(b"%PDF"))
+
+    # --- флажок действует только на МЧД ---
+    def test_flag_ignored_for_paper_poa(self):
+        """У бумажной доверенности представителя удостоверяет паспорт —
+        случайно оставшийся флажок не должен его прятать."""
+        poa = services.create_request(
+            request_type=C.TYPE_POA, organization=self.org, initiator_b24_id=1,
+            data={"poa_type": "single", "gosuslugi": True,
+                  "rep": {"last_name": "Петров", "passport": "40 18 123456"}},
+        )
+        labels = [k for k, _v in anketa_pdf.rep_rows(poa)]
+        self.assertIn("Паспорт (серия, №)", labels)
+        self.assertIn("Адрес регистрации", labels)
+
+    def test_flag_works_when_mchd_chosen_by_form(self):
+        """«МЧД» говорится в трёх местах формы; флажок должен работать по любому
+        из признаков — так же, как проверка ИНН/СНИЛС."""
+        req = self._mchd(True, request_type=C.TYPE_POA, form="mchd")
+        req.data["poa_type"] = "single"
+        labels = [k for k, _v in anketa_pdf.rep_rows(req)]
+        self.assertNotIn("Паспорт (серия, №)", labels)
+
+    # --- валидация ---
+    def test_inn_snils_not_validated_under_gosuslugi(self):
+        """Полей нет — проверять нечего: заявка не должна упираться в
+        контрольные разряды значения, которого пользователь не вводил."""
+        data = {"gosuslugi": True, "poa_type": "mchd",
+                "rep": {"inn": "123", "snils": "456"}}
+        self.assertIsNone(validators.mchd_rep_error(data))
+
+    def test_inn_still_validated_without_flag(self):
+        data = {"poa_type": "mchd", "rep": {"inn": "123456789012"}}
+        self.assertIsNotNone(validators.mchd_rep_error(data))
+
+    def test_submit_passes_without_pii(self):
+        """Заявку на МЧД через Госуслуги можно отправить, не заполнив ни
+        паспорта, ни ИНН, ни СНИЛС."""
+        req = services.create_request(
+            request_type=C.TYPE_MCHD, organization=self.org, initiator_b24_id=1,
+            subject_name="Петров Пётр",
+            data={"gosuslugi": True, "poa_type": "mchd",
+                  "rep": {"last_name": "Петров", "first_name": "Пётр",
+                          "position": "Администратор"}},
+        )
+        services.submit(req, [internal(10, 0, C.ROLE_CFO_HEAD)])
+        req.refresh_from_db()
+        self.assertEqual(req.status, C.STATUS_ON_APPROVAL)
+
+    def test_api_accepts_flag(self):
+        r = api(1).post("/api/reg/requests/", {
+            "request_type": C.TYPE_MCHD, "organization": self.org.id,
+            "subject_name": "Петров Пётр",
+            "data": {"gosuslugi": True, "poa_type": "mchd",
+                     "rep": {"last_name": "Петров", "position": "Администратор"}},
+        }, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertIs(r.json()["data"]["gosuslugi"], True)
 
 class MchdPlaceholderTests(TestCase):
     """Прочерк в графе ИНН/СНИЛС — это «значения нет», а не ошибка.

@@ -25,7 +25,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 from approvalflow.sheet import _ensure_font
 from . import constants as C
 from .models import PowerTemplate
-from .validators import format_snils, is_machine_readable
+from .validators import format_snils, is_gosuslugi, is_machine_readable
 
 
 import re
@@ -159,13 +159,83 @@ def _render_revoke(request) -> bytes:
     return buffer.getvalue()
 
 
+def _gos(request) -> bool:
+    """МЧД через Госуслуги: паспорт, дата рождения, СНИЛС, ИНН и адрес
+    регистрации там не нужны — в анкете их не заполняют, значит и печатать
+    нечего (лист прочерков только сбивал бы юриста)."""
+    data = request.data or {}
+    return is_machine_readable(request.request_type, data) and is_gosuslugi(data)
+
+
+def head_rows(request, *, is_ecp: bool | None = None) -> list[tuple[str, str]]:
+    """Шапка заявления: что оформляем, к какому сроку и насколько срочно."""
+    data = request.data or {}
+    if is_ecp is None:
+        is_ecp = request.request_type == C.TYPE_ECP
+    rows = [
+        # У ЭЦП перечень типов пока не утверждён (согласуется с ИТ), поэтому
+        # печатаем то, что ввёл инициатор, как есть.
+        ("Тип ЭЦП", data.get("ecp_type") or "—") if is_ecp
+        else ("Тип доверенности", _one(C.ANKETA_POA_TYPES, data.get("poa_type"))),
+        ("Планируемая дата получения", _fmt_date(data.get("planned_date"))),
+        ("Срочность", _one(C.ANKETA_URGENCY, data.get("urgency"))),
+    ]
+    if _gos(request):
+        rows.append((
+            "Способ оформления",
+            "Через портал «Госуслуги» — паспортные данные, дата рождения, "
+            "СНИЛС, ИНН и адрес регистрации не требуются",
+        ))
+    return rows
+
+
+def rep_rows(request) -> list[tuple[str, str]]:
+    """Раздел 1 заявления: сведения о представителе.
+
+    Вынесено из вёрстки отдельной функцией, чтобы состав полей (а он зависит
+    от типа доверенности и от флажка «Госуслуги») можно было проверять
+    тестами: парсера PDF в проекте нет."""
+    data = request.data or {}
+    rep = data.get("rep", {}) or {}
+    gos = _gos(request)
+    # ИНН и СНИЛС — реквизиты МЧД, которыми ФНС идентифицирует представителя.
+    # Для бумажной доверенности печатаем их, только если инициатор всё же
+    # заполнил: там представителя удостоверяет паспорт.
+    is_mchd = is_machine_readable(request.request_type, data)
+    ids_rows = []
+    if not gos:
+        if is_mchd or rep.get("inn"):
+            ids_rows.append(("ИНН", rep.get("inn") or "—"))
+        if is_mchd or rep.get("snils"):
+            ids_rows.append(("СНИЛС", format_snils(rep.get("snils"))))
+    passport_rows = [] if gos else [
+        ("Паспорт (серия, №)", rep.get("passport") or "—"),
+        ("Код подразделения", rep.get("passport_department_code") or "—"),
+        ("Кем и когда выдан", " · ".join(filter(None, [
+            rep.get("passport_issued_by"), rep.get("passport_issue_date"),
+        ])) or "—"),
+        ("Адрес регистрации", rep.get("reg_address") or "—"),
+    ]
+    return [
+        ("ФИО", " ".join(filter(None, [
+            rep.get("last_name"), rep.get("first_name"), rep.get("middle_name"),
+        ])) or request.subject_name or "—"),
+        *([] if gos else [("Дата рождения", _fmt_date(rep.get("birth_date")))]),
+        *ids_rows,
+        ("Статус", _one(C.ANKETA_REP_STATUS, rep.get("status"))),
+        ("Должность", rep.get("position") or request.position or "—"),
+        ("Телефон", rep.get("phone") or "—"),
+        ("Email", rep.get("email") or "—"),
+        *passport_rows,
+    ]
+
+
 def render_pdf(request) -> bytes:
     if request.request_type == C.TYPE_REVOKE:
         return _render_revoke(request)
 
     font = _ensure_font()
     data = request.data or {}
-    rep = data.get("rep", {}) or {}
     legal = data.get("rep_legal", {}) or {}
 
     buffer = io.BytesIO()
@@ -183,40 +253,11 @@ def render_pdf(request) -> bytes:
     ))
     story.append(Spacer(1, 6))
 
-    # Шапка
-    story.append(kv_table([
-        # У ЭЦП перечень типов пока не утверждён (согласуется с ИТ), поэтому
-        # печатаем то, что ввёл инициатор, как есть.
-        ("Тип ЭЦП", data.get("ecp_type") or "—") if is_ecp
-        else ("Тип доверенности", _one(C.ANKETA_POA_TYPES, data.get("poa_type"))),
-        ("Планируемая дата получения", _fmt_date(data.get("planned_date"))),
-        ("Срочность", _one(C.ANKETA_URGENCY, data.get("urgency"))),
-    ]))
+    story.append(kv_table(head_rows(request, is_ecp=is_ecp)))
 
     # Раздел 1
     story.append(Paragraph("Раздел 1. Сведения о представителе", h2))
-    # ИНН и СНИЛС — обязательные реквизиты МЧД (ими ФНС идентифицирует
-    # представителя). Для бумажной доверенности печатаем их, только если
-    # инициатор всё же заполнил: там представителя удостоверяет паспорт.
-    is_mchd = is_machine_readable(request.request_type, data)
-    ids_rows = []
-    if is_mchd or rep.get("inn"):
-        ids_rows.append(("ИНН", rep.get("inn") or "—"))
-    if is_mchd or rep.get("snils"):
-        ids_rows.append(("СНИЛС", format_snils(rep.get("snils"))))
-    story.append(kv_table([
-        ("ФИО", " ".join(filter(None, [rep.get("last_name"), rep.get("first_name"), rep.get("middle_name")])) or request.subject_name or "—"),
-        ("Дата рождения", _fmt_date(rep.get("birth_date"))),
-        *ids_rows,
-        ("Статус", _one(C.ANKETA_REP_STATUS, rep.get("status"))),
-        ("Должность", rep.get("position") or request.position or "—"),
-        ("Телефон", rep.get("phone") or "—"),
-        ("Email", rep.get("email") or "—"),
-        ("Паспорт (серия, №)", rep.get("passport") or "—"),
-        ("Код подразделения", rep.get("passport_department_code") or "—"),
-        ("Кем и когда выдан", " · ".join(filter(None, [rep.get("passport_issued_by"), rep.get("passport_issue_date")])) or "—"),
-        ("Адрес регистрации", rep.get("reg_address") or "—"),
-    ]))
+    story.append(kv_table(rep_rows(request)))
     if any(legal.values()):
         story.append(kv_table([
             ("Юр. лицо (наименование)", legal.get("name") or "—"),
