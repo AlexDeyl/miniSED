@@ -56,6 +56,13 @@ class Facility(models.Model):
     )
     address = models.CharField("Адрес", max_length=500, blank=True)
     ops_director = models.CharField("Операционный директор", max_length=255, blank=True)
+    # Ящик ИТ-отдела объекта: сюда уходит согласованная заявка на ЭЦП вместе с
+    # заявлением, вложениями и листом согласования. Несколько адресов — через
+    # запятую или точку с запятой (у объекта может быть и общий ящик, и личный
+    # ящик ИТ-специалиста).
+    it_email = models.CharField(
+        "Почта ИТ-отдела (можно несколько через запятую)", max_length=500, blank=True
+    )
     is_active = models.BooleanField("Активен", default=True)
     external_id = models.CharField("Внешний ID", max_length=64, blank=True)
 

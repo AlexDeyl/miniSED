@@ -4,18 +4,60 @@
     "АО \"Пример Отель\""
   ],
   "facilities": [
-    {"name": "Отель Пример-1", "organization": "АО \"Пример Отель\"", "address": "г. Пример, ул. Тестовая, 1"},
-    {"name": "Отель Пример-2", "organization": "ООО \"Пример Управление\""}
+    {
+      "name": "Отель Пример-1",
+      "organization": "АО \"Пример Отель\"",
+      "address": "г. Пример, ул. Тестовая, 1",
+      "it_email": "it.hotel1@example.ru"
+    },
+    {
+      "name": "Отель Пример-2",
+      "organization": "ООО \"Пример Управление\"",
+      "it_email": "it.hotel2@example.ru, helpdesk@example.ru"
+    }
   ],
   "cfos": [
-    {"name": "Отдел продаж", "organization": null, "category": "sales", "head": "Иванов Иван Иванович"},
-    {"name": "Юридический отдел", "organization": null, "category": "other", "head": ""},
-    {"name": "СГХ Отель Пример-1", "organization": "АО \"Пример Отель\"", "category": "sgh", "head": ""}
+    {
+      "name": "Отдел продаж",
+      "organization": null,
+      "category": "sales",
+      "head": "Иванов Иван Иванович"
+    },
+    {
+      "name": "Юридический отдел",
+      "organization": null,
+      "category": "other",
+      "head": ""
+    },
+    {
+      "name": "СГХ Отель Пример-1",
+      "organization": "АО \"Пример Отель\"",
+      "category": "sgh",
+      "head": ""
+    }
   ],
   "role_assignments": [
-    {"role_code": "cfo_head", "cfo": "Отдел продаж", "user_b24_id": 1, "user_name": "Иванов Иван Иванович"},
-    {"role_code": "finance_director", "user_b24_id": 2, "user_name": "Петров Пётр Петрович"},
-    {"role_code": "final_signer", "user_b24_id": 3, "user_name": "Сидоров Сидор Сидорович"},
-    {"role_code": "final_signer", "organization": "АО \"Пример Отель\"", "user_b24_id": 4, "user_name": "Сергеев Сергей Сергеевич"}
+    {
+      "role_code": "cfo_head",
+      "cfo": "Отдел продаж",
+      "user_b24_id": 1,
+      "user_name": "Иванов Иван Иванович"
+    },
+    {
+      "role_code": "finance_director",
+      "user_b24_id": 2,
+      "user_name": "Петров Пётр Петрович"
+    },
+    {
+      "role_code": "final_signer",
+      "user_b24_id": 3,
+      "user_name": "Сидоров Сидор Сидорович"
+    },
+    {
+      "role_code": "final_signer",
+      "organization": "АО \"Пример Отель\"",
+      "user_b24_id": 4,
+      "user_name": "Сергеев Сергей Сергеевич"
+    }
   ]
 }

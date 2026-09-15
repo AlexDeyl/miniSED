@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta
 from unittest import mock
 from unittest import skipUnless
 
+from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection
 from django.test import TestCase
@@ -17,7 +18,7 @@ from core.models import CFO, Facility, Organization
 from core.models import AuditLog, Role, UserProfile
 from documents import services as docsvc
 from . import constants as C
-from . import routing, services, validators
+from . import it_mail, routing, services, validators
 from .models import RegulatoryRequest, RoleAssignment
 
 
@@ -1096,6 +1097,131 @@ class EcpRouteAndExecutionTests(TestCase):
         with self.assertRaises(services.RequestError):
             services.it_take_in_work(poa, by_b24_id=self.IT)
 
+
+
+class EcpItDepartmentMailTests(TestCase):
+    """Согласованная заявка на ЭЦП уходит письмом на ящик ИТ-отдела ОБЪЕКТА:
+    все данные заявления в тексте, заявление и вложения — файлами, плюс лист
+    согласования."""
+
+    IT = 700
+    INITIATOR = 1
+    APPROVER = 10
+
+    def setUp(self):
+        self.org = Organization.objects.create(short_name="УК Норд")
+        self.hotel = Facility.objects.create(
+            name="Отель Введенский", organization=self.org,
+            it_email="it.vvedensky@example.ru, it.help@example.ru",
+        )
+        self.other = Facility.objects.create(name="Отель Другой", organization=self.org,
+                                             it_email="it.other@example.ru")
+        RoleAssignment.objects.create(
+            role_code=C.ROLE_IT_SPECIALIST, facility=self.hotel,
+            user_b24_id=self.IT, user_name="ИТ-специалист",
+        )
+        UserProfile.objects.create(bitrix_id=self.APPROVER, fio="Иванов Иван Иванович")
+
+    def _approved_ecp(self, facility=None, attach=True):
+        req = services.create_request(
+            request_type=C.TYPE_ECP, organization=self.org,
+            facility=facility or self.hotel, initiator_b24_id=self.INITIATOR,
+            subject_name="Петров Пётр Петрович", position="Администратор",
+            comment="Нужна для сдачи отчётности",
+            data={
+                "ecp_type": "Квалифицированная",
+                "planned_date": "2026-10-01",
+                "urgency": "urgent",
+                "receive": "personally",
+                "attachments": ["passport", "snils"],
+                "rep": {
+                    "last_name": "Петров", "first_name": "Пётр", "middle_name": "Петрович",
+                    "inn": "500100732259", "snils": "112-233-445 95",
+                    "phone": "+7 999 000-00-00", "email": "petrov@example.ru",
+                    "passport": "40 01 123456", "status": "employee",
+                },
+            },
+        )
+        if attach:
+            doc = docsvc.create_document(title="Скан паспорта", linked_object=req)
+            docsvc.add_version(doc, SimpleUploadedFile("passport.pdf", b"scan-bytes"))
+        services.submit(req, [internal(self.APPROVER, 0, C.ROLE_CFO_HEAD)])
+        pid = services.get_approval(req).rounds.first().participants.first().id
+        # уведомления шлются в transaction.on_commit — в TestCase их нужно
+        # выполнить явно, иначе outbox останется пустым
+        with self.captureOnCommitCallbacks(execute=True):
+            services.decide(req, pid, "approve", "Согласовано", actor_b24_id=self.APPROVER)
+        req.refresh_from_db()
+        return req
+
+    def test_letter_goes_to_facility_it_mailbox(self):
+        req = self._approved_ecp()
+        self.assertEqual(req.status, C.STATUS_TO_IT)
+        letters = [m for m in mail.outbox if m.subject.startswith(it_mail.SUBJECT_MARK)]
+        self.assertEqual(len(letters), 1, [m.subject for m in mail.outbox])
+        msg = letters[0]
+        # адресат — почта ИТ объекта заявки, а не любого объекта
+        self.assertEqual(msg.to, ["it.vvedensky@example.ru", "it.help@example.ru"])
+        self.assertIn("Отель Введенский", msg.subject)
+        self.assertIn(req.number, msg.subject)
+
+    def test_body_carries_anketa_fields(self):
+        req = self._approved_ecp()
+        body = [m for m in mail.outbox if m.subject.startswith(it_mail.SUBJECT_MARK)][0].body
+        for fragment in [
+            req.number, "Отель Введенский", "Петров Пётр Петрович",
+            "Квалифицированная", "01.10.2026", "Срочная", "500100732259",
+            "112-233-445 95", "+7 999 000-00-00", "40 01 123456",
+            "Получить лично", "Копия паспорта", "Копия СНИЛС",
+            "Нужна для сдачи отчётности",
+            "Иванов Иван Иванович", "Согласовано",
+        ]:
+            self.assertIn(fragment, body, fragment)
+
+    def test_attachments_are_anketa_files_and_sheet(self):
+        req = self._approved_ecp()
+        msg = [m for m in mail.outbox if m.subject.startswith(it_mail.SUBJECT_MARK)][0]
+        names = [a[0] for a in msg.attachments]
+        self.assertTrue(names[0].startswith("anketa_"), names)   # заявление первым
+        self.assertIn("passport.pdf", names)
+        self.assertTrue(any(n.startswith("Лист_согласования_") for n in names), names)
+        self.assertTrue(all(a[1] for a in msg.attachments))       # файлы не пустые
+
+    def test_fallback_when_facility_has_no_mailbox(self):
+        self.hotel.it_email = ""
+        self.hotel.save(update_fields=["it_email"])
+        with self.settings(IT_DEPT_FALLBACK_EMAIL="it@example.ru"):
+            self._approved_ecp()
+        msg = [m for m in mail.outbox if m.subject.startswith(it_mail.SUBJECT_MARK)][0]
+        self.assertEqual(msg.to, ["it@example.ru"])
+
+    def test_no_recipient_does_not_break_flow(self):
+        self.hotel.it_email = ""
+        self.hotel.save(update_fields=["it_email"])
+        with self.settings(IT_DEPT_FALLBACK_EMAIL=""):
+            req = self._approved_ecp()
+        self.assertEqual(req.status, C.STATUS_TO_IT)
+        self.assertFalse([m for m in mail.outbox if m.subject.startswith(it_mail.SUBJECT_MARK)])
+
+    def test_poa_does_not_trigger_it_letter(self):
+        """Письмо ИТ-отделу — только по ЭЦП: доверенность исполняют юристы."""
+        poa = services.create_request(
+            request_type=C.TYPE_POA, organization=self.org, facility=self.hotel,
+            initiator_b24_id=self.INITIATOR,
+        )
+        services.submit(poa, [internal(self.APPROVER, 0, C.ROLE_CFO_HEAD)])
+        pid = services.get_approval(poa).rounds.first().participants.first().id
+        with self.captureOnCommitCallbacks(execute=True):
+            services.decide(poa, pid, "approve", actor_b24_id=self.APPROVER)
+        self.assertFalse([m for m in mail.outbox if m.subject.startswith(it_mail.SUBJECT_MARK)])
+
+    def test_oversized_attachment_is_listed_not_sent(self):
+        with self.settings(IT_MAIL_MAX_ATTACH_MB=0):
+            self._approved_ecp()
+        msg = [m for m in mail.outbox if m.subject.startswith(it_mail.SUBJECT_MARK)][0]
+        self.assertEqual(msg.attachments, [])
+        self.assertIn("Не вложены из-за размера письма", msg.body)
+        self.assertIn("passport.pdf", msg.body)
 
 class MchdPlaceholderTests(TestCase):
     """Прочерк в графе ИНН/СНИЛС — это «значения нет», а не ошибка.

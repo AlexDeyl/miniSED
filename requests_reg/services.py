@@ -106,6 +106,9 @@ def _sync_status(request: RegulatoryRequest) -> None:
                 _set(request, constants.STATUS_TO_IT)
                 log_action("request_approved_to_it", target=request)
                 _notify("notify_it_queue", request)
+                # ИТ-отделу объекта — письмо с заявлением, вложениями и листом
+                # согласования: по нему ЭЦП выпускают, не заходя в MiniSED.
+                _notify("notify_it_department", request)
             else:
                 _set(request, constants.STATUS_TO_LEGAL)
                 log_action("request_approved_to_legal", target=request)

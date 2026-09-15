@@ -27,9 +27,9 @@ class OrganizationAdmin(admin.ModelAdmin):
 
 @admin.register(Facility)
 class FacilityAdmin(admin.ModelAdmin):
-    list_display = ("name", "organization", "ops_director", "is_active")
+    list_display = ("name", "organization", "ops_director", "it_email", "is_active")
     list_filter = ("is_active", "organization")
-    search_fields = ("name", "address")
+    search_fields = ("name", "address", "it_email")
 
 
 @admin.register(Department)

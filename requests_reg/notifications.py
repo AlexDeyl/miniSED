@@ -8,6 +8,8 @@
 События:
   - согласующему, когда до него дошла очередь (в т.ч. юротделу — всем юристам);
   - юристам, когда заявка передана на исполнение (раздел «Новые»);
+  - ИТ-специалистам и на ящик ИТ-отдела объекта, когда согласована ЭЦП
+    (письмо отделу — с заявлением, вложениями и листом согласования);
   - инициатору, когда заявка исполнена (нужно подтвердить получение);
   - юристам, когда инициатор подтвердил получение (заявка закрыта).
 """
@@ -229,6 +231,30 @@ def notify_it_queue(request):
     _dispatch(b24, emails, "Новая заявка на ЭЦП",
               f"Заявка передана ИТ-специалисту на исполнение: {_label(request)}",
               link=_card_link(request), link_text="Открыть заявку")
+
+
+def notify_it_department(request):
+    """ИТ-отделу ОБЪЕКТА — полный комплект по согласованной заявке на ЭЦП.
+
+    Отдельно от notify_it_queue: тот зовёт ИТ-специалиста в приложение, а это
+    письмо на ящик отдела, по которому можно работать, не открывая MiniSED —
+    заявление, вложения инициатора и лист согласования. Сборка и отправка — в
+    it_mail (логика объёмная и своя).
+
+    Результат пишем в аудит: «ушло ли письмо в ИТ» — первый вопрос, который
+    задают, когда ЭЦП не выпустили, и ответ на него должен быть в карточке."""
+    from core.services import log_action
+
+    from . import it_mail
+
+    to = it_mail.recipients(request)
+    if not to:
+        log_action("it_mail_no_recipient", target=request,
+                   new_value={"facility": request.facility.name if request.facility_id else None})
+        return
+    ok = it_mail.send_to_it_department(request)
+    log_action("it_mail_sent" if ok else "it_mail_failed", target=request,
+               new_value={"to": to})
 
 
 def notify_initiator_executed(request):

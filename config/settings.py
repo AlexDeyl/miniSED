@@ -248,6 +248,14 @@ EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", "")
 EMAIL_USE_SSL = env_bool("EMAIL_USE_SSL", default=True)
 DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER)
 
+# Куда слать согласованную заявку на ЭЦП, если у объекта не заполнена почта
+# ИТ-отдела (Facility.it_email) или объект в заявке вообще не указан. Несколько
+# адресов — через запятую. Без этого фолбэка такая заявка ушла бы в никуда.
+IT_DEPT_FALLBACK_EMAIL = env("IT_DEPT_FALLBACK_EMAIL", "")
+# Предел суммарного размера вложений письма ИТ-отделу (МБ): что не влезло,
+# перечисляем в тексте — файлы всегда доступны в карточке заявки.
+IT_MAIL_MAX_ATTACH_MB = int(env("IT_MAIL_MAX_ATTACH_MB", "20"))
+
 
 # ---------------------------------------------------------------------------
 # Интеграция с Битрикс24

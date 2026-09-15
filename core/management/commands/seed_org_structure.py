@@ -81,18 +81,20 @@ class Command(BaseCommand):
                         f"{f['name']!r}: {f['organization']!r} — пропуск"
                     )
                     continue
+                defaults = {"address": f.get("address", ""), "is_active": True}
+                # Почту ИТ-отдела перезаписываем, только если она есть в JSON:
+                # иначе повторный сид затирал бы адрес, заведённый руками в
+                # админке. Пустая строка в JSON — осознанная очистка.
+                if "it_email" in f:
+                    defaults["it_email"] = f.get("it_email") or ""
                 _, created = Facility.objects.update_or_create(
-                    name=f["name"],
-                    organization=org,
-                    defaults={
-                        "address": f.get("address", ""),
-                        "is_active": True,
-                    },
+                    name=f["name"], organization=org, defaults=defaults,
                 )
                 fac_n += 1
                 self.stdout.write(
                     f"  [объект {'СОЗДАН' if created else 'обновлён'}] "
                     f"{f['name']} → {org.short_name}"
+                    + (f" · ИТ: {f['it_email']}" if f.get("it_email") else "")
                 )
 
             # --- ЦФО ---
