@@ -81,6 +81,7 @@ def render_pdf(compliment, *, approval=None) -> bytes:
           Paragraph(f"<b>Дополнительная информация:</b><br/>{compliment.description or '—'}", base)],
          [Paragraph(f"<b>Компания:</b> {compliment.company}", base), ""]],
         colWidths=[None, 80 * mm],
+        splitInRow=1,  # длинное описание не должно ронять бланк (LayoutError)
     )
     guest.setStyle(grid)
     story += [guest, Spacer(1, 2)]
@@ -100,6 +101,7 @@ def render_pdf(compliment, *, approval=None) -> bytes:
              + (f"<br/>{compliment.category_details}" if compliment.category_details else ""),
              base,
          )]],
+        splitInRow=1,  # подробности категории — свободный текст без лимита
     )
     category.setStyle(grid)
     story += [category, Spacer(1, 10)]

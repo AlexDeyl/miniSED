@@ -214,6 +214,32 @@ class SheetPdfTests(TestCase):
         sheet.generated_file.seek(0)
         self.assertTrue(sheet.generated_file.read(4) == b"%PDF")
 
+    def test_long_comment_does_not_break_layout(self):
+        """Комментарий согласующего длиной больше страницы.
+
+        Юрист пишет разбор договора по пунктам — строка таблицы становится выше
+        листа, и без splitInRow reportlab бросает LayoutError, а лист
+        согласования отдаёт 500 вместо PDF (боевой случай ДОГ-000238)."""
+        ap = make_approval(flow=Approval.FLOW_SEQUENTIAL)
+        rnd = services.submit(ap, [internal(10, 0, "approver")])
+        huge = " ".join(
+            f"п.{i}.{i} — позиция юридического отдела по данному пункту договора,"
+            f" правки контрагента принимаются частично." for i in range(1, 120)
+        )
+        services.decide(rnd.participants.first(), "approve", huge)
+        ap.refresh_from_db()
+        pdf = render_pdf(ap)
+        self.assertTrue(pdf.startswith(b"%PDF"))
+
+    def test_unbreakable_long_word_does_not_break_layout(self):
+        """Тот же случай, но текст без пробелов (вставленная ссылка/мусор):
+        перенести его внутри ячейки не по чему."""
+        ap = make_approval(flow=Approval.FLOW_SEQUENTIAL)
+        rnd = services.submit(ap, [internal(10, 0, "approver")])
+        services.decide(rnd.participants.first(), "approve", "п" * 6000)
+        ap.refresh_from_db()
+        self.assertTrue(render_pdf(ap).startswith(b"%PDF"))
+
 
 class ApiTests(TestCase):
     AUTHOR = 1

@@ -186,7 +186,15 @@ def build_story(approval: Approval, *, role_names: dict | None = None) -> list:
                 Paragraph(_fmt(p.decided_at), base),
                 Paragraph(p.decision_comment or "—", base),
             ])
-        table = Table(data, colWidths=[34 * mm, 28 * mm, 28 * mm, 20 * mm, 24 * mm, None])
+        # splitInRow — чтобы длинный комментарий согласующего не ронял лист.
+        # Комментарий ничем не ограничен (юрист пишет разбор по пунктам на
+        # страницу), а строка таблицы выше страницы для reportlab неразрешима:
+        # без этого флага он бросает LayoutError, и лист согласования отдаёт
+        # 500 вместо PDF. repeatRows — шапка повторяется на переносе.
+        table = Table(
+            data, colWidths=[34 * mm, 28 * mm, 28 * mm, 20 * mm, 24 * mm, None],
+            repeatRows=1, splitInRow=1,
+        )
         table.setStyle(TableStyle([
             ("FONTNAME", (0, 0), (-1, -1), font),
             ("FONTSIZE", (0, 0), (-1, -1), 8.5),

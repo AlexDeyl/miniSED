@@ -84,6 +84,10 @@ def _doc(buffer, request, font):
         t = Table(
             [[Paragraph(k, label), Paragraph(v, base)] for k, v in rows],
             colWidths=[55 * mm, None],
+            # Свободный текст (основание, комментарий, иные полномочия) длину не
+            # ограничивает — строка выше страницы иначе роняет генерацию
+            # заявления с LayoutError (см. approvalflow.sheet).
+            splitInRow=1,
         )
         t.setStyle(TableStyle([
             ("VALIGN", (0, 0), (-1, -1), "TOP"),

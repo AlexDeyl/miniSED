@@ -190,7 +190,13 @@ def render_pdf(agreement: Agreement) -> bytes:
                 Paragraph(_fmt(p.decided_at), base),
                 Paragraph(p.comment or "—", base),
             ])
-        table = Table(data, colWidths=[45 * mm, 28 * mm, 32 * mm, None])
+        # splitInRow: длинный комментарий согласующего делает строку выше
+        # страницы, а неразрезаемая строка — это LayoutError и 500 вместо PDF
+        # (см. тот же флаг в approvalflow.sheet).
+        table = Table(
+            data, colWidths=[45 * mm, 28 * mm, 32 * mm, None],
+            repeatRows=1, splitInRow=1,
+        )
         table.setStyle(TableStyle([
             ("FONTNAME", (0, 0), (-1, -1), font),
             ("FONTSIZE", (0, 0), (-1, -1), 8.5),
@@ -224,7 +230,10 @@ def render_pdf(agreement: Agreement) -> bytes:
                     Paragraph(who, base),
                     Paragraph(v["comment"] or "—", base),
                 ])
-            vtable = Table(vdata, colWidths=[20 * mm, 32 * mm, 40 * mm, None])
+            vtable = Table(
+                vdata, colWidths=[20 * mm, 32 * mm, 40 * mm, None],
+                repeatRows=1, splitInRow=1,  # комментарий к версии тоже без лимита
+            )
             vtable.setStyle(TableStyle([
                 ("FONTNAME", (0, 0), (-1, -1), font),
                 ("FONTSIZE", (0, 0), (-1, -1), 8.5),
