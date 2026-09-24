@@ -6,6 +6,7 @@ import { ApiError } from '@/services/api'
 import type { RegulatoryRequestListItem, RequestType } from '@/types/request'
 import AddressAutocomplete from '@/components/AddressAutocomplete.vue'
 import PoaSearchSelect from '@/components/PoaSearchSelect.vue'
+import PersonCheckForm from '@/components/PersonCheckForm.vue'
 import { formatSnils, isPlaceholder, isValidInn, isValidSnils } from '@/utils/personal'
 
 // id приходит только с /requests/:id/edit — та же форма правит уже созданную
@@ -91,6 +92,7 @@ const TYPES: { code: RequestType; name: string }[] = [
   { code: 'mchd', name: 'Заявка на МЧД' },
   { code: 'ecp', name: 'Заявка на ЭЦП' },
   { code: 'revoke', name: 'Заявка на отзыв доверенности/МЧД' },
+  { code: 'check', name: 'Заявка на проверку лица' },
 ]
 function typeFromQuery(): RequestType {
   const q = String(route.query.type || '')
@@ -198,6 +200,9 @@ async function uploadAttachments(reqId: number) {
 // Анкета (сведения о представителе) одинакова у всех трёх типов; различаются
 // только «параметры» сверху и дополнительный раздел снизу.
 const isRevoke = computed(() => requestType.value === 'revoke')
+// Проверка лица — своя анкета целиком (PersonCheckForm), общего с
+// доверенностями у неё только тип в этом списке.
+const isCheck = computed(() => requestType.value === 'check')
 const isAnketa = computed(() => ['poa', 'mchd', 'ecp'].includes(requestType.value))
 const isEcp = computed(() => requestType.value === 'ecp')
 // Список приложений зависит от типа заявки, механика загрузки файлов общая.
@@ -526,7 +531,21 @@ async function save() {
       отправьте её на согласование из карточки.
     </p>
 
-    <div class="form" style="max-width:760px">
+    <template v-if="isCheck">
+      <div v-if="!isEdit" class="form" style="max-width:760px">
+        <div class="form-row">
+          <label class="form-field" style="max-width:370px">
+            <span>Тип заявки</span>
+            <select v-model="requestType">
+              <option v-for="t in TYPES" :key="t.code" :value="t.code">{{ t.name }}</option>
+            </select>
+          </label>
+        </div>
+      </div>
+      <PersonCheckForm :id="props.id" />
+    </template>
+
+    <div v-else class="form" style="max-width:760px">
       <!-- Базовое -->
       <div class="form-row">
         <label class="form-field">

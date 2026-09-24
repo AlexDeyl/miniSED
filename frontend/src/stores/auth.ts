@@ -33,6 +33,9 @@ export const useAuthStore = defineStore('auth', () => {
   const isComplimentExecutor = computed(() => !!profile.value?.is_compliment_executor)
   // ИТ-специалист — ему виден раздел «Работа ИТ» (исполнение заявок на ЭЦП).
   const isItSpecialist = computed(() => !!profile.value?.is_it_specialist)
+  // Служба безопасности — ей виден раздел «Работа службы безопасности»
+  // (исполнение проверок лиц). Юристу — пока ему переданы функции СБ.
+  const isSecurity = computed(() => !!profile.value?.is_security)
 
   function ls(key: string, value?: string | null): string | null {
     try {
@@ -69,6 +72,13 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   // применить токен, полученный OAuth-редиректом (?bitrix_token=...)
+  // Флаги доступа меняются без перелогина (юрист принял функции СБ) —
+  // перечитываем профиль, чтобы сайдбар показал новый раздел сразу.
+  async function refreshProfile() {
+    if (!token.value) return
+    try { applyProfile(await authApi.me()) } catch { /* оставим как было */ }
+  }
+
   async function applyToken(t: string) {
     token.value = t
     ls(TOKEN_KEY, t)
@@ -148,7 +158,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   return {
     token, profile, b24UserId, ready, isAuthenticated, displayName, isLawyer,
-    canViewAll, isComplimentExecutor, isItSpecialist,
-    login, bitrixLogin, applyToken, logout, init,
+    canViewAll, isComplimentExecutor, isItSpecialist, isSecurity,
+    login, bitrixLogin, applyToken, refreshProfile, logout, init,
   }
 })

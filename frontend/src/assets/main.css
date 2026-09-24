@@ -221,6 +221,8 @@ a { color: var(--green-main); text-decoration: none; }
    с юротдельскими. */
 .status-pill.to_it { background: #00838f; }
 .status-pill.it_work { background: #0277bd; }
+/* Проверка лица на исполнении у службы безопасности */
+.status-pill.check_work { background: #5d4037; }
 .status-pill.signing { background: #0288d1; }
 .status-pill.executed { background: var(--green-main); }
 .status-pill.closed { background: #9e9e9e; }

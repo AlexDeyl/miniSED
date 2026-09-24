@@ -14,6 +14,9 @@ export interface AuthProfile {
   is_compliment_executor?: boolean
   /** Исполнитель заявок на ЭЦП — виден раздел «Работа ИТ». */
   is_it_specialist?: boolean
+  /** Служба безопасности (или юрист на время передачи её функций) —
+   *  виден раздел «Работа службы безопасности». */
+  is_security?: boolean
 }
 
 export interface LoginResult extends AuthProfile {

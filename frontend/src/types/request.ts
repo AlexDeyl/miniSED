@@ -1,7 +1,7 @@
 import type { ApprovalDetail } from './approval'
 import type { DocumentVersion } from './document'
 
-export type RequestType = 'poa' | 'mchd' | 'ecp' | 'revoke'
+export type RequestType = 'poa' | 'mchd' | 'ecp' | 'revoke' | 'check'
 export type RequestStatus =
   | 'draft'
   | 'on_approval'
@@ -14,6 +14,8 @@ export type RequestStatus =
   // Исполнение заявки на ЭЦП: её ведёт не юротдел, а ИТ-специалист объекта.
   | 'to_it'
   | 'it_work'
+  // Проверка лица: служба безопасности взяла заявку в работу.
+  | 'check_work'
   | 'executed'
   | 'closed'
   | 'canceled'
@@ -93,14 +95,24 @@ export interface RegulatoryRequestDetail extends RegulatoryRequestListItem {
   source_request: number | null
   source_request_info: RequestCardRef | null
   revocations: RequestCardRef[]
+  // Исполнение (ИТ / служба безопасности): кто и когда взял в работу.
+  executor_b24_id: number | null
+  taken_at: string | null
+  // Итог проверки лица службой безопасности.
+  check_result: '' | CheckResult
+  check_result_display: string
+  check_comment: string
   updated_at: string
   approval: ApprovalDetail | null
   documents: RequestDocument[]
 }
 
+export type CheckResult = 'approved' | 'approved_remarks' | 'rejected'
+
 export interface RequestCreatePayload {
   request_type: RequestType
-  organization: number
+  // У проверки лица юрлицо выводит сервер (из объекта в анкете).
+  organization?: number
   facility?: number | null
   cfo?: number | null
   subject_name?: string

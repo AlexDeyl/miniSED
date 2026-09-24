@@ -50,6 +50,9 @@ def profile_payload(profile: UserProfile | None, user=None) -> dict:
         "is_compliment_executor": _is_compliment_executor(profile.bitrix_id),
         # Показывать ли раздел «Работа ИТ» (исполнение заявок на ЭЦП).
         "is_it_specialist": _is_it_specialist(profile.bitrix_id),
+        # Показывать ли раздел «Работа службы безопасности» (проверка лиц):
+        # сотрудник СБ или юрист, пока функции СБ переданы юротделу.
+        "is_security": _is_security(profile.bitrix_id),
     }
 
 
@@ -63,6 +66,12 @@ def _is_it_specialist(b24_id) -> bool:
     return RoleAssignment.objects.filter(
         role_code=R.ROLE_IT_SPECIALIST, user_b24_id=b24_id, is_active=True
     ).exists()
+
+
+def _is_security(b24_id) -> bool:
+    from requests_reg import check
+
+    return check.can_work_security(b24_id)
 
 
 def _is_compliment_executor(b24_id) -> bool:

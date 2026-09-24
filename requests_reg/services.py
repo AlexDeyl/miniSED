@@ -11,6 +11,11 @@
 маршрут отзыва — один руководитель ЦФО, и когда он сам инициатор, согласовывать
 нечего. Тогда submit() переводит заявку сразу к юристам (см. _submit_to_legal).
 
+Заявка на ПРОВЕРКУ ЛИЦА после согласования никуда не передаётся: статус
+«Согласована» и есть «Новые» раздела службы безопасности. Дальше СБ берёт её
+в работу («На исполнении») и исполняет с решением и отчётом («Исполнена») —
+подтверждения получения у неё нет, итог инициатор видит в карточке.
+
 Маршрут строится по правилам (routing.build_route); ручной выбор согласующего
 фиксируется в аудите (core.log_action).
 """
@@ -101,7 +106,11 @@ def _sync_status(request: RegulatoryRequest) -> None:
             # финальное утверждение → согласована → автопередача исполнителю
             _set(request, constants.STATUS_APPROVED)
             _notify("notify_initiator_status", request)  # инициатору — согласована
-            if request.request_type == constants.TYPE_ECP:
+            if request.request_type == constants.TYPE_CHECK:
+                # остаётся «Согласована» — это «Новые» в разделе СБ
+                log_action("request_approved_to_security", target=request)
+                _notify("notify_security_queue", request)
+            elif request.request_type == constants.TYPE_ECP:
                 # ЭЦП исполняет ИТ-специалист объекта, а не юротдел
                 _set(request, constants.STATUS_TO_IT)
                 log_action("request_approved_to_it", target=request)
@@ -157,6 +166,13 @@ def submit(request: RegulatoryRequest, participants: list[dict], *, flow_type=No
 
     if request.request_type == constants.TYPE_REVOKE:
         err = validators.revoke_error(request)
+        if err:
+            raise RequestError(err)
+
+    if request.request_type == constants.TYPE_CHECK:
+        from . import check
+
+        err = check.data_error(request.data)
         if err:
             raise RequestError(err)
 
@@ -387,3 +403,84 @@ def confirm_receipt(request: RegulatoryRequest, *, by_b24_id=None):
     _set(request, constants.STATUS_CLOSED, received_at=timezone.now())
     log_action("request_received", target=request)
     _notify("notify_legal_closed", request)  # юристам — инициатор ознакомился
+
+
+# --- Исполнение проверки лица службой безопасности --------------------------
+# Кто вправе (сотрудник СБ или юрист на время передачи) — проверяет API;
+# здесь — переходы статусов и обязательные условия ТЗ.
+def _require_check(request: RegulatoryRequest):
+    if request.request_type != constants.TYPE_CHECK:
+        raise RequestError("Раздел службы безопасности исполняет только заявки на проверку лица.")
+
+
+def security_take_in_work(request: RegulatoryRequest, *, by_b24_id=None):
+    _require_check(request)
+    if request.status != constants.STATUS_APPROVED:
+        raise RequestError("Взять в работу можно только согласованную заявку.")
+    _set(request, constants.STATUS_CHECK_WORK, executor_b24_id=by_b24_id,
+         taken_at=timezone.now())
+    log_action("request_security_taken", target=request,
+               new_value={"by_b24_id": by_b24_id,
+                          "delegated": _delegated_executor(by_b24_id)})
+
+
+def _delegated_executor(b24_id) -> bool:
+    """Исполняет ли юрист по передаче функций (а не сотрудник СБ) — в аудит."""
+    from . import check
+
+    return bool(b24_id) and not check.is_security_officer(b24_id)
+
+
+def security_execute(request: RegulatoryRequest, *, result: str, comment: str = "",
+                     by_b24_id=None):
+    """«Исполнено»: нужно решение, комментарий к решению с замечаниями или
+    отказу, и хотя бы один прикреплённый отчёт о проверке."""
+    _require_check(request)
+    if request.status != constants.STATUS_CHECK_WORK:
+        raise RequestError("Исполнить можно заявку, взятую в работу.")
+    if result not in dict(constants.CHECK_RESULTS):
+        raise RequestError("Выберите решение по проверке.")
+    comment = (comment or "").strip()
+    if result in constants.CHECK_RESULTS_NEED_COMMENT and not comment:
+        raise RequestError("Для этого решения укажите причину в поле «Комментарии».")
+    if not request.documents.filter(
+        deleted_at__isnull=True, document_type=constants.CHECK_REPORT_DOC_TYPE
+    ).exists():
+        raise RequestError("Загрузите отчёт о проверке — без него заявку не исполнить.")
+    _set(
+        request, constants.STATUS_EXECUTED,
+        check_result=result, check_comment=comment,
+        executor_b24_id=by_b24_id or request.executor_b24_id,
+        executed_at=timezone.now(),
+    )
+    log_action("request_security_executed", target=request,
+               new_value={"result": result, "by_b24_id": by_b24_id,
+                          "delegated": _delegated_executor(by_b24_id)})
+    _notify("notify_initiator_check_result", request)
+
+
+# --- Передача функций СБ юристам -------------------------------------------
+def start_security_delegation(*, by_b24_id, comment: str = ""):
+    from .models import SecurityDelegation
+
+    current = SecurityDelegation.active()
+    if current is not None:
+        return current
+    d = SecurityDelegation.objects.create(started_by_b24_id=by_b24_id, comment=comment[:255])
+    log_action("security_delegation_started", target=d,
+               new_value={"by_b24_id": by_b24_id, "comment": comment})
+    return d
+
+
+def end_security_delegation(*, by_b24_id):
+    from .models import SecurityDelegation
+
+    current = SecurityDelegation.active()
+    if current is None:
+        return None
+    current.ended_at = timezone.now()
+    current.ended_by_b24_id = by_b24_id
+    current.save(update_fields=["ended_at", "ended_by_b24_id"])
+    log_action("security_delegation_ended", target=current,
+               new_value={"by_b24_id": by_b24_id})
+    return current

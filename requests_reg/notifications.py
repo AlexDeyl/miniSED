@@ -11,7 +11,9 @@
   - ИТ-специалистам и на ящик ИТ-отдела объекта, когда согласована ЭЦП
     (письмо отделу — с заявлением, вложениями и листом согласования);
   - инициатору, когда заявка исполнена (нужно подтвердить получение);
-  - юристам, когда инициатор подтвердил получение (заявка закрыта).
+  - юристам, когда инициатор подтвердил получение (заявка закрыта);
+  - службе безопасности (и юристам на время передачи её функций), когда
+    согласована заявка на проверку лица; инициатору — итог проверки.
 """
 
 from __future__ import annotations
@@ -281,4 +283,29 @@ def notify_initiator_status(request):
     st = request.get_status_display()
     _dispatch(b24, emails, f"Заявка: {st}",
               f"Статус заявки изменился: {_label(request)} — {st}",
+              link=_card_link(request), link_text="Открыть заявку")
+
+
+def notify_security_queue(request):
+    """Службе безопасности — согласованная проверка лица легла в «Новые».
+
+    На время передачи функций СБ зовём и юристов: иначе заявка ждала бы
+    человека в отпуске."""
+    from . import check
+
+    b24, emails = _recipients(check.security_recipient_ids())
+    _dispatch(b24, emails, "Новая заявка на проверку лица",
+              f"Заявка на проверку согласована и ждёт исполнения: {_label(request)}",
+              link=_card_link(request), link_text="Открыть заявку")
+
+
+def notify_initiator_check_result(request):
+    """Инициатору — проверка исполнена: решение СБ и комментарий."""
+    if not request.initiator_b24_id:
+        return
+    b24, emails = _recipients([request.initiator_b24_id])
+    msg = f"Проверка исполнена: {_label(request)}\nРешение: {request.get_check_result_display()}"
+    if request.check_comment:
+        msg += f"\nКомментарий: {request.check_comment}"
+    _dispatch(b24, emails, "Проверка лица исполнена", msg,
               link=_card_link(request), link_text="Открыть заявку")

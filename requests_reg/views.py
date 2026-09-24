@@ -19,12 +19,13 @@ from rest_framework.response import Response
 from rest_framework.exceptions import NotFound, PermissionDenied
 
 from approvalflow.models import ApprovalParticipant
+from approvalflow.services import ApprovalError
 from core.services import log_action
 from core.auth import can_view_all, get_current_b24_id, is_admin_mode, is_lawyer
 from core.search import query_param as _query_param
 
-from . import constants, services
-from .models import PowerTemplate, RegulatoryRequest, RoleAssignment
+from . import check, constants, services
+from .models import PowerTemplate, RegulatoryRequest, RoleAssignment, SecurityDelegation
 from .search import search
 from .serializers import (
     RegulatoryRequestDetailSerializer,
@@ -200,6 +201,8 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
             or is_lawyer(self.b24_id)
             or can_view_all(self.b24_id)
             or (req.request_type == constants.TYPE_ECP and self._is_it_specialist(req))
+            # проверку лица исполняет СБ (или юрист на время передачи функций)
+            or (req.request_type == constants.TYPE_CHECK and check.can_work_security(self.b24_id))
         )
 
     def get_object(self):
@@ -251,9 +254,11 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
         return Response(RegulatoryRequestDetailSerializer(req).data)
 
     def _run(self, fn):
+        # ApprovalError — отказ движка (не твоя очередь, отклонение без
+        # причины…): это ошибка ввода, а не сервера, и отвечать на неё 500 нельзя.
         try:
             fn()
-        except services.RequestError as e:
+        except (services.RequestError, ApprovalError) as e:
             return Response({"detail": str(e)}, status=400)
         return None
 
@@ -439,6 +444,83 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
             comment=(request.data.get("comment") or "").strip(),
         )) or self._detail(req)
 
+    # --- исполнение проверки лица (служба безопасности) ---
+    def _require_security(self, *, read_only=False):
+        """Раздел СБ: сотрудник СБ, юрист на время передачи функций, а для
+        чтения — ещё и сквозной просмотр / режим администратора."""
+        if check.can_work_security(self.b24_id):
+            return
+        if read_only and (can_view_all(self.b24_id) or is_admin_mode(self.request)):
+            return
+        raise PermissionDenied("Раздел доступен только службе безопасности.")
+
+    @action(detail=False, methods=["get"], url_path="security_queue")
+    def security_queue(self, request):
+        """Раздел «Работа службы безопасности»: Новые / В работе / Архив / Все."""
+        self._require_security(read_only=True)
+        scope = (request.query_params.get("scope") or "").strip()
+        query = _query_param(request, "q").strip()
+        # как у юристов и ИТ: поиск идёт мимо вкладки
+        statuses = (
+            constants.SECURITY_ALL_STATUSES if query
+            else constants.SECURITY_SCOPES.get(scope, constants.SECURITY_QUEUE_STATUSES)
+        )
+        qs = (
+            RegulatoryRequest.objects.select_related("organization")
+            .filter(request_type=constants.TYPE_CHECK, status__in=statuses)
+            .order_by("-id")
+        )
+        qs = search(qs, query)
+        return Response(RegulatoryRequestListSerializer(qs, many=True).data)
+
+    @action(detail=True, methods=["post"], url_path="security_take")
+    def security_take(self, request, pk=None):
+        req = self.get_object()
+        self._require_security()
+        return self._run(
+            lambda: services.security_take_in_work(req, by_b24_id=self.b24_id)
+        ) or self._detail(req)
+
+    @action(detail=True, methods=["post"], url_path="security_execute")
+    def security_execute(self, request, pk=None):
+        req = self.get_object()
+        self._require_security()
+        return self._run(lambda: services.security_execute(
+            req,
+            result=(request.data.get("result") or "").strip(),
+            comment=(request.data.get("comment") or "").strip(),
+            by_b24_id=self.b24_id,
+        )) or self._detail(req)
+
+    @action(detail=False, methods=["get", "post"], url_path="security_delegation")
+    def security_delegation(self, request):
+        """Передача функций СБ юристам (ТЗ, примечание к исполнению).
+
+        GET — текущее состояние; POST {"active": true|false, "comment"} —
+        включить (любой юрист) или вернуть (юрист либо сотрудник СБ)."""
+        if request.method == "POST":
+            want = bool(request.data.get("active"))
+            lawyer = is_lawyer(self.b24_id)
+            admin = is_admin_mode(request)
+            if want and not (lawyer or admin):
+                raise PermissionDenied("Принять функции СБ может сотрудник юридического отдела.")
+            if not want and not (lawyer or admin or check.is_security_officer(self.b24_id)):
+                raise PermissionDenied("Вернуть функции СБ может юрист или сотрудник СБ.")
+            if want:
+                services.start_security_delegation(
+                    by_b24_id=self.b24_id, comment=(request.data.get("comment") or "").strip(),
+                )
+            else:
+                services.end_security_delegation(by_b24_id=self.b24_id)
+        d = SecurityDelegation.active()
+        return Response({
+            "active": d is not None,
+            "started_at": d.started_at if d else None,
+            "started_by_b24_id": d.started_by_b24_id if d else None,
+            "comment": d.comment if d else "",
+            "can_work": check.can_work_security(self.b24_id),
+        })
+
     @action(detail=True, methods=["post"], url_path="take")
     def take(self, request, pk=None):
         req = self.get_object()
@@ -482,6 +564,7 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
             "revoke_kinds": [
                 {"code": c, "name": n} for c, n in constants.ANKETA_REVOKE_KINDS
             ],
+            "check_results": [{"code": c, "name": n} for c, n in constants.CHECK_RESULTS],
         })
 
     # --- выбор отзываемой доверенности (для заявки на отзыв) ----------------

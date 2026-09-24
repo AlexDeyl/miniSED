@@ -10,6 +10,10 @@ TYPE_POA = "poa"
 TYPE_MCHD = "mchd"
 TYPE_ECP = "ecp"
 TYPE_REVOKE = "revoke"
+# Проверка контрагента или физлица службой безопасности (ТЗ «Заявка на
+# проверку лица»): согласование — техническая проверка данных, исполнение —
+# сама проверка в разделе «Работа службы безопасности».
+TYPE_CHECK = "check"
 
 # code -> (название, префикс номера)
 REQUEST_TYPES = {
@@ -17,6 +21,7 @@ REQUEST_TYPES = {
     TYPE_MCHD: ("Заявка на МЧД", "МЧД"),
     TYPE_ECP: ("Заявка на ЭЦП", "ЭЦП"),
     TYPE_REVOKE: ("Заявка на отзыв доверенности/МЧД", "ОТЗ"),
+    TYPE_CHECK: ("Заявка на проверку лица", "ПРВ"),
 }
 
 # Типы, которые МОЖНО отозвать: отзывают выданную доверенность или МЧД.
@@ -37,6 +42,10 @@ STATUS_SIGNING = "signing"
 # статусов, иначе в карточке ЭЦП было бы написано «Передана юристам».
 STATUS_TO_IT = "to_it"
 STATUS_IT_WORK = "it_work"
+# Проверку лица после согласования берёт в работу служба безопасности.
+# «Согласована» у неё — это и есть «Новые» в разделе СБ (статус по ТЗ не
+# меняется до «Взять в работу»), поэтому отдельного «передана СБ» нет.
+STATUS_CHECK_WORK = "check_work"
 STATUS_EXECUTED = "executed"
 STATUS_CLOSED = "closed"
 STATUS_CANCELED = "canceled"
@@ -52,6 +61,7 @@ STATUS_CHOICES = [
     (STATUS_SIGNING, "На подписании"),
     (STATUS_TO_IT, "Передана ИТ-специалисту"),
     (STATUS_IT_WORK, "В работе у ИТ-специалиста"),
+    (STATUS_CHECK_WORK, "На исполнении"),
     (STATUS_EXECUTED, "Исполнена"),
     (STATUS_CLOSED, "Закрыта"),
     (STATUS_CANCELED, "Отменена"),
@@ -86,6 +96,20 @@ IT_SCOPES = {
     "work": IT_WORK_STATUSES,
     "archive": IT_ARCHIVE_STATUSES,
     "all": IT_ALL_STATUSES,
+}
+
+# --- раздел «Работа службы безопасности»: исполнение проверки лица ---------
+# Та же раскладка, что у юристов и ИТ: Новые / В работе / Архив / Все.
+SECURITY_NEW_STATUSES = [STATUS_APPROVED]
+SECURITY_WORK_STATUSES = [STATUS_CHECK_WORK]
+SECURITY_ARCHIVE_STATUSES = [STATUS_EXECUTED]
+SECURITY_QUEUE_STATUSES = SECURITY_NEW_STATUSES + SECURITY_WORK_STATUSES
+SECURITY_ALL_STATUSES = [c for c, _ in STATUS_CHOICES if c != STATUS_DRAFT]
+SECURITY_SCOPES = {
+    "new": SECURITY_NEW_STATUSES,
+    "work": SECURITY_WORK_STATUSES,
+    "archive": SECURITY_ARCHIVE_STATUSES,
+    "all": SECURITY_ALL_STATUSES,
 }
 
 # статусы, попадающие в раздел юристов (активные)
@@ -154,6 +178,8 @@ ROLE_FINAL_SIGNER = "final_signer"
 # Роли для заявок на комплименты (маршрут по категориям).
 ROLE_CEO_ASSISTANT = "ceo_assistant"
 ROLE_CONFECTIONER = "confectioner"
+# Согласует проверку физлица и исполняет проверки в разделе СБ.
+ROLE_SECURITY_ADVISOR = "security_advisor"
 
 ROLE_NAMES = {
     ROLE_CFO_HEAD: "Руководитель ЦФО",
@@ -170,6 +196,7 @@ ROLE_NAMES = {
     ROLE_FINAL_SIGNER: "Финальный подписант / генеральный директор",
     ROLE_CEO_ASSISTANT: "Помощник генерального директора",
     ROLE_CONFECTIONER: "Кондитерский цех",
+    ROLE_SECURITY_ADVISOR: "Советник генерального директора по безопасности",
 }
 
 
@@ -320,3 +347,64 @@ POWER_TEMPLATES = [
     ("ТМЦ1", "Подписание актов (товарных)",
      "Подписание актов приёма-передачи, товарных накладных, УПД."),
 ]
+
+
+# --- Заявка на проверку лица (ТЗ) -------------------------------------------
+# Значения — в RegulatoryRequest.data. Коды справочников держим стабильными:
+# по ним фронт строит форму, а карточка и поиск показывают ярлыки.
+CHECK_PERSON_LEGAL = "legal"
+CHECK_PERSON_INDIVIDUAL = "individual"
+CHECK_PERSON_TYPES = [
+    (CHECK_PERSON_LEGAL, "Юридическое лицо / ИП"),
+    (CHECK_PERSON_INDIVIDUAL, "Физическое лицо (в том числе самозанятый)"),
+]
+# Направление планируемой деятельности юрлица (раздел 1).
+CHECK_LEGAL_DIRECTIONS = [
+    ("supplier", "Поставщик"),
+    ("buyer", "Покупатель"),
+]
+# Направление деятельности (раздел 2) — у физлица шире: сотрудник, НПД.
+CHECK_DIRECTIONS = [
+    ("supplier", "Поставщик"),
+    ("buyer", "Покупатель"),
+    ("employee", "Сотрудник"),
+    ("npd", "НПД (самозанятый)"),
+]
+CHECK_CONTRACT_KINDS = [
+    ("standard", "Стандартный"),
+    ("counterparty", "По форме контрагента"),
+]
+# Объект сотрудничества. Список закрыт ТЗ; к объекту/юрлицу базы код
+# привязывается по названию (check.resolve_place), чтобы заявка попадала в
+# отчёты и поиск по объекту. «Невесомость» заведена юрлицом, не объектом.
+CHECK_PLACE_MULTIPLE = "multiple"
+CHECK_PLACES = [
+    (CHECK_PLACE_MULTIPLE, "Несколько объектов (указать в графе «Иная информация»)"),
+    ("vvedensky", "Отель «Введенский»"),
+    ("demetra", "Отель «Деметра Арт Отель»"),
+    ("svet", "Отель «SVET»"),
+    ("saga", "Отель «SAGA»"),
+    ("dom", "Отель «DOM BOUTIQUE HOTEL»"),
+    ("nevesomost", "Невесомость"),
+]
+# Приложения (раздел 3) — все необязательные; document_type файла = код.
+CHECK_ATTACHMENTS = [
+    ("check_anketa", "Анкета / Реквизиты"),
+    ("check_pd_consent", "Согласие на обработку персональных данных"),
+    ("check_urgency", "Обоснование срочности"),
+    ("check_other", "Иной документ"),
+]
+# Отчёт о проверке, который прикладывает служба безопасности при исполнении.
+CHECK_REPORT_DOC_TYPE = "check_report"
+
+# Решение службы безопасности по итогам проверки.
+CHECK_RESULT_CLEAN = "approved"
+CHECK_RESULT_REMARKS = "approved_remarks"
+CHECK_RESULT_REJECTED = "rejected"
+CHECK_RESULTS = [
+    (CHECK_RESULT_CLEAN, "Согласовано без замечаний"),
+    (CHECK_RESULT_REMARKS, "Согласовано с замечаниями"),
+    (CHECK_RESULT_REJECTED, "Не согласовано"),
+]
+# Решения, при которых комментарий обязателен.
+CHECK_RESULTS_NEED_COMMENT = [CHECK_RESULT_REMARKS, CHECK_RESULT_REJECTED]

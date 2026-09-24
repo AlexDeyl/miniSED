@@ -6,7 +6,7 @@ import { requests, type UserOption } from '@/services/requests'
 import { documents as documentsApi } from '@/services/documents'
 import { api, ApiError } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
-import type { RegulatoryRequestDetail, RouteSlot } from '@/types/request'
+import type { CheckResult, RegulatoryRequestDetail, RouteSlot } from '@/types/request'
 import type { ApprovalParticipant, ParticipantInput } from '@/types/approval'
 import { fmtDateTime, isGroupLegal, useApprovalCard } from '@/composables/useApprovalCard'
 import UserSearchSelect from '@/components/UserSearchSelect.vue'
@@ -233,6 +233,124 @@ function returnForRevision() {
   run(() => requests.returnForRevision(props.id, comment.trim()))
 }
 
+// --- Проверка лица ---------------------------------------------------------
+// Анкета — таблицей «поле — значение»: служба безопасности копирует из неё
+// реквизиты в базы проверки, поэтому текст выделяемый, плюс кнопка
+// «Скопировать».
+const isCheck = computed(() => req.value?.request_type === 'check')
+const CHECK_LABELS: Record<string, Record<string, string>> = {
+  person_type: { legal: 'Юридическое лицо / ИП', individual: 'Физическое лицо (в том числе самозанятый)' },
+  urgency: { standard: 'Стандартная (3 раб. дня)', urgent: 'Срочная (1-2 раб. дня, с обоснованием)' },
+  direction: { supplier: 'Поставщик', buyer: 'Покупатель', employee: 'Сотрудник', npd: 'НПД (самозанятый)' },
+  contract_kind: { standard: 'Стандартный', counterparty: 'По форме контрагента' },
+  place: {
+    multiple: 'Несколько объектов', vvedensky: 'Отель «Введенский»',
+    demetra: 'Отель «Деметра Арт Отель»', svet: 'Отель «SVET»', saga: 'Отель «SAGA»',
+    dom: 'Отель «DOM BOUTIQUE HOTEL»', nevesomost: 'Невесомость',
+  },
+}
+function lbl(kind: string, code: unknown): string {
+  return (typeof code === 'string' && CHECK_LABELS[kind]?.[code]) || String(code || '')
+}
+function ruDate(iso: unknown): string {
+  return typeof iso === 'string' && iso ? new Date(iso).toLocaleDateString('ru-RU') : ''
+}
+const checkRows = computed(() => {
+  const d = (req.value?.data || {}) as Record<string, any>
+  const rows: [string, string][] = [
+    ['Тип лица', lbl('person_type', d.person_type)],
+    ['Дата подачи заявки', ruDate(req.value?.created_at)],
+    ['Срочность', lbl('urgency', d.urgency)],
+  ]
+  if (d.person_type === 'individual') {
+    const i = d.individual || {}
+    rows.push(
+      ['Фамилия', i.last_name], ['Имя', i.first_name], ['Отчество', i.middle_name],
+      ['Дата рождения', ruDate(i.birth_date)],
+      ['Данные паспорта', i.passport], ['Должность', i.position],
+      ['Место сотрудничества', lbl('place', i.place)],
+      ['Направление деятельности', lbl('direction', d.direction)],
+    )
+  } else {
+    const l = d.legal || {}
+    rows.push(
+      ['Наименование', l.name], ['ИНН / ОГРН', l.inn_ogrn],
+      ['Направление планируемой деятельности', lbl('direction', l.direction)],
+      ['Вид планируемого договора', lbl('contract_kind', l.contract_kind)],
+      ['Объект сотрудничества', lbl('place', l.place)],
+      ['Иная информация', l.other_info],
+    )
+  }
+  rows.push(['Иная информация о сотрудничестве', d.coop_info])
+  return rows.filter(([, v]) => v)
+})
+const copied = ref(false)
+async function copyCheck() {
+  const text = checkRows.value.map(([k, v]) => `${k}: ${v}`).join('\n')
+  try {
+    await navigator.clipboard.writeText(text)
+    copied.value = true
+    setTimeout(() => (copied.value = false), 2000)
+  } catch {
+    error.value = 'Браузер не дал скопировать — выделите текст в таблице вручную.'
+  }
+}
+
+// Хронология заявки (ТЗ): создание → отправление → завершение согласования →
+// принятие в работу → исполнение.
+const checkTimeline = computed(() => [
+  { label: 'Создана', value: req.value?.created_at },
+  { label: 'Отправлена на согласование', value: req.value?.approval?.submitted_at },
+  { label: 'Согласование завершено', value: req.value?.approval?.completed_at },
+  { label: 'Принята в работу', value: req.value?.taken_at },
+  { label: 'Исполнена', value: req.value?.executed_at },
+])
+
+// Исполнение службой безопасности (или юристом по передаче функций).
+const CHECK_RESULTS: { code: CheckResult; name: string; hint: string }[] = [
+  { code: 'approved', name: 'Согласовано без замечаний', hint: '' },
+  { code: 'approved_remarks', name: 'Согласовано с замечаниями', hint: 'укажите замечания в комментарии' },
+  { code: 'rejected', name: 'Не согласовано', hint: 'укажите причину в комментарии' },
+]
+const canWorkSecurity = computed(() => auth.isSecurity && isCheck.value)
+const checkResult = ref<CheckResult | ''>('')
+const checkComment = ref('')
+const reportInput = ref<HTMLInputElement | null>(null)
+const reports = computed(
+  () => (req.value?.documents || []).filter((d) => d.document_type === 'check_report'),
+)
+const needComment = computed(
+  () => checkResult.value === 'approved_remarks' || checkResult.value === 'rejected',
+)
+const checkBlocker = computed(() => {
+  if (!checkResult.value) return 'Выберите решение.'
+  if (needComment.value && !checkComment.value.trim()) return 'Для этого решения нужен комментарий.'
+  if (!reports.value.length) return 'Загрузите отчёт о проверке.'
+  return ''
+})
+async function uploadReports(e: Event) {
+  const input = e.target as HTMLInputElement
+  const picked = Array.from(input.files || [])
+  if (!picked.length) return
+  busy.value = true
+  error.value = null
+  try {
+    await Promise.all(picked.map((f) =>
+      requests.uploadDocument(props.id, f, `Отчёт о проверке: ${f.name}`, 'check_report')))
+    req.value = await requests.get(props.id)
+  } catch (err) {
+    error.value = err instanceof ApiError ? err.message : 'Не удалось загрузить отчёт'
+  } finally {
+    busy.value = false
+    input.value = ''
+  }
+}
+function executeCheck() {
+  if (checkBlocker.value) { error.value = checkBlocker.value; return }
+  if (!confirm('Отметить заявку исполненной? Решение увидит инициатор.')) return
+  run(() => requests.securityExecute(props.id, checkResult.value as CheckResult, checkComment.value.trim()))
+}
+
 // Строки сводки, специфичные для доверенности: исполнение и получение.
 const summaryExtras = computed(() => {
   const rows: { label: string; value: string }[] = []
@@ -415,8 +533,48 @@ onMounted(load)
         </table>
       </div>
 
+      <!-- Проверка лица: анкета в режиме предпросмотра -->
+      <div v-if="isCheck" class="detail-card">
+        <div class="detail-card-header check-head">
+          <span>Сведения о проверяемом лице</span>
+          <button class="btn btn--ghost check-copy" @click="copyCheck">
+            {{ copied ? 'Скопировано ✓' : 'Скопировать' }}
+          </button>
+        </div>
+        <table class="round-table check-table">
+          <tbody>
+            <tr v-for="[k, v] in checkRows" :key="k">
+              <td>{{ k }}</td><td style="white-space:pre-line">{{ v }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Итог проверки — видит инициатор и все, кому открыта карточка -->
+      <div v-if="isCheck && req.status === 'executed'" class="detail-card">
+        <div class="detail-card-header">Результат проверки</div>
+        <table class="round-table">
+          <tbody>
+            <tr><td>Решение</td><td><b>{{ req.check_result_display || '—' }}</b></td></tr>
+            <tr v-if="req.check_comment">
+              <td>Комментарии</td><td style="white-space:pre-line">{{ req.check_comment }}</td>
+            </tr>
+            <tr v-if="req.executor_b24_id">
+              <td>Исполнил</td>
+              <td>{{ nameByBid(req.executor_b24_id) || `USER #${req.executor_b24_id}` }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-if="reports.length" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+          <button
+            v-for="d in reports" :key="d.id" class="btn btn--soft" :disabled="busy"
+            @click="dl(d.download_url, d.title)"
+          >{{ d.title }}</button>
+        </div>
+      </div>
+
       <!-- Суть заявки: основание и комментарий инициатора -->
-      <div v-if="req.basis || req.comment || req.position || req.department" class="detail-card">
+      <div v-if="!isCheck && (req.basis || req.comment || req.position || req.department)" class="detail-card">
         <div class="detail-card-header">Заявка</div>
         <table class="round-table">
           <tbody>
@@ -538,8 +696,20 @@ onMounted(load)
 
       <HistoryCard :history="history" />
 
+      <div v-if="isCheck" class="detail-card">
+        <div class="detail-card-header">Хронология заявки</div>
+        <table class="round-table">
+          <tbody>
+            <tr v-if="pendingPart"><td>Сейчас решает</td><td>{{ partLabel(pendingPart) }}</td></tr>
+            <tr v-for="t in checkTimeline" :key="t.label">
+              <td>{{ t.label }}</td><td>{{ t.value ? fmtDateTime(t.value) : '—' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
       <SummaryCard
-        v-if="rounds.length"
+        v-if="rounds.length && !isCheck"
         :round-number="currentRound?.round_number ?? null"
         :progress="progress"
         :waiting-for="pendingPart ? partLabel(pendingPart) : ''"
@@ -562,6 +732,50 @@ onMounted(load)
       </DocumentsCard>
       <input ref="fileInput" type="file" style="display:none" @change="uploadFile" />
       <input ref="versionInput" type="file" style="display:none" @change="uploadVersion" />
+
+      <!-- Работа службы безопасности: исполнение проверки -->
+      <div
+        v-if="canWorkSecurity && (req.status === 'approved' || req.status === 'check_work')"
+        class="detail-card"
+      >
+        <div class="detail-card-header">Исполнение (служба безопасности)</div>
+        <template v-if="req.status === 'approved'">
+          <p class="muted" style="margin:0 0 10px">Заявка согласована и ждёт исполнителя.</p>
+          <button class="btn btn--primary" :disabled="busy" @click="run(() => requests.securityTake(req!.id))">
+            Взять в работу
+          </button>
+        </template>
+        <template v-else>
+          <div class="form-field" style="margin-bottom:10px">
+            <span>Решение *</span>
+            <label v-for="r in CHECK_RESULTS" :key="r.code" class="check-radio">
+              <input type="radio" :value="r.code" v-model="checkResult" />
+              {{ r.name }}<em v-if="r.hint"> — {{ r.hint }}</em>
+            </label>
+          </div>
+          <label class="form-field" style="margin-bottom:10px">
+            <span>Комментарии{{ needComment ? ' *' : '' }}</span>
+            <textarea v-model="checkComment" rows="3" class="submit-comment" />
+          </label>
+          <div class="form-field" style="margin-bottom:10px">
+            <span>Отчёт о проверке * <em class="check-note">(можно несколько файлов)</em></span>
+            <div class="check-reports">
+              <button class="btn btn--soft" :disabled="busy" @click="reportInput?.click()">Загрузить отчёт</button>
+              <button
+                v-for="d in reports" :key="d.id" type="button" class="link-btn" style="margin-left:0"
+                @click="dl(d.download_url, d.title)"
+              >{{ d.title }}</button>
+              <span v-if="!reports.length" class="check-note">отчёт ещё не загружен</span>
+            </div>
+            <input ref="reportInput" type="file" multiple style="display:none" @change="uploadReports" />
+          </div>
+          <button
+            class="btn btn--primary" :disabled="busy || !!checkBlocker" :title="checkBlocker"
+            @click="executeCheck"
+          >Исполнено</button>
+          <span v-if="checkBlocker" class="check-note" style="margin-left:8px">{{ checkBlocker }}</span>
+        </template>
+      </div>
 
       <!-- Раздел юристов: исполнение -->
       <div v-if="isLegalStage" class="detail-card">
@@ -589,7 +803,7 @@ onMounted(load)
       </div>
 
       <!-- Исполнена: подтверждение получения инициатором -->
-      <div v-if="req.status === 'executed'" class="detail-card">
+      <div v-if="req.status === 'executed' && !isCheck" class="detail-card">
         <div class="detail-card-header">Исполнена</div>
         <p class="muted" style="margin:0 0 10px">
           Способ передачи: {{ req.delivery_method_display }}<template v-if="req.delivery_comment"> — {{ req.delivery_comment }}</template>
@@ -635,6 +849,14 @@ onMounted(load)
   width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #d0d0d0;
   border-radius: 6px; font: inherit; font-size: 13px; resize: vertical;
 }
+.check-head { display: flex; justify-content: space-between; align-items: center; }
+.check-copy { padding: 3px 10px; font-size: 12px; }
+.check-table td:first-child { width: 42%; color: var(--text-muted); }
+.check-table td { user-select: text; }
+.check-radio { display: block; font-size: 13px; margin: 3px 0; cursor: pointer; }
+.check-radio input { margin-right: 6px; }
+.check-radio em, .check-note { font-style: normal; color: var(--text-muted); font-size: 12px; }
+.check-reports { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .link-btn {
   background: none; border: none; padding: 0; margin-left: 8px;
   color: var(--green-main); cursor: pointer; font: inherit; font-size: 12px;

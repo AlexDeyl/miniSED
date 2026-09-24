@@ -140,6 +140,13 @@ const router = createRouter({
       meta: { title: 'Работа ИТ' },
     },
     {
+      // Исполнение заявок на проверку лица (СБ или юрист по передаче функций)
+      path: '/security',
+      name: 'security',
+      component: () => import('@/views/SecurityQueueView.vue'),
+      meta: { title: 'Работа службы безопасности' },
+    },
+    {
       path: '/other',
       name: 'other',
       component: () => import('@/views/OtherView.vue'),

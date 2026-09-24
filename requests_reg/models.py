@@ -125,8 +125,17 @@ class RegulatoryRequest(models.Model):
     # Кто исполнил заявку. Для ЭЦП это ИТ-специалист объекта, взявший её в
     # работу (у доверенностей исполнителем выступает юротдел как группа).
     executor_b24_id = models.IntegerField("Исполнитель (ID Б24)", null=True, blank=True)
+    # Когда исполнитель взял заявку в работу — строка хронологии в карточке
+    # проверки лица («дата и время принятия в работу»).
+    taken_at = models.DateTimeField("Взята в работу", null=True, blank=True)
     executed_at = models.DateTimeField("Исполнена", null=True, blank=True)
     received_at = models.DateTimeField("Получено инициатором", null=True, blank=True)
+
+    # Итог проверки лица службой безопасности: решение и комментарий к нему.
+    check_result = models.CharField(
+        "Решение по проверке", max_length=20, choices=constants.CHECK_RESULTS, blank=True
+    )
+    check_comment = models.TextField("Комментарий к проверке", blank=True)
 
     # type-специфичные поля (доверитель, полномочия, нотариат, тип ЭЦП и т.д.)
     data = models.JSONField("Доп. поля", default=dict, blank=True)
@@ -153,3 +162,32 @@ class RegulatoryRequest(models.Model):
 
     def status_label(self) -> str:
         return self.get_status_display()
+
+
+class SecurityDelegation(models.Model):
+    """Передача функций службы безопасности юридическому отделу.
+
+    Пока СБ нет на месте (отпуск, больничный), любой юрист одной кнопкой
+    берёт её раздел на себя, а потом возвращает. Строка — один период
+    передачи: открыт, пока не проставлен ended_at. Кто и когда включал —
+    остаётся в истории; кто исполнил конкретную заявку — в её executor_b24_id.
+    """
+
+    started_by_b24_id = models.IntegerField("Передал (ID Б24)")
+    started_at = models.DateTimeField("Начало", auto_now_add=True)
+    ended_by_b24_id = models.IntegerField("Вернул (ID Б24)", null=True, blank=True)
+    ended_at = models.DateTimeField("Окончание", null=True, blank=True)
+    comment = models.CharField("Причина", max_length=255, blank=True)
+
+    class Meta:
+        ordering = ["-started_at"]
+        verbose_name = "Передача функций СБ юристам"
+        verbose_name_plural = "Передача функций СБ юристам"
+
+    def __str__(self):
+        state = "действует" if self.ended_at is None else "завершена"
+        return f"Передача СБ → юристам с {self.started_at:%d.%m.%Y} ({state})"
+
+    @classmethod
+    def active(cls):
+        return cls.objects.filter(ended_at__isnull=True).first()

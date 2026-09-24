@@ -6,6 +6,7 @@ import { ApiError } from '@/services/api'
 import { useAdminModeStore } from '@/stores/adminMode'
 import { useLegalUiStore } from '@/stores/legalUi'
 import SearchBox from '@/components/SearchBox.vue'
+import SecurityDelegationBar from '@/components/SecurityDelegationBar.vue'
 import type { RegulatoryRequestListItem } from '@/types/request'
 
 // Режим администратора: при переключении список надо перезагрузить —
@@ -47,6 +48,9 @@ onMounted(load)
 
 <template>
   <section>
+    <!-- Передача функций СБ: юрист принимает раздел службы безопасности
+         на время её отсутствия -->
+    <SecurityDelegationBar />
     <SearchBox v-model="query" placeholder="Поиск: номер, ФИО, паспорт, организация, имя файла" />
     <p v-if="query && !loading && !error" class="state" style="margin-bottom:8px">
       Поиск идёт по всем заявкам юротдела, независимо от вкладки. Найдено: {{ items.length }}.

@@ -11,6 +11,10 @@
 природе (уволенный сотрудник ходит с действующей доверенностью), поэтому
 длинная цепочка тут во вред. А если заявку заводит сам руководитель ЦФО,
 согласовывать нечего — маршрут пустой, заявка уходит прямо юристам.
+
+Заявка на ПРОВЕРКУ ЛИЦА тоже вне таблицы: её согласование — техническая
+проверка данных одним этапом. Физлицо смотрит советник ГД по безопасности,
+юрлицо — юротдел (группа, любой юрист). См. check_route.
 """
 
 from __future__ import annotations
@@ -108,6 +112,31 @@ def revoke_route(request: RegulatoryRequest) -> list[dict]:
     return [_slot(0, C.ROLE_CFO_HEAD, resolve_role(C.ROLE_CFO_HEAD, request))]
 
 
+def _legal_group_slot(order: int) -> dict:
+    """Юротдел — групповой слот: согласует любой юрист, менять некого."""
+    return {
+        "order": order,
+        "role_code": C.ROLE_LEGAL_DEPT,
+        "role_name": C.ROLE_NAMES[C.ROLE_LEGAL_DEPT],
+        "required": True,
+        "group": True,
+        "resolved": True,
+        "b24_user_id": None,
+        "user_name": "Юридический отдел",
+        "needs_manual": False,
+        "replaceable": False,
+    }
+
+
+def check_route(request: RegulatoryRequest) -> list[dict]:
+    """Маршрут проверки лица: один этап, по типу лица (ТЗ, «Согласование»)."""
+    from . import check
+
+    if check.is_individual(request):
+        return [_slot(0, C.ROLE_SECURITY_ADVISOR, resolve_role(C.ROLE_SECURITY_ADVISOR, request))]
+    return [_legal_group_slot(0)]
+
+
 def resolve_role(role_code: str, request: RegulatoryRequest) -> RoleAssignment | None:
     """Находит исполнителя роли по самому специфичному контексту (ЦФО→объект→орг→глобально)."""
     qs = RoleAssignment.objects.filter(role_code=role_code, is_active=True)
@@ -135,6 +164,8 @@ def build_route(request: RegulatoryRequest) -> list[dict]:
     """
     if request.request_type == C.TYPE_REVOKE:
         return revoke_route(request)
+    if request.request_type == C.TYPE_CHECK:
+        return check_route(request)
 
     route = []
     order = 0
@@ -145,21 +176,7 @@ def build_route(request: RegulatoryRequest) -> list[dict]:
         # Юротдел — групповой слот: согласовать может ЛЮБОЙ юрист, конкретного
         # исполнителя не назначаем и ручной выбор не требуется.
         if role_code == C.ROLE_LEGAL_DEPT:
-            route.append(
-                {
-                    "order": order,
-                    "role_code": role_code,
-                    "role_name": C.ROLE_NAMES[role_code],
-                    "required": True,
-                    "group": True,
-                    "resolved": True,
-                    "b24_user_id": None,
-                    "user_name": "Юридический отдел",
-                    "needs_manual": False,
-                    # согласует любой юрист — заменять некого
-                    "replaceable": False,
-                }
-            )
+            route.append(_legal_group_slot(order))
             order += 1
             continue
 

@@ -10,6 +10,7 @@ import { useComplimentsUiStore, COMPLIMENT_TABS, EXECUTION_TABS } from '@/stores
 import { useOtherUiStore, OTHER_TABS } from '@/stores/otherUi'
 import { useAdminModeStore } from '@/stores/adminMode'
 import { useItUiStore, IT_TABS } from '@/stores/itUi'
+import { useSecurityUiStore, SECURITY_TABS } from '@/stores/securityUi'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -22,6 +23,7 @@ const complimentsUi = useComplimentsUiStore()
 const otherUi = useOtherUiStore()
 const adminMode = useAdminModeStore()
 const itUi = useItUiStore()
+const securityUi = useSecurityUiStore()
 
 const pageTitle = computed(() => (route.meta.title as string) || 'MiniSED')
 const bare = computed(() => route.meta.noShell === true)
@@ -34,6 +36,7 @@ const onCompliments = computed(() => route.name === 'compliments')
 const onExecution = computed(() => route.name === 'execution')
 const onOther = computed(() => route.name === 'other')
 const onIt = computed(() => route.name === 'it')
+const onSecurity = computed(() => route.name === 'security')
 // Открыто из Битрикса (в iframe) — тогда «Выйти» не нужен (авто-вход портала).
 const inBitrix = window.self !== window.top
 
@@ -142,6 +145,20 @@ function tabBadge(code: string): number {
             class="sidebar-subtab" :class="{ active: itUi.scope === t.code }"
             @click="itUi.scope = t.code"
           >{{ t.label }}<span v-if="t.code === 'new' && itUi.newCount" class="subtab-badge">{{ itUi.newCount }}</span></button>
+        </div>
+
+        <!-- Исполнение проверок лиц: служба безопасности (юристы — на время
+             передачи её функций) -->
+        <RouterLink v-if="auth.isSecurity || auth.canViewAll" to="/security">
+          <span>Работа службы безопасности</span>
+          <span v-if="securityUi.newCount" class="nav-badge" title="Ждут исполнения">{{ securityUi.newCount }}</span>
+        </RouterLink>
+        <div v-if="onSecurity" class="sidebar-subtabs">
+          <button
+            v-for="t in SECURITY_TABS" :key="t.code"
+            class="sidebar-subtab" :class="{ active: securityUi.scope === t.code }"
+            @click="securityUi.scope = t.code"
+          >{{ t.label }}<span v-if="t.code === 'new' && securityUi.newCount" class="subtab-badge">{{ securityUi.newCount }}</span></button>
         </div>
 
         <RouterLink to="/deals"><span>Поиск сделок</span></RouterLink>

@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import PowerTemplate, RegulatoryRequest, RoleAssignment
+from .models import PowerTemplate, RegulatoryRequest, RoleAssignment, SecurityDelegation
 
 
 @admin.register(PowerTemplate)
@@ -18,7 +18,9 @@ class RegulatoryRequestAdmin(admin.ModelAdmin):
     )
     list_filter = ("request_type", "status", "organization")
     search_fields = ("number", "subject_name", "position")
-    readonly_fields = ("number", "created_at", "updated_at", "executed_at", "received_at")
+    readonly_fields = (
+        "number", "created_at", "updated_at", "taken_at", "executed_at", "received_at",
+    )
 
 
 @admin.register(RoleAssignment)
@@ -26,3 +28,9 @@ class RoleAssignmentAdmin(admin.ModelAdmin):
     list_display = ("role_code", "user_b24_id", "user_name", "organization", "cfo", "facility", "is_active")
     list_filter = ("role_code", "is_active", "organization")
     search_fields = ("user_name", "user_b24_id")
+
+
+@admin.register(SecurityDelegation)
+class SecurityDelegationAdmin(admin.ModelAdmin):
+    list_display = ("started_at", "started_by_b24_id", "ended_at", "ended_by_b24_id", "comment")
+    readonly_fields = ("started_at",)

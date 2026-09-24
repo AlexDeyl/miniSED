@@ -59,6 +59,10 @@ class RegulatoryRequestDetailSerializer(RegulatoryRequestListSerializer):
     # доверенность, а открыв доверенность, сразу видит, что её отзывают.
     source_request_info = serializers.SerializerMethodField()
     revocations = serializers.SerializerMethodField()
+    # Итог проверки лица службой безопасности.
+    check_result_display = serializers.CharField(
+        source="get_check_result_display", read_only=True
+    )
 
     class Meta(RegulatoryRequestListSerializer.Meta):
         fields = RegulatoryRequestListSerializer.Meta.fields + [
@@ -68,6 +72,8 @@ class RegulatoryRequestDetailSerializer(RegulatoryRequestListSerializer):
             "delivery_comment", "executed_at", "received_at",
             "external_1c_id", "external_diadoc_id",
             "source_request", "source_request_info", "revocations",
+            "executor_b24_id", "taken_at",
+            "check_result", "check_result_display", "check_comment",
             "updated_at", "approval", "documents",
         ]
 
@@ -94,6 +100,9 @@ class RegulatoryRequestWriteSerializer(serializers.ModelSerializer):
             "basis", "valid_from", "valid_until", "comment", "data",
             "source_request",
         ]
+        # У проверки лица юрлицо выводится из объекта анкеты (validate), у
+        # остальных типов его обязательность проверяет validate.
+        extra_kwargs = {"organization": {"required": False}}
 
     def validate_request_type(self, value):
         if value not in constants.REQUEST_TYPES:
@@ -120,6 +129,11 @@ class RegulatoryRequestWriteSerializer(serializers.ModelSerializer):
         # Привязка к отзываемой доверенности имеет смысл только у отзыва:
         # у доверенности это поле осталось бы висеть непонятной ссылкой.
         rtype = attrs.get("request_type") or getattr(self.instance, "request_type", None)
+
+        if rtype == constants.TYPE_CHECK:
+            return self._validate_check(attrs, data)
+        if not attrs.get("organization") and self.instance is None:
+            raise serializers.ValidationError({"organization": "Выберите организацию."})
         if attrs.get("source_request") and rtype != constants.TYPE_REVOKE:
             raise serializers.ValidationError(
                 {"detail": "Привязать отзываемую доверенность можно только к заявке на отзыв."}
@@ -149,4 +163,29 @@ class RegulatoryRequestWriteSerializer(serializers.ModelSerializer):
                     raise serializers.ValidationError(
                         {"detail": "Срок доверенности не может превышать 3 года."}
                     )
+        return attrs
+
+    def _validate_check(self, attrs, data):
+        """Проверка лица: анкета по правилам ТЗ, а юрлицо, объект и «кого
+        проверяем» выводятся из неё — в форме этих полей нет."""
+        from . import check
+
+        if data is None and self.instance is not None:
+            return attrs  # PATCH без анкеты — править нечего
+        err = check.data_error(data)
+        if err:
+            raise serializers.ValidationError({"detail": err})
+        org, facility = check.resolve_place(check.place_code(data))
+        if org is None:
+            raise serializers.ValidationError(
+                {"detail": "В справочнике нет ни одного юрлица — обратитесь к администратору."}
+            )
+        attrs["organization"] = org
+        attrs["facility"] = facility
+        attrs["cfo"] = None
+        attrs["subject_name"] = check.subject_name(data)
+        individual = check.person_type(data) == constants.CHECK_PERSON_INDIVIDUAL
+        attrs["position"] = (
+            ((data.get("individual") or {}).get("position") or "").strip() if individual else ""
+        )
         return attrs

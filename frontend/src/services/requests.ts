@@ -1,6 +1,7 @@
 import { api } from './api'
 import type { ParticipantInput } from '@/types/approval'
 import type {
+  CheckResult,
   RegulatoryRequestDetail,
   RegulatoryRequestListItem,
   RequestCreatePayload,
@@ -12,6 +13,14 @@ const BASE = '/reg/requests'
 export interface Organization { id: number; short_name: string }
 export interface Facility { id: number; name: string; organization: number }
 export interface Cfo { id: number; name: string; code: string; organization: number | null }
+export interface SecurityDelegation {
+  active: boolean
+  started_at: string | null
+  started_by_b24_id: number | null
+  comment: string
+  // могу ли я сейчас работать в разделе СБ
+  can_work: boolean
+}
 export interface UserOption { id: number; fio: string; bitrix_id: number; position_name?: string }
 
 export const requests = {
@@ -87,9 +96,29 @@ export const requests = {
   confirmReceipt: (id: number | string) =>
     api.post<RegulatoryRequestDetail>(`${BASE}/${id}/confirm_receipt/`),
 
-  uploadDocument: (id: number | string, file: File, title: string) => {
+  // --- исполнение проверки лица (служба безопасности) ---
+  securityQueue: (scope?: string, q?: string) => {
+    const p = new URLSearchParams()
+    if (scope) p.set('scope', scope)
+    if (q) p.set('q', q)
+    const qs = p.toString()
+    return api.get<RegulatoryRequestListItem[]>(`${BASE}/security_queue/${qs ? `?${qs}` : ''}`)
+  },
+  securityTake: (id: number | string) =>
+    api.post<RegulatoryRequestDetail>(`${BASE}/${id}/security_take/`),
+  securityExecute: (id: number | string, result: CheckResult, comment: string) =>
+    api.post<RegulatoryRequestDetail>(`${BASE}/${id}/security_execute/`, { result, comment }),
+  // Передача функций СБ юристам: состояние и переключение.
+  securityDelegation: () => api.get<SecurityDelegation>(`${BASE}/security_delegation/`),
+  setSecurityDelegation: (active: boolean, comment = '') =>
+    api.post<SecurityDelegation>(`${BASE}/security_delegation/`, { active, comment }),
+
+  // documentType — вид документа (приложение к проверке, отчёт СБ…): по нему
+  // сервер находит нужные файлы, напр. обязательный отчёт о проверке.
+  uploadDocument: (id: number | string, file: File, title: string, documentType = '') => {
     const form = new FormData()
     form.append('title', title)
+    if (documentType) form.append('document_type', documentType)
     form.append('linked_type', 'requests_reg.regulatoryrequest')
     form.append('linked_id', String(id))
     form.append('file', file)
