@@ -296,6 +296,9 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
             mine = (
                 (services.is_group_legal(pending) and lawyer)
                 or pending.b24_user_id == self.b24_id
+                # функции СБ у юристов — этап советника по безопасности их
+                or (lawyer and pending.role == constants.ROLE_SECURITY_ADVISOR
+                    and check.delegation_active())
             )
             if mine:
                 out.append(req)

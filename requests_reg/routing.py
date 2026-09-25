@@ -133,6 +133,10 @@ def check_route(request: RegulatoryRequest) -> list[dict]:
     from . import check
 
     if check.is_individual(request):
+        # Функции СБ переданы юристам (СБ в отпуске) — согласует любой юрист,
+        # тем же групповым этапом, что и у юрлица.
+        if check.delegation_active():
+            return [_legal_group_slot(0)]
         return [_slot(0, C.ROLE_SECURITY_ADVISOR, resolve_role(C.ROLE_SECURITY_ADVISOR, request))]
     return [_legal_group_slot(0)]
 

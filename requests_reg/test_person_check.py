@@ -288,3 +288,48 @@ class PersonCheckNotificationTests(_CheckBase):
         self.assertIn("hr@x.ru", msg.to)
         self.assertIn("Не согласовано", msg.body)
         self.assertIn("Санкции", msg.body)
+
+
+class DelegatedApprovalTests(_CheckBase):
+    """Функции СБ у юристов: согласует проверку физлица любой юрист."""
+
+    def _delegate(self, on=True):
+        api(LAWYER).post("/api/reg/requests/security_delegation/", {"active": on}, format="json")
+
+    def test_route_default_is_security_advisor(self):
+        rid = self._create(individual_data()).json()["id"]
+        route = api(INITIATOR).get(f"/api/reg/requests/{rid}/route_preview/").json()["route"]
+        self.assertEqual((route[0]["role_code"], route[0]["b24_user_id"], route[0]["needs_manual"]),
+                         (C.ROLE_SECURITY_ADVISOR, SECURITY, False))
+
+    def test_route_during_delegation_is_legal_group(self):
+        self._delegate()
+        rid = self._create(individual_data()).json()["id"]
+        route = api(INITIATOR).get(f"/api/reg/requests/{rid}/route_preview/").json()["route"]
+        self.assertEqual([s["role_code"] for s in route], [C.ROLE_LEGAL_DEPT])
+        self.assertTrue(route[0]["group"])
+        self._submit(rid)
+        self.assertEqual(self._approve(rid, LAWYER).json()["status"], C.STATUS_APPROVED)
+
+    def test_lawyer_closes_pending_security_stage_after_delegation(self):
+        rid = self._create(individual_data()).json()["id"]
+        self._submit(rid)  # ушла на Золотько (SECURITY)
+        # без передачи юрист решать не может
+        self.assertEqual(self._approve(rid, LAWYER).status_code, 400)
+        self.assertEqual(api(LAWYER).get("/api/reg/requests/todo/").json(), [])
+
+        self._delegate()
+        self.assertEqual([x["id"] for x in api(LAWYER).get("/api/reg/requests/todo/").json()], [rid])
+        r = self._approve(rid, LAWYER)
+        self.assertEqual(r.json()["status"], C.STATUS_APPROVED)
+        part = r.json()["approval"]["rounds"][0]["participants"][0]
+        self.assertEqual(part["b24_user_id"], LAWYER)  # записан тот, кто решил
+        self.assertTrue(AuditLog.objects.filter(action="security_approval_by_lawyer").exists())
+
+    def test_stranger_cannot_close_security_stage_even_during_delegation(self):
+        rid = self._create(individual_data()).json()["id"]
+        self._submit(rid)
+        self._delegate()
+        # посторонний карточку даже не видит (404), решение не принимается
+        self.assertIn(self._approve(rid, STRANGER).status_code, (400, 404))
+        self.assertEqual(RegulatoryRequest.objects.get(pk=rid).status, C.STATUS_ON_APPROVAL)

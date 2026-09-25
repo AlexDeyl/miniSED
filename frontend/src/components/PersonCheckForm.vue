@@ -132,7 +132,7 @@ function validate(): string | null {
   if (i.birth_date > todayStr) return 'Раздел 1: дата рождения не может быть в будущем.'
   if (i.passport.replace(/\D/g, '').length !== 10)
     return 'Раздел 1: паспорт — 10 цифр (серия 4 + номер 6).'
-  if (!i.position.trim()) return 'Раздел 1: укажите должность.'
+  if (!i.position.trim()) return 'Раздел 1: укажите должность/статус.'
   if (!i.place) return 'Раздел 1: укажите место сотрудничества.'
   if (!data.direction) return 'Раздел 2: укажите направление деятельности.'
   return null
@@ -268,7 +268,10 @@ async function save() {
         </label>
       </div>
       <div class="form-row">
-        <label class="form-field"><span>Должность *</span><input v-model="data.individual.position" /></label>
+        <label class="form-field">
+          <span>Должность/Статус *</span>
+          <input v-model="data.individual.position" placeholder="напр. фотограф, самозанятый" />
+        </label>
         <label class="form-field">
           <span>Место сотрудничества *</span>
           <select v-model="data.individual.place">

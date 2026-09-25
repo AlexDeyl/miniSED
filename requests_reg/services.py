@@ -265,6 +265,17 @@ def is_group_legal(participant: ApprovalParticipant) -> bool:
     return participant.role == constants.ROLE_LEGAL_DEPT and participant.b24_user_id is None
 
 
+def _lawyer_covers_security(participant: ApprovalParticipant, actor_b24_id) -> bool:
+    """Юрист решает за советника по безопасности на время передачи функций СБ."""
+    if participant.role != constants.ROLE_SECURITY_ADVISOR or not actor_b24_id:
+        return False
+    if participant.b24_user_id == actor_b24_id:
+        return False  # это и есть сам советник
+    from . import check
+
+    return check.delegation_active() and is_lawyer(actor_b24_id)
+
+
 @transaction.atomic
 def decide(request: RegulatoryRequest, participant_id, decision, comment="", *,
            actor_b24_id=None, admin_b24_id=None):
@@ -289,6 +300,17 @@ def decide(request: RegulatoryRequest, participant_id, decision, comment="", *,
                 raise RequestError("Согласовать этап юротдела может только сотрудник юридического отдела.")
             participant.b24_user_id = actor_b24_id
             participant.save(update_fields=["b24_user_id"])
+    elif admin_b24_id is None and _lawyer_covers_security(participant, actor_b24_id):
+        # Этап советника по безопасности, а функции СБ переданы юристам:
+        # заявка, ушедшая на круг до передачи, не должна ждать человека в
+        # отпуске. Этап закрывает юрист — и записывается в него сам.
+        log_action(
+            "security_approval_by_lawyer", target=request,
+            old_value={"b24_user_id": participant.b24_user_id},
+            new_value={"b24_user_id": actor_b24_id},
+        )
+        participant.b24_user_id = actor_b24_id
+        participant.save(update_fields=["b24_user_id"])
     elif (
         admin_b24_id is None
         and actor_b24_id is not None

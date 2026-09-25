@@ -161,7 +161,7 @@ def data_error(data) -> str | None:
         if not re.fullmatch(r"\d{10}", passport):
             return "Раздел 1: паспорт — 10 цифр (серия 4 + номер 6)."
         if not _s(ind, "position"):
-            return "Раздел 1: укажите должность."
+            return "Раздел 1: укажите должность/статус."
         place = ind.get("place")
         if place not in _codes(C.CHECK_PLACES) or place == C.CHECK_PLACE_MULTIPLE:
             return "Раздел 1: укажите место сотрудничества."
@@ -183,7 +183,7 @@ def summary_rows(req) -> list[tuple[str, str]]:
             ("ФИО", subject_name(data)),
             ("Дата рождения", ind.get("birth_date") or ""),
             ("Паспорт", ind.get("passport") or ""),
-            ("Должность", ind.get("position") or ""),
+            ("Должность/Статус", ind.get("position") or ""),
             ("Место сотрудничества", _label(C.CHECK_PLACES, ind.get("place"))),
             ("Направление деятельности", _label(C.CHECK_DIRECTIONS, data.get("direction"))),
         ]

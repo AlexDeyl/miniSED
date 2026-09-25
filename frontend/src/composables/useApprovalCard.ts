@@ -53,7 +53,11 @@ export function useApprovalCard(
   function isMine(p: ApprovalParticipant): boolean {
     if (p.type !== 'internal') return false
     // Групповой юрэтап закреплён не за человеком, а за юротделом.
-    return isGroupLegal(p) ? auth.isLawyer : p.b24_user_id === auth.b24UserId
+    if (isGroupLegal(p)) return auth.isLawyer
+    // Этап советника по безопасности, пока его функции у юристов (у юриста
+    // isSecurity только на время передачи) — решает любой юрист.
+    if (p.role === 'security_advisor' && auth.isLawyer && auth.isSecurity) return true
+    return p.b24_user_id === auth.b24UserId
   }
 
   const myPart = computed(() =>

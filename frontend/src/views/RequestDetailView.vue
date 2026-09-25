@@ -267,7 +267,7 @@ const checkRows = computed(() => {
     rows.push(
       ['Фамилия', i.last_name], ['Имя', i.first_name], ['Отчество', i.middle_name],
       ['Дата рождения', ruDate(i.birth_date)],
-      ['Данные паспорта', i.passport], ['Должность', i.position],
+      ['Данные паспорта', i.passport], ['Должность/Статус', i.position],
       ['Место сотрудничества', lbl('place', i.place)],
       ['Направление деятельности', lbl('direction', d.direction)],
     )
