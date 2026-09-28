@@ -123,7 +123,9 @@ def facets(base_qs, selected: dict[str, list[str]]) -> dict:
 
     rows = (
         apply(base_qs, selected, skip="status")
-        .values("status").annotate(n=Count("id"))
+        # order_by() обязателен: сортировка модели по -id иначе попадает в
+        # GROUP BY, и каждый статус считается по одной заявке.
+        .values("status").annotate(n=Count("id")).order_by()
     )
     by_status = {r["status"]: r["n"] for r in rows}
     # статусы — в порядке жизненного цикла, а не по количеству

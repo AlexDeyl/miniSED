@@ -75,7 +75,8 @@ class FilterTests(TestCase):
         self.assertEqual(inits, {"Иванова Анна": 2, "Петров Пётр": 2})  # черновик не считается
         self.assertIn({"value": "none", "label": "Без ЦФО", "count": 1}, f["cfo"])
         # статусы — в порядке жизненного цикла
-        self.assertEqual([x["value"] for x in f["status"]], ["to_legal", "legal_work", "closed"])
+        self.assertEqual([(x["value"], x["count"]) for x in f["status"]],
+                         [("to_legal", 2), ("legal_work", 1), ("closed", 1)])
 
         # отметили юрлицо — инициаторы пересчитались, а сами юрлица — нет
         f = self.q(LAWYER, f"/api/reg/requests/facets/?view=legal&organization={self.vv.id}").json()
