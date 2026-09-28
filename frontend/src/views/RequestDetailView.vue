@@ -137,6 +137,10 @@ const canSubmit = computed(
 // значит есть что дорабатывать.
 const canEdit = canSubmit
 const isLegalStage = computed(() => req.value && LEGAL_STATUSES.includes(req.value.status))
+// МЧД для СФР (коды СФР / КАДРЫ_СФР_ВУ_МУ) исполняет отдел внедрения и
+// разработки ПО; действия видит тот, у кого открыт раздел «Работа ИТ».
+const isDevStage = computed(() => req.value?.status === 'to_dev' || req.value?.status === 'dev_work')
+const devComment = ref('')
 // Отмена доступна до передачи юристам; удаление — только у отменённой.
 const canCancel = computed(
   () => isInitiator.value &&
@@ -721,7 +725,7 @@ onMounted(load)
 
       <DocumentsCard
         :docs="req.documents" :busy="busy"
-        :upload-label="isLegalStage ? 'Прикрепить скан доверенности' : 'Прикрепить документ'"
+        :upload-label="isLegalStage ? 'Прикрепить скан доверенности' : isDevStage ? 'Прикрепить файл МЧД' : 'Прикрепить документ'"
         hint="Правки: скачайте версию, измените локально и загрузите как «новую версию» — старая останется в истории. Файлы Word/Excel можно править прямо в браузере."
         @download="dl" @upload="fileInput?.click()"
         @add-version="pickVersion" @edit="(id) => (editingDocId = id)"
@@ -774,6 +778,30 @@ onMounted(load)
             @click="executeCheck"
           >Исполнено</button>
           <span v-if="checkBlocker" class="check-note" style="margin-left:8px">{{ checkBlocker }}</span>
+        </template>
+      </div>
+
+      <!-- МЧД для СФР: исполнение отделом внедрения и разработки ПО -->
+      <div v-if="isDevStage" class="detail-card">
+        <div class="detail-card-header">Исполнение (отдел внедрения и разработки ПО)</div>
+        <p class="muted" style="margin:0 0 10px">
+          МЧД с кодом СФР выпускается в спецпрограмме. Прикрепите файл выпущенной
+          МЧД в «Документах» — без него заявку не исполнить.
+        </p>
+        <template v-if="auth.isItSpecialist">
+          <button
+            v-if="req.status === 'to_dev'" class="btn btn--primary" :disabled="busy"
+            @click="run(() => requests.devTake(req!.id))"
+          >Взять в работу</button>
+          <div v-else class="form-row" style="align-items:flex-end">
+            <label class="form-field">
+              <span>Комментарий (необязательно)</span>
+              <input v-model="devComment" type="text" placeholder="например, номер МЧД в реестре" />
+            </label>
+            <button class="btn btn--primary" :disabled="busy" @click="run(() => requests.devExecute(req!.id, devComment))">
+              Исполнена
+            </button>
+          </div>
         </template>
       </div>
 

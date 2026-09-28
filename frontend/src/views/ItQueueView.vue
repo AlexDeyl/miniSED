@@ -25,7 +25,7 @@ const busy = ref(false)
 const error = ref<string | null>(null)
 
 const emptyText = computed(() => ({
-  new: 'Новых заявок на ЭЦП нет.',
+  new: 'Новых заявок нет.',
   work: 'В работе ничего нет.',
   archive: 'Архив пуст.',
   all: 'Заявок пока нет.',
@@ -73,7 +73,7 @@ onMounted(() => {
   <section>
     <SearchBox v-model="query" placeholder="Поиск: номер, ФИО, организация, имя файла" />
     <p v-if="query && !loading && !error" class="state" style="margin-bottom:8px">
-      Поиск идёт по всем заявкам на ЭЦП, независимо от вкладки. Найдено: {{ items.length }}.
+      Поиск идёт по всем заявкам раздела, независимо от вкладки. Найдено: {{ items.length }}.
     </p>
 
     <p v-if="loading" class="state">Загрузка…</p>
@@ -92,6 +92,16 @@ onMounted(() => {
             <span class="status-pill" :class="r.status">{{ r.status_display }}</span>
           </div>
           <div class="item-sub">{{ r.subject_name || '—' }} · {{ r.organization_name }}</div>
+
+          <!-- МЧД для СФР: выпуск в спецпрограмме, файл МЧД прикладывается в
+               карточке — поэтому «Исполнена» там, а здесь только «взять» -->
+          <div v-if="r.status === 'to_dev' || r.status === 'dev_work'" class="row-actions" style="margin-top:8px">
+            <button
+              v-if="r.status === 'to_dev'" class="btn btn--soft" :disabled="busy"
+              @click="act(() => requests.devTake(r.id))"
+            >Взять в работу</button>
+            <RouterLink :to="`/requests/${r.id}`" class="btn btn--primary">Открыть и исполнить</RouterLink>
+          </div>
 
           <div v-if="r.status === 'to_it' || r.status === 'it_work'" class="row-actions" style="margin-top:8px">
             <button

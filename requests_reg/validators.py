@@ -80,6 +80,17 @@ def is_machine_readable(request_type: str, data=None) -> bool:
     return d.get("poa_type") == constants.TYPE_MCHD or d.get("form") == constants.TYPE_MCHD
 
 
+def is_sfr_mchd(request_type: str, data=None) -> bool:
+    """МЧД для СФР: машиночитаемая, и среди кодов доверенности есть СФР или
+    КАДРЫ_СФР_ВУ_МУ. Такую выпускает отдел внедрения и разработки ПО в
+    спецпрограмме, поэтому и исполняет её он, а не юротдел. Бумажная
+    доверенность с тем же кодом — по-прежнему юристам."""
+    if not is_machine_readable(request_type, data):
+        return False
+    codes = (data or {}).get("power_templates") or []
+    return any(c in constants.SFR_POWER_CODES for c in codes)
+
+
 def is_gosuslugi(data) -> bool:
     """МЧД оформляется через Госуслуги (флажок в анкете).
 

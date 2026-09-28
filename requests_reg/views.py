@@ -24,7 +24,7 @@ from core.services import log_action
 from core.auth import can_view_all, get_current_b24_id, is_admin_mode, is_lawyer
 from core.search import query_param as _query_param
 
-from . import check, constants, filters, services
+from . import check, constants, filters, services, validators
 from .models import PowerTemplate, RegulatoryRequest, RoleAssignment, SecurityDelegation
 from .search import search
 from .serializers import (
@@ -226,6 +226,9 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
             or is_lawyer(self.b24_id)
             or can_view_all(self.b24_id)
             or (req.request_type == constants.TYPE_ECP and self._is_it_specialist(req))
+            # МЧД для СФР исполняет отдел внедрения и разработки ПО
+            or (self._is_sfr_executor()
+                and validators.is_sfr_mchd(req.request_type, req.data))
             # проверку лица исполняет СБ (или юрист на время передачи функций)
             or (req.request_type == constants.TYPE_CHECK and check.can_work_security(self.b24_id))
         )
@@ -461,8 +464,13 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
             return qs.filter(Q(facility=req.facility) | Q(facility__isnull=True)).exists()
         return qs.exists()
 
+    def _is_sfr_executor(self) -> bool:
+        return RoleAssignment.objects.filter(
+            role_code=constants.ROLE_SFR_EXECUTOR, user_b24_id=self.b24_id, is_active=True,
+        ).exists()
+
     def _require_it(self, req=None, *, read_only=False):
-        if self._is_it_specialist(req):
+        if self._is_it_specialist(req) or (req is None and self._is_sfr_executor()):
             return
         if read_only and can_view_all(self.b24_id):
             return
@@ -482,13 +490,55 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
             constants.IT_ALL_STATUSES if query
             else constants.IT_SCOPES.get(scope, constants.IT_QUEUE_STATUSES)
         )
+        # ЭЦП — ИТ-специалистам, МЧД для СФР — отделу внедрения; тот, кто
+        # только читает (сквозной просмотр), видит обе.
+        reader = not (self._is_it_specialist() or self._is_sfr_executor())
+        kinds = Q()
+        if self._is_it_specialist() or reader:
+            kinds |= Q(request_type=constants.TYPE_ECP)
+        if self._is_sfr_executor() or reader:
+            # новые и в работе — по статусу; архив — по исполнителю из отдела
+            # (выпущенная им МЧД в статусе «Исполнена»/«Закрыта»)
+            kinds |= Q(status__in=[constants.STATUS_TO_DEV, constants.STATUS_DEV_WORK]) | Q(
+                executor_b24_id__in=self._sfr_executor_ids(),
+            ) & ~Q(request_type=constants.TYPE_ECP)
         qs = (
-            RegulatoryRequest.objects.select_related("organization")
-            .filter(request_type=constants.TYPE_ECP, status__in=statuses)
+            RegulatoryRequest.objects.select_related("organization", "cfo")
+            .filter(kinds, status__in=statuses)
             .order_by("-id")
         )
         qs = search(qs, query)
-        return Response(RegulatoryRequestListSerializer(qs, many=True).data)
+        return Response(RegulatoryRequestListSerializer(
+            qs, many=True, context=_list_context(qs),
+        ).data)
+
+    @staticmethod
+    def _sfr_executor_ids():
+        return RoleAssignment.objects.filter(
+            role_code=constants.ROLE_SFR_EXECUTOR, is_active=True,
+        ).values_list("user_b24_id", flat=True)
+
+    def _require_dev(self):
+        if self._is_sfr_executor() or is_admin_mode(self.request):
+            return
+        raise PermissionDenied("Действие доступно отделу внедрения и разработки ПО.")
+
+    @action(detail=True, methods=["post"], url_path="dev_take")
+    def dev_take(self, request, pk=None):
+        req = self.get_object()
+        self._require_dev()
+        return self._run(
+            lambda: services.dev_take_in_work(req, by_b24_id=self.b24_id)
+        ) or self._detail(req)
+
+    @action(detail=True, methods=["post"], url_path="dev_execute")
+    def dev_execute(self, request, pk=None):
+        req = self.get_object()
+        self._require_dev()
+        return self._run(lambda: services.dev_execute(
+            req, by_b24_id=self.b24_id,
+            comment=(request.data.get("comment") or "").strip(),
+        )) or self._detail(req)
 
     @action(detail=True, methods=["post"], url_path="it_take")
     def it_take(self, request, pk=None):

@@ -109,6 +109,12 @@ export const requests = {
   itExecute: (id: number | string, comment = '') =>
     api.post<RegulatoryRequestDetail>(`${BASE}/${id}/it_execute/`, { comment }),
 
+  // --- МЧД для СФР: исполнение отделом внедрения и разработки ПО ---
+  devTake: (id: number | string) =>
+    api.post<RegulatoryRequestDetail>(`${BASE}/${id}/dev_take/`),
+  devExecute: (id: number | string, comment = '') =>
+    api.post<RegulatoryRequestDetail>(`${BASE}/${id}/dev_execute/`, { comment }),
+
   take: (id: number | string) => api.post<RegulatoryRequestDetail>(`${BASE}/${id}/take/`),
   toSigning: (id: number | string) => api.post<RegulatoryRequestDetail>(`${BASE}/${id}/to_signing/`),
   execute: (id: number | string, deliveryMethod: string, deliveryComment = '') =>

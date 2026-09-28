@@ -110,6 +110,11 @@ def _sync_status(request: RegulatoryRequest) -> None:
                 # остаётся «Согласована» — это «Новые» в разделе СБ
                 log_action("request_approved_to_security", target=request)
                 _notify("notify_security_queue", request)
+            elif validators.is_sfr_mchd(request.request_type, request.data):
+                # МЧД для СФР выпускает отдел внедрения и разработки ПО
+                _set(request, constants.STATUS_TO_DEV)
+                log_action("request_approved_to_dev", target=request)
+                _notify("notify_dev_queue", request)
             elif request.request_type == constants.TYPE_ECP:
                 # ЭЦП исполняет ИТ-специалист объекта, а не юротдел
                 _set(request, constants.STATUS_TO_IT)
@@ -415,6 +420,34 @@ def it_execute(request: RegulatoryRequest, *, by_b24_id=None, comment: str = "")
         executed_at=timezone.now(),
     )
     log_action("request_it_executed", target=request)
+    _notify("notify_initiator_executed", request)  # инициатору — подтвердите получение
+
+
+# --- Исполнение МЧД для СФР отделом внедрения и разработки ПО ---------------
+# Как у юристов, но без «на подписании»: МЧД выпускается в спецпрограмме.
+# Файл выпущенной МЧД обязателен — его скачает инициатор.
+def dev_take_in_work(request: RegulatoryRequest, *, by_b24_id=None):
+    if request.status != constants.STATUS_TO_DEV:
+        raise RequestError("Взять в работу можно только заявку, переданную в отдел внедрения.")
+    _set(request, constants.STATUS_DEV_WORK, executor_b24_id=by_b24_id,
+         taken_at=timezone.now())
+    log_action("request_dev_taken", target=request, new_value={"by_b24_id": by_b24_id})
+
+
+def dev_execute(request: RegulatoryRequest, *, by_b24_id=None, comment: str = ""):
+    if request.status not in (constants.STATUS_TO_DEV, constants.STATUS_DEV_WORK):
+        raise RequestError("Исполнить можно заявку, переданную в отдел внедрения или взятую в работу.")
+    if not request.documents.filter(deleted_at__isnull=True).exclude(
+        document_type="anketa"
+    ).exists():
+        raise RequestError("Прикрепите файл выпущенной МЧД перед исполнением.")
+    _set(
+        request, constants.STATUS_EXECUTED,
+        executor_b24_id=by_b24_id or request.executor_b24_id,
+        delivery_comment=comment or request.delivery_comment,
+        executed_at=timezone.now(),
+    )
+    log_action("request_dev_executed", target=request, new_value={"by_b24_id": by_b24_id})
     _notify("notify_initiator_executed", request)  # инициатору — подтвердите получение
 
 

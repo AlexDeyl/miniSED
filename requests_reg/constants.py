@@ -42,6 +42,10 @@ STATUS_SIGNING = "signing"
 # статусов, иначе в карточке ЭЦП было бы написано «Передана юристам».
 STATUS_TO_IT = "to_it"
 STATUS_IT_WORK = "it_work"
+# МЧД для СФР (коды СФР, КАДРЫ_СФР_ВУ_МУ) выпускает не юротдел, а отдел
+# внедрения и разработки ПО через спецпрограмму — своя пара статусов.
+STATUS_TO_DEV = "to_dev"
+STATUS_DEV_WORK = "dev_work"
 # Проверку лица после согласования берёт в работу служба безопасности.
 # «Согласована» у неё — это и есть «Новые» в разделе СБ (статус по ТЗ не
 # меняется до «Взять в работу»), поэтому отдельного «передана СБ» нет.
@@ -61,6 +65,8 @@ STATUS_CHOICES = [
     (STATUS_SIGNING, "На подписании"),
     (STATUS_TO_IT, "Передана ИТ-специалисту"),
     (STATUS_IT_WORK, "В работе у ИТ-специалиста"),
+    (STATUS_TO_DEV, "Передана в отдел внедрения и разработки"),
+    (STATUS_DEV_WORK, "В работе у отдела внедрения и разработки"),
     (STATUS_CHECK_WORK, "На исполнении"),
     (STATUS_EXECUTED, "Исполнена"),
     (STATUS_CLOSED, "Закрыта"),
@@ -89,11 +95,12 @@ REVOCABLE_STATUSES = [
     STATUS_EXECUTED, STATUS_CLOSED,
 ]
 
-# --- раздел «Работа ИТ»: исполнение заявок на ЭЦП ------------------------
+# --- раздел «Работа ИТ»: исполнение заявок на ЭЦП и МЧД для СФР -----------
 # Устроен так же, как очередь юротдела: Новые / В работе / Архив / Все.
-IT_QUEUE_STATUSES = [STATUS_TO_IT, STATUS_IT_WORK]
-IT_NEW_STATUSES = [STATUS_TO_IT]
-IT_WORK_STATUSES = [STATUS_IT_WORK]
+# Кто что видит — по роли: ИТ-специалист — ЭЦП, отдел внедрения — МЧД СФР.
+IT_QUEUE_STATUSES = [STATUS_TO_IT, STATUS_IT_WORK, STATUS_TO_DEV, STATUS_DEV_WORK]
+IT_NEW_STATUSES = [STATUS_TO_IT, STATUS_TO_DEV]
+IT_WORK_STATUSES = [STATUS_IT_WORK, STATUS_DEV_WORK]
 IT_ARCHIVE_STATUSES = [STATUS_EXECUTED, STATUS_CLOSED, STATUS_REJECTED, STATUS_CANCELED]
 IT_ALL_STATUSES = [c for c, _ in STATUS_CHOICES if c != STATUS_DRAFT]
 IT_SCOPES = {
@@ -185,6 +192,8 @@ ROLE_CEO_ASSISTANT = "ceo_assistant"
 ROLE_CONFECTIONER = "confectioner"
 # Согласует проверку физлица и исполняет проверки в разделе СБ.
 ROLE_SECURITY_ADVISOR = "security_advisor"
+# Исполнитель МЧД с кодами СФР — руководитель отдела внедрения и разработки ПО.
+ROLE_SFR_EXECUTOR = "sfr_executor"
 
 ROLE_NAMES = {
     ROLE_CFO_HEAD: "Руководитель ЦФО",
@@ -202,7 +211,12 @@ ROLE_NAMES = {
     ROLE_CEO_ASSISTANT: "Помощник генерального директора",
     ROLE_CONFECTIONER: "Кондитерский цех",
     ROLE_SECURITY_ADVISOR: "Советник генерального директора по безопасности",
+    ROLE_SFR_EXECUTOR: "Исполнитель МЧД для СФР (отдел внедрения и разработки ПО)",
 }
+
+# Коды доверенности, с которыми МЧД выпускает отдел внедрения и разработки
+# (спецпрограмма для отчётности в СФР), а не юротдел.
+SFR_POWER_CODES = ["СФР", "КАДРЫ_СФР_ВУ_МУ"]
 
 
 def number_prefix(request_type: str) -> str:

@@ -235,6 +235,22 @@ def notify_it_queue(request):
               link=_card_link(request), link_text="Открыть заявку")
 
 
+def notify_dev_queue(request):
+    """Отделу внедрения и разработки — согласована МЧД для СФР (коды СФР /
+    КАДРЫ_СФР_ВУ_МУ), её надо выпустить в спецпрограмме."""
+    from .models import RoleAssignment
+    from . import constants
+
+    ids = list(
+        RoleAssignment.objects.filter(role_code=constants.ROLE_SFR_EXECUTOR, is_active=True)
+        .values_list("user_b24_id", flat=True)
+    )
+    b24, emails = _recipients(ids)
+    _dispatch(b24, emails, "Новая МЧД для СФР на исполнение",
+              f"Согласована МЧД для СФР, требуется выпуск: {_label(request)}",
+              link=_card_link(request), link_text="Открыть заявку")
+
+
 def notify_it_department(request):
     """ИТ-отделу ОБЪЕКТА — полный комплект по согласованной заявке на ЭЦП.
 

@@ -63,8 +63,11 @@ def _is_it_specialist(b24_id) -> bool:
     from requests_reg import constants as R
     from requests_reg.models import RoleAssignment
 
+    # Раздел «Работа ИТ» нужен и ИТ-специалисту (ЭЦП), и исполнителю МЧД
+    # для СФР (отдел внедрения и разработки ПО).
     return RoleAssignment.objects.filter(
-        role_code=R.ROLE_IT_SPECIALIST, user_b24_id=b24_id, is_active=True
+        role_code__in=[R.ROLE_IT_SPECIALIST, R.ROLE_SFR_EXECUTOR],
+        user_b24_id=b24_id, is_active=True,
     ).exists()
 
 

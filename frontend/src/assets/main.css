@@ -221,6 +221,9 @@ a { color: var(--green-main); text-decoration: none; }
    с юротдельскими. */
 .status-pill.to_it { background: #00838f; }
 .status-pill.it_work { background: #0277bd; }
+/* МЧД для СФР — у отдела внедрения и разработки ПО */
+.status-pill.to_dev { background: #00695c; }
+.status-pill.dev_work { background: #283593; }
 /* Проверка лица на исполнении у службы безопасности */
 .status-pill.check_work { background: #5d4037; }
 .status-pill.signing { background: #0288d1; }

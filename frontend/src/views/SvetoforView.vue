@@ -102,7 +102,8 @@ const TAB_STATUSES: Record<string, Record<WorkKind, string[]>> = {
   },
   completed: {
     agreement: ['completed'],
-    request: ['approved', 'to_legal', 'legal_work', 'signing', 'executed', 'closed'],
+    request: ['approved', 'to_legal', 'legal_work', 'signing', 'to_it', 'it_work',
+      'to_dev', 'dev_work', 'executed', 'closed'],
     contract: ['approved'],
     compliment: ['approved', 'in_work', 'executed'],
   },
