@@ -294,6 +294,8 @@ async function prefill(id: string) {
           ...r.source_request_info,
           organization: r.organization,
           organization_name: r.organization_name,
+          cfo_name: '',
+          initiator_name: '',
           created_at: r.created_at,
         }
       }

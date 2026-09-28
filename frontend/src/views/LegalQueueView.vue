@@ -6,8 +6,9 @@ import { ApiError } from '@/services/api'
 import { useAdminModeStore } from '@/stores/adminMode'
 import { useLegalUiStore } from '@/stores/legalUi'
 import SearchBox from '@/components/SearchBox.vue'
+import RequestFilterPanel from '@/components/RequestFilterPanel.vue'
 import SecurityDelegationBar from '@/components/SecurityDelegationBar.vue'
-import type { RegulatoryRequestListItem } from '@/types/request'
+import type { RegulatoryRequestListItem, RequestFilters } from '@/types/request'
 
 // Режим администратора: при переключении список надо перезагрузить —
 // сервер отдаёт другую выборку.
@@ -17,6 +18,10 @@ const adminMode = useAdminModeStore()
 // При непустом запросе сервер ищет по ВСЕМ статусам, а не только по вкладке:
 // когда ищут дубль, статус заранее неизвестен.
 const query = ref('')
+// Отбор галочками (компания, инициатор, ЦФО, статус). Как и поиск, идёт по
+// всем заявкам юротдела, мимо вкладки.
+const filters = ref<RequestFilters>({})
+const filtering = computed(() => Object.values(filters.value).some((v) => v?.length))
 const items = ref<RegulatoryRequestListItem[]>([])
 const loading = ref(true)
 const error = ref<string | null>(null)
@@ -34,7 +39,7 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    items.value = await requests.legalQueue(legalUi.scope, query.value || undefined)
+    items.value = await requests.legalQueue(legalUi.scope, query.value || undefined, filters.value)
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Не удалось загрузить'
   } finally {
@@ -42,7 +47,7 @@ async function load() {
   }
 }
 
-watch([() => legalUi.scope, query, () => adminMode.active], load)
+watch([() => legalUi.scope, query, () => adminMode.active, filters], load, { deep: true })
 onMounted(load)
 </script>
 
@@ -52,14 +57,16 @@ onMounted(load)
          на время её отсутствия -->
     <SecurityDelegationBar />
     <SearchBox v-model="query" placeholder="Поиск: номер, ФИО, паспорт, организация, имя файла" />
-    <p v-if="query && !loading && !error" class="state" style="margin-bottom:8px">
-      Поиск идёт по всем заявкам юротдела, независимо от вкладки. Найдено: {{ items.length }}.
+    <RequestFilterPanel v-model="filters" view="legal" :q="query || undefined" />
+    <p v-if="(query || filtering) && !loading && !error" class="state" style="margin-bottom:8px">
+      {{ filtering && !query ? 'Отбор' : 'Поиск' }} идёт по всем заявкам юротдела, независимо от вкладки.
+      Найдено: {{ items.length }}.
     </p>
 
     <p v-if="loading" class="state">Загрузка…</p>
     <p v-else-if="error" class="state state--error">{{ error }}</p>
     <p v-else-if="items.length === 0" class="state">
-      {{ query ? 'Ничего не найдено.' : emptyText }}
+      {{ query || filtering ? 'Ничего не найдено.' : emptyText }}
     </p>
 
     <ul v-else class="item-list">
@@ -69,7 +76,10 @@ onMounted(load)
             <span class="item-title">{{ r.number }} · {{ r.type_display }}</span>
             <span class="status-pill" :class="r.status">{{ r.status_display }}</span>
           </div>
-          <div class="item-sub">{{ r.subject_name || '—' }} · {{ r.organization_name }}</div>
+          <div class="item-sub">
+            {{ [r.subject_name || '—', r.organization_name, r.cfo_name].filter(Boolean).join(' · ') }}
+          </div>
+          <div v-if="r.initiator_name" class="item-sub">Инициатор: {{ r.initiator_name }}</div>
         </RouterLink>
       </li>
     </ul>

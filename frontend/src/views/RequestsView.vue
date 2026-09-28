@@ -6,7 +6,8 @@ import { ApiError } from '@/services/api'
 import { useAdminModeStore } from '@/stores/adminMode'
 import { useRequestsUiStore } from '@/stores/requestsUi'
 import SearchBox from '@/components/SearchBox.vue'
-import type { RegulatoryRequestListItem } from '@/types/request'
+import RequestFilterPanel from '@/components/RequestFilterPanel.vue'
+import type { RegulatoryRequestListItem, RequestFilters } from '@/types/request'
 
 // Режим администратора: при переключении список надо перезагрузить —
 // сервер отдаёт другую выборку.
@@ -14,6 +15,8 @@ const adminMode = useAdminModeStore()
 
 // Поиск по номеру, ФИО сотрудника, организации и анкете доверенности.
 const query = ref('')
+// Отбор галочками: компания, инициатор, ЦФО, статус.
+const filters = ref<RequestFilters>({})
 const items = ref<RegulatoryRequestListItem[]>([])
 const loading = ref(true)
 const error = ref<string | null>(null)
@@ -25,7 +28,9 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    items.value = await requests.list(reqUi.typeFilter || undefined, query.value || undefined)
+    items.value = await requests.list(
+      reqUi.typeFilter || undefined, query.value || undefined, undefined, filters.value,
+    )
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Не удалось загрузить'
   } finally {
@@ -33,7 +38,7 @@ async function load() {
   }
 }
 
-watch([() => reqUi.typeFilter, query, () => adminMode.active], load)
+watch([() => reqUi.typeFilter, query, () => adminMode.active, filters], load, { deep: true })
 onMounted(load)
 </script>
 
@@ -50,11 +55,15 @@ onMounted(load)
     </Teleport>
 
     <SearchBox v-model="query" placeholder="Поиск: номер, ФИО, паспорт, организация, имя файла" />
+    <RequestFilterPanel
+      v-model="filters" view="mine"
+      :type="reqUi.typeFilter || undefined" :q="query || undefined"
+    />
 
     <p v-if="loading" class="state">Загрузка…</p>
     <p v-else-if="error" class="state state--error">{{ error }}</p>
     <p v-else-if="items.length === 0" class="state">
-      {{ query ? 'Ничего не найдено.' : 'Заявок пока нет.' }}
+      {{ query || Object.values(filters).some((v) => v?.length) ? 'Ничего не найдено.' : 'Заявок пока нет.' }}
     </p>
 
     <ul v-else class="item-list">
@@ -65,7 +74,7 @@ onMounted(load)
             <span class="status-pill" :class="r.status">{{ r.status_display }}</span>
           </div>
           <div class="item-sub">
-            {{ r.subject_name || '—' }} · {{ r.organization_name }}
+            {{ [r.subject_name || '—', r.organization_name, r.cfo_name].filter(Boolean).join(' · ') }}
           </div>
         </RouterLink>
       </li>

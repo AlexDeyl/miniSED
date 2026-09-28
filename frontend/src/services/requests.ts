@@ -2,6 +2,8 @@ import { api } from './api'
 import type { ParticipantInput } from '@/types/approval'
 import type {
   CheckResult,
+  RequestFacets,
+  RequestFilters,
   RegulatoryRequestDetail,
   RegulatoryRequestListItem,
   RequestCreatePayload,
@@ -9,6 +11,13 @@ import type {
 } from '@/types/request'
 
 const BASE = '/reg/requests'
+
+// Галочки отбора → параметры запроса: значения поля через запятую.
+function putFilters(p: URLSearchParams, f?: RequestFilters) {
+  for (const [k, v] of Object.entries(f || {})) {
+    if (v && v.length) p.set(k, v.join(','))
+  }
+}
 
 export interface Organization { id: number; short_name: string }
 export interface Facility { id: number; name: string; organization: number }
@@ -27,11 +36,12 @@ export const requests = {
   // q — поиск по номеру, ФИО, организации и анкете доверенности.
   // scope: mine — созданные мной (по умолчанию), participant — где я
   // согласующий (этим живёт рабочее место визирования), all — и то, и другое.
-  list: (type?: string, q?: string, scope?: 'mine' | 'participant' | 'all') => {
+  list: (type?: string, q?: string, scope?: 'mine' | 'participant' | 'all', filters?: RequestFilters) => {
     const p = new URLSearchParams()
     if (type) p.set('type', type)
     if (q) p.set('q', q)
     if (scope) p.set('scope', scope)
+    putFilters(p, filters)
     const qs = p.toString()
     return api.get<RegulatoryRequestListItem[]>(`${BASE}/${qs ? `?${qs}` : ''}`)
   },
@@ -67,12 +77,24 @@ export const requests = {
     }),
 
   // При непустом q сервер ищет по ВСЕМ статусам, игнорируя вкладку (ищут дубли).
-  legalQueue: (scope?: string, q?: string) => {
+  // Отмеченные галочки, как и поиск, ищут по всем статусам, мимо вкладки.
+  legalQueue: (scope?: string, q?: string, filters?: RequestFilters) => {
     const p = new URLSearchParams()
     if (scope) p.set('scope', scope)
     if (q) p.set('q', q)
+    putFilters(p, filters)
     const qs = p.toString()
     return api.get<RegulatoryRequestListItem[]>(`${BASE}/legal_queue/${qs ? `?${qs}` : ''}`)
+  },
+  // Варианты галочек отбора со счётчиками. view: mine — «Регламентные
+  // заявки» (своя видимость), legal — «Работа юристов».
+  facets: (view: 'mine' | 'legal', opts: { type?: string; q?: string; filters?: RequestFilters } = {}) => {
+    const p = new URLSearchParams()
+    if (view === 'legal') p.set('view', 'legal')
+    if (opts.type) p.set('type', opts.type)
+    if (opts.q) p.set('q', opts.q)
+    putFilters(p, opts.filters)
+    return api.get<RequestFacets>(`${BASE}/facets/?${p.toString()}`)
   },
   // --- исполнение заявок на ЭЦП (ИТ-специалист объекта) ---
   itQueue: (scope?: string, q?: string) => {

@@ -68,8 +68,16 @@ export interface RegulatoryRequestListItem {
   subject_name: string
   organization: number
   organization_name: string
+  cfo_name: string
+  initiator_name: string
   created_at: string
 }
+
+// Отбор «как в 1С»: выбранные значения по полям (ИЛИ внутри поля, И между).
+export type RequestFilterField = 'organization' | 'initiator' | 'cfo' | 'status'
+export type RequestFilters = Partial<Record<RequestFilterField, string[]>>
+export interface FacetOption { value: string; label: string; count: number }
+export type RequestFacets = Record<RequestFilterField, FacetOption[]>
 
 export interface RegulatoryRequestDetail extends RegulatoryRequestListItem {
   facility: number | null

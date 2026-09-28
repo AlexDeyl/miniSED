@@ -24,7 +24,7 @@ from core.services import log_action
 from core.auth import can_view_all, get_current_b24_id, is_admin_mode, is_lawyer
 from core.search import query_param as _query_param
 
-from . import check, constants, services
+from . import check, constants, filters, services
 from .models import PowerTemplate, RegulatoryRequest, RoleAssignment, SecurityDelegation
 from .search import search
 from .serializers import (
@@ -115,6 +115,17 @@ def _participants(data):
     ]
 
 
+def _list_context(qs) -> dict:
+    """ФИО инициаторов для строк списка — одним запросом на всю выборку."""
+    from core.models import UserProfile
+
+    ids = {i for i in qs.values_list("initiator_b24_id", flat=True) if i}
+    names = dict(
+        UserProfile.objects.filter(bitrix_id__in=ids).values_list("bitrix_id", "fio")
+    )
+    return {"initiator_names": names}
+
+
 @method_decorator(csrf_exempt, name="dispatch")
 class RegulatoryRequestViewSet(viewsets.ModelViewSet):
     permission_classes = [AllowAny]
@@ -132,6 +143,12 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
         if self.action in ("list", "legal_queue"):
             return RegulatoryRequestListSerializer
         return RegulatoryRequestDetailSerializer
+
+    def list(self, request, *args, **kwargs):
+        qs = self.get_queryset()
+        return Response(RegulatoryRequestListSerializer(
+            qs, many=True, context=_list_context(qs),
+        ).data)
 
     def _participant_request_ids(self):
         """ID заявок, где я согласующий (в любом круге).
@@ -152,14 +169,25 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
         )
 
     def get_queryset(self):
-        qs = RegulatoryRequest.objects.select_related("organization")
+        qs = self._scoped_qs()
+        if self.action == "list":
+            qs = filters.apply(qs, filters.parse(self.request.query_params))
+        return qs
+
+    def _scoped_qs(self):
+        """Выборка до галочек отбора: видимость (scope), тип и строка поиска.
+        От неё же считаются варианты галочек (facets)."""
+        qs = RegulatoryRequest.objects.select_related("organization", "cfo")
         # Раздел «Регламентные заявки» = только СВОИ (созданные мной);
         # ?scope=participant — где я согласующий (рабочее место визирования),
         # ?scope=all — и то, и другое. Сотрудник с правом сквозного просмотра
         # видит все заявки.
-        if self.action == "list" and is_admin_mode(self.request):
+        # facets считаются по той же видимости, что и список, — иначе в
+        # галочках всплыли бы чужие инициаторы и юрлица.
+        listing = self.action in ("list", "facets")
+        if listing and is_admin_mode(self.request):
             pass  # режим администратора — все заявки, без отбора
-        elif self.action == "list":
+        elif listing:
             scope = self.request.query_params.get("scope") or "mine"
             mine = Q(initiator_b24_id=self.b24_id)
             participant = Q(id__in=self._participant_request_ids())
@@ -176,10 +204,7 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
         rtype = self.request.query_params.get("type")
         if rtype:
             qs = qs.filter(request_type=rtype)
-        status_f = self.request.query_params.get("status")
-        if status_f:
-            qs = qs.filter(status=status_f)
-        if self.action == "list":
+        if self.action in ("list", "facets"):
             qs = search(qs, _query_param(self.request, "q"))
         return qs
 
@@ -378,21 +403,47 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
         self._require_lawyer(read_only=True)
         # scope: new (новые) / work (в работе) / archive (закрытые) / all;
         # по умолчанию — активные
+        selected = filters.parse(request.query_params)
+        qs = filters.apply(self._legal_base_qs(bool(selected)), selected)
+        return Response(RegulatoryRequestListSerializer(
+            qs, many=True, context=_list_context(qs),
+        ).data)
+
+    def _legal_base_qs(self, filtering: bool):
+        """Очередь юротдела до галочек. При поиске и при отборе вкладка не
+        сужает выборку: ищут дубли или всё по контрагенту, а в каком статусе
+        лежит найденное — заранее неизвестно. Фронт об этом предупреждает."""
+        request = self.request
         scope = (request.query_params.get("scope") or "").strip()
         query = _query_param(request, "q").strip()
-        # При поиске вкладка не сужает выборку: ищут дубли, а в каком статусе
-        # лежит найденное — заранее неизвестно. Фронт об этом предупреждает.
         statuses = (
-            constants.LEGAL_ALL_STATUSES if query
+            constants.LEGAL_ALL_STATUSES if (query or filtering)
             else constants.LEGAL_SCOPES.get(scope, constants.LEGAL_QUEUE_STATUSES)
         )
         qs = (
-            RegulatoryRequest.objects.select_related("organization")
+            RegulatoryRequest.objects.select_related("organization", "cfo")
             .filter(status__in=statuses)
             .order_by("-id")
         )
-        qs = search(qs, query)
-        return Response(RegulatoryRequestListSerializer(qs, many=True).data)
+        rtype = request.query_params.get("type")
+        if rtype:
+            qs = qs.filter(request_type=rtype)
+        return search(qs, query)
+
+    @action(detail=False, methods=["get"])
+    def facets(self, request):
+        """Варианты галочек отбора (компания, инициатор, ЦФО, статус) — только
+        то, что есть в доступной выборке, со счётчиками.
+
+        ?view=legal — для «Работы юристов» (все отправленные заявки), иначе —
+        для раздела «Регламентные заявки» (та же видимость, что у списка)."""
+        selected = filters.parse(request.query_params)
+        if request.query_params.get("view") == "legal":
+            self._require_lawyer(read_only=True)
+            base = self._legal_base_qs(True)
+        else:
+            base = self._scoped_qs()
+        return Response(filters.facets(base, selected))
 
     # --- исполнение заявок на ЭЦП (ИТ-специалист объекта) ---
     def _is_it_specialist(self, req=None) -> bool:

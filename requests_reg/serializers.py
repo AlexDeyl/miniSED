@@ -23,14 +23,35 @@ class RegulatoryRequestListSerializer(serializers.ModelSerializer):
     type_display = serializers.CharField(source="get_request_type_display", read_only=True)
     status_display = serializers.CharField(source="status_label", read_only=True)
     organization_name = serializers.CharField(source="organization.short_name", read_only=True)
+    cfo_name = serializers.SerializerMethodField()
+    initiator_name = serializers.SerializerMethodField()
 
     class Meta:
         model = RegulatoryRequest
         fields = [
             "id", "number", "request_type", "type_display",
             "status", "status_display", "subject_name",
-            "organization", "organization_name", "created_at",
+            "organization", "organization_name", "cfo_name",
+            "initiator_b24_id", "initiator_name", "created_at",
         ]
+
+    def get_cfo_name(self, obj):
+        return obj.cfo.name if obj.cfo_id else ""
+
+    def get_initiator_name(self, obj):
+        """ФИО инициатора: из контекста списка (одним запросом), иначе — из
+        профиля; пусто, если профиля нет."""
+        names = self.context.get("initiator_names")
+        if names is not None:
+            return names.get(obj.initiator_b24_id, "")
+        if not obj.initiator_b24_id:
+            return ""
+        from core.models import UserProfile
+
+        return (
+            UserProfile.objects.filter(bitrix_id=obj.initiator_b24_id)
+            .values_list("fio", flat=True).first() or ""
+        )
 
 
 def _card_ref(req) -> dict | None:
