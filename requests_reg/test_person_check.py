@@ -18,6 +18,7 @@ INITIATOR = 1
 SECURITY = 40
 LAWYER = 30
 STRANGER = 99
+HR_HEAD = 50
 
 
 def api(uid):
@@ -62,6 +63,9 @@ class _CheckBase(TestCase):
         RoleAssignment.objects.create(
             role_code=C.ROLE_SECURITY_ADVISOR, user_b24_id=SECURITY, user_name="Советник СБ",
         )
+        RoleAssignment.objects.create(
+            role_code=C.ROLE_HR_HEAD, user_b24_id=HR_HEAD, user_name="Руководитель персонала",
+        )
         p = UserProfile.objects.create(fio="Юрист Юрьев", bitrix_id=LAWYER, is_active=True)
         p.roles.add(Role.objects.get(code="lawyer"))
 
@@ -82,8 +86,10 @@ class _CheckBase(TestCase):
         return r.json()
 
     def _approve(self, rid, uid):
+        """Решение по ТЕКУЩЕМУ этапу (первый ожидающий в последнем круге)."""
         body = api(INITIATOR).get(f"/api/reg/requests/{rid}/").json()
-        pid = body["approval"]["rounds"][-1]["participants"][0]["id"]
+        parts = sorted(body["approval"]["rounds"][-1]["participants"], key=lambda p: p["order"])
+        pid = next(p for p in parts if p["decision"] == "waiting")["id"]
         return api(uid).post(f"/api/reg/requests/{rid}/decide/", {
             "participant_id": pid, "decision": "approve",
         }, format="json")
@@ -99,6 +105,7 @@ class _CheckBase(TestCase):
     def _approved_individual(self):
         rid = self._create(individual_data()).json()["id"]
         self._submit(rid)
+        self.assertEqual(self._approve(rid, HR_HEAD).json()["status"], C.STATUS_ON_APPROVAL)
         self.assertEqual(self._approve(rid, SECURITY).json()["status"], C.STATUS_APPROVED)
         return rid
 
@@ -143,11 +150,22 @@ class PersonCheckTests(_CheckBase):
         self.assertEqual(self._create(legal_data(inn_ogrn="1027700132195")).status_code, 201)
 
     # --- маршрут ---
-    def test_route_individual_is_security_advisor(self):
+    def test_route_individual_is_hr_head_then_security_advisor(self):
         rid = self._create(individual_data()).json()["id"]
         route = api(INITIATOR).get(f"/api/reg/requests/{rid}/route_preview/").json()["route"]
-        self.assertEqual([s["role_code"] for s in route], [C.ROLE_SECURITY_ADVISOR])
-        self.assertEqual(route[0]["b24_user_id"], SECURITY)
+        self.assertEqual([s["role_code"] for s in route], [C.ROLE_HR_HEAD, C.ROLE_SECURITY_ADVISOR])
+        self.assertEqual([s["b24_user_id"] for s in route], [HR_HEAD, SECURITY])
+
+    def test_security_waits_for_hr_head(self):
+        """Советник не может согласовать раньше руководителя персонала."""
+        rid = self._create(individual_data()).json()["id"]
+        body = self._submit(rid)
+        sec = next(p for p in body["approval"]["rounds"][0]["participants"]
+                   if p["role"] == C.ROLE_SECURITY_ADVISOR)
+        r = api(SECURITY).post(f"/api/reg/requests/{rid}/decide/", {
+            "participant_id": sec["id"], "decision": "approve",
+        }, format="json")
+        self.assertEqual(r.status_code, 400)
 
     def test_route_legal_is_legal_group(self):
         rid = self._create(legal_data()).json()["id"]
@@ -166,8 +184,8 @@ class PersonCheckTests(_CheckBase):
     def test_reject_requires_reason(self):
         rid = self._create(individual_data()).json()["id"]
         body = self._submit(rid)
-        pid = body["approval"]["rounds"][0]["participants"][0]["id"]
-        r = api(SECURITY).post(f"/api/reg/requests/{rid}/decide/", {
+        pid = body["approval"]["rounds"][0]["participants"][0]["id"]  # руководитель персонала
+        r = api(HR_HEAD).post(f"/api/reg/requests/{rid}/decide/", {
             "participant_id": pid, "decision": "reject", "comment": "",
         }, format="json")
         self.assertEqual(r.status_code, 400)
@@ -273,6 +291,7 @@ class PersonCheckNotificationTests(_CheckBase):
 
         rid = self._create(individual_data()).json()["id"]
         self._submit(rid)
+        self._approve(rid, HR_HEAD)
         with self.captureOnCommitCallbacks(execute=True):
             self._approve(rid, SECURITY)
         self.assertTrue(any("sb@x.ru" in m.to for m in mail.outbox
@@ -299,21 +318,24 @@ class DelegatedApprovalTests(_CheckBase):
     def test_route_default_is_security_advisor(self):
         rid = self._create(individual_data()).json()["id"]
         route = api(INITIATOR).get(f"/api/reg/requests/{rid}/route_preview/").json()["route"]
-        self.assertEqual((route[0]["role_code"], route[0]["b24_user_id"], route[0]["needs_manual"]),
+        self.assertEqual((route[1]["role_code"], route[1]["b24_user_id"], route[1]["needs_manual"]),
                          (C.ROLE_SECURITY_ADVISOR, SECURITY, False))
 
     def test_route_during_delegation_is_legal_group(self):
         self._delegate()
         rid = self._create(individual_data()).json()["id"]
         route = api(INITIATOR).get(f"/api/reg/requests/{rid}/route_preview/").json()["route"]
-        self.assertEqual([s["role_code"] for s in route], [C.ROLE_LEGAL_DEPT])
-        self.assertTrue(route[0]["group"])
+        # руководитель персонала остаётся первым, СБ заменяет юротдел
+        self.assertEqual([s["role_code"] for s in route], [C.ROLE_HR_HEAD, C.ROLE_LEGAL_DEPT])
+        self.assertTrue(route[1]["group"])
         self._submit(rid)
+        self._approve(rid, HR_HEAD)
         self.assertEqual(self._approve(rid, LAWYER).json()["status"], C.STATUS_APPROVED)
 
     def test_lawyer_closes_pending_security_stage_after_delegation(self):
         rid = self._create(individual_data()).json()["id"]
-        self._submit(rid)  # ушла на Золотько (SECURITY)
+        self._submit(rid)
+        self._approve(rid, HR_HEAD)  # дальше — Золотько (SECURITY)
         # без передачи юрист решать не может
         self.assertEqual(self._approve(rid, LAWYER).status_code, 400)
         self.assertEqual(api(LAWYER).get("/api/reg/requests/todo/").json(), [])
@@ -322,13 +344,15 @@ class DelegatedApprovalTests(_CheckBase):
         self.assertEqual([x["id"] for x in api(LAWYER).get("/api/reg/requests/todo/").json()], [rid])
         r = self._approve(rid, LAWYER)
         self.assertEqual(r.json()["status"], C.STATUS_APPROVED)
-        part = r.json()["approval"]["rounds"][0]["participants"][0]
+        part = next(p for p in r.json()["approval"]["rounds"][0]["participants"]
+                    if p["role"] == C.ROLE_SECURITY_ADVISOR)
         self.assertEqual(part["b24_user_id"], LAWYER)  # записан тот, кто решил
         self.assertTrue(AuditLog.objects.filter(action="security_approval_by_lawyer").exists())
 
     def test_stranger_cannot_close_security_stage_even_during_delegation(self):
         rid = self._create(individual_data()).json()["id"]
         self._submit(rid)
+        self._approve(rid, HR_HEAD)
         self._delegate()
         # посторонний карточку даже не видит (404), решение не принимается
         self.assertIn(self._approve(rid, STRANGER).status_code, (400, 404))

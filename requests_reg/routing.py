@@ -129,16 +129,24 @@ def _legal_group_slot(order: int) -> dict:
 
 
 def check_route(request: RegulatoryRequest) -> list[dict]:
-    """Маршрут проверки лица: один этап, по типу лица (ТЗ, «Согласование»)."""
+    """Маршрут проверки лица по типу лица (ТЗ, «Согласование»).
+
+    Юрлицо — один этап, юротдел. Физлицо — сначала руководитель службы
+    персонала (уточнение заказчика: физлиц заводит отдел персонала, и его
+    руководитель визирует заявку первым), затем советник по безопасности —
+    или юротдел, если функции СБ переданы юристам."""
     from . import check
 
-    if check.is_individual(request):
-        # Функции СБ переданы юристам (СБ в отпуске) — согласует любой юрист,
-        # тем же групповым этапом, что и у юрлица.
-        if check.delegation_active():
-            return [_legal_group_slot(0)]
-        return [_slot(0, C.ROLE_SECURITY_ADVISOR, resolve_role(C.ROLE_SECURITY_ADVISOR, request))]
-    return [_legal_group_slot(0)]
+    if not check.is_individual(request):
+        return [_legal_group_slot(0)]
+    route = [_slot(0, C.ROLE_HR_HEAD, resolve_role(C.ROLE_HR_HEAD, request))]
+    if check.delegation_active():
+        # СБ в отпуске — согласует любой юрист, тем же групповым этапом,
+        # что и у юрлица.
+        route.append(_legal_group_slot(1))
+    else:
+        route.append(_slot(1, C.ROLE_SECURITY_ADVISOR, resolve_role(C.ROLE_SECURITY_ADVISOR, request)))
+    return route
 
 
 def resolve_role(role_code: str, request: RegulatoryRequest) -> RoleAssignment | None:
