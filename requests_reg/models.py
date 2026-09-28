@@ -23,9 +23,11 @@ class PowerTemplate(models.Model):
     name = models.CharField("Наименование", max_length=255)
     powers = models.TextField("Полномочия", blank=True)
     is_active = models.BooleanField("Активен", default=True)
+    # Порядок в форме — как в утверждённой матрице, а не по алфавиту.
+    sort_order = models.PositiveIntegerField("Порядок", default=0)
 
     class Meta:
-        ordering = ["code"]
+        ordering = ["sort_order", "code"]
         verbose_name = "Шаблон доверенности"
         verbose_name_plural = "Шаблоны доверенностей (матрица)"
 

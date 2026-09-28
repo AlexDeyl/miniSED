@@ -299,9 +299,11 @@ def render_pdf(request) -> bytes:
     codes = data.get("power_templates") or []
     if codes:
         tpls = PowerTemplate.objects.filter(code__in=codes)
-        story.append(Paragraph("Шаблоны полномочий (матрица):", label))
+        story.append(Paragraph("Коды доверенности:", label))
         for t in tpls:
-            story.append(Paragraph(f"<b>{t.code} — {t.name}</b>: {t.powers}", base))
+            # пункты полномочий — каждый с новой строки, как в матрице
+            powers = t.powers.replace("\n", "<br/>")
+            story.append(Paragraph(f"<b>{t.code} — {t.name}</b>:<br/>{powers}", base))
             story.append(Spacer(1, 2))
 
     term = data.get("term_type")

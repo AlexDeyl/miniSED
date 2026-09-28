@@ -389,10 +389,12 @@ class ApiTests(TestCase):
 
     def test_power_templates(self):
         data = api(1).get("/api/reg/requests/power_templates/").json()
-        codes = {t["code"] for t in data}
-        self.assertIn("УПР1", codes)
-        self.assertIn("ФНС1", codes)
-        self.assertEqual(len(data), 16)
+        codes = [t["code"] for t in data]
+        # матрица кодов 2026-09-28: 15 кодов в порядке файла, старые выключены
+        self.assertEqual(len(codes), 15)
+        self.assertEqual(codes[:3], ["СФР", "АДМ_ГД", "АДМ_ОД"])
+        self.assertEqual(codes[-1], "ПОЧТА")
+        self.assertNotIn("УПР1", codes)
 
     def test_anketa_pdf_endpoint(self):
         rid = self._create()

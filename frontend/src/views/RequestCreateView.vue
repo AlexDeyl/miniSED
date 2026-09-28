@@ -806,10 +806,15 @@ async function save() {
             <input v-model="data.powers_other" />
           </label>
           <div class="form-field" style="margin-bottom:10px">
-            <span>Шаблоны полномочий (матрица)</span>
-            <label v-for="t in templates" :key="t.code" class="check" :title="t.powers">
+            <span>Коды доверенности</span>
+            <!-- Полномочия кода — текстом под ним: по ним и выбирают код,
+                 во всплывающей подсказке их никто не читал. -->
+            <label v-for="t in templates" :key="t.code" class="check tpl">
               <input type="checkbox" :value="t.code" v-model="(data.power_templates as string[])" />
-              <b>{{ t.code }}</b> — {{ t.name }}
+              <span>
+                <b>{{ t.code }}</b> <span class="tpl-dept">— {{ t.name }}</span>
+                <span class="tpl-powers">{{ t.powers }}</span>
+              </span>
             </label>
           </div>
           <div class="form-row">
@@ -904,6 +909,10 @@ async function save() {
 .revoke-picked { margin-bottom: 10px; padding: 7px 10px; border-radius: 6px; background: #eef6f0; font-size: 13.5px; }
 .check { display: block; font-size: 13px; margin: 3px 0; cursor: pointer; }
 .check input { margin-right: 6px; }
+.check.tpl { display: flex; align-items: flex-start; gap: 0; margin: 6px 0; }
+.check.tpl input { margin-top: 3px; flex: none; }
+.tpl-dept { color: var(--text-muted); }
+.tpl-powers { display: block; white-space: pre-line; font-size: 12px; color: var(--text-muted); margin-top: 1px; }
 .attach-hint { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
 .attach-row { margin: 4px 0; }
 .attach-file { margin: 2px 0 8px 22px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
