@@ -302,6 +302,15 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
             )
             if mine:
                 out.append(req)
+        # Инициатору — исполненные заявки, где осталось подтвердить получение:
+        # это тоже «моё действие», и без него заявка не закроется.
+        out += list(
+            RegulatoryRequest.objects.select_related("organization").filter(
+                initiator_b24_id=self.b24_id,
+                status=constants.STATUS_EXECUTED,
+                request_type__in=constants.RECEIPT_TYPES,
+            )
+        )
         return Response(RegulatoryRequestListSerializer(out, many=True).data)
 
     # --- согласование ---

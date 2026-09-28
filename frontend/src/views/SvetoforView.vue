@@ -56,6 +56,8 @@ interface WorkItem {
   /** Маршрут карточки; у согласований пусто — они раскрываются панелью справа. */
   to: string
   tags: string[]
+  /** Исполненная заявка ждёт от инициатора «Получил / ознакомился». */
+  confirmReceipt?: boolean
 }
 
 const rawAgreements = ref<Agreement[]>([])
@@ -141,6 +143,8 @@ const items = computed<WorkItem[]>(() => {
       createdAt: r.created_at,
       to: `/requests/${r.id}`,
       tags: [],
+      // сюда она попадает только как моя исполненная (сервер, todo)
+      confirmReceipt: r.status === 'executed' && r.request_type !== 'check',
     })),
     ...rawContracts.value.map((c) => ({
       kind: 'contract' as const,
@@ -239,6 +243,22 @@ async function refreshBadges() {
   svet.todoCount = ag.length + rq.length + ct.length + cm.length
   svet.rejectedUnseen = counts.rejected_unseen
   svet.completedUnseen = counts.completed_unseen
+}
+
+// «Получил / ознакомился» по исполненной заявке → «Закрыта»; карточка
+// уходит из «Требует действия», счётчик в сайдбаре уменьшается.
+async function confirmReceipt(id: number) {
+  if (!confirm('Подтвердить получение? Заявка будет закрыта.')) return
+  busy.value = true
+  error.value = null
+  try {
+    await requests.confirmReceipt(id)
+    await Promise.all([loadList(), refreshBadges()])
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.message : 'Не удалось подтвердить получение'
+  } finally {
+    busy.value = false
+  }
 }
 
 const decisionComment = ref('')
@@ -528,7 +548,24 @@ onMounted(async () => {
           <!-- Карточки всех модулей в одном списке. Свободное согласование
                раскрывается панелью справа, остальное — своей страницей. -->
           <template v-for="it in items" :key="it.kind + it.id">
-            <RouterLink v-if="it.to" :to="it.to" class="svet-card svet-card--req">
+            <!-- Исполненная заявка: осталось подтвердить получение — кнопка
+                 прямо в списке, чтобы не ходить в карточку ради одного клика -->
+            <div v-if="it.to && it.confirmReceipt" class="svet-card svet-card--req">
+              <RouterLink :to="it.to" class="svet-card-link">
+                <div class="svet-card-row">
+                  <span class="svet-card-title">{{ it.title }}</span>
+                  <span class="req-badge">{{ it.badge }}</span>
+                </div>
+                <div class="item-sub">{{ it.subtitle }} · Исполнена — подтвердите получение</div>
+              </RouterLink>
+              <div class="row-actions" style="margin-top:8px">
+                <button class="btn btn--primary" :disabled="busy" @click="confirmReceipt(it.id)">
+                  Получил / ознакомился
+                </button>
+                <RouterLink :to="it.to" class="btn btn--ghost">Открыть</RouterLink>
+              </div>
+            </div>
+            <RouterLink v-else-if="it.to" :to="it.to" class="svet-card svet-card--req">
               <div class="svet-card-row">
                 <span class="svet-card-title">{{ it.title }}</span>
                 <span class="req-badge">{{ it.badge }}</span>
@@ -816,6 +853,7 @@ onMounted(async () => {
 .svet-detail { flex: 1; overflow-y: auto; background: var(--gray-bg); border-radius: 10px; padding: 4px 4px 20px; }
 .placeholder { color: var(--text-muted); text-align: center; padding: 40px; }
 .svet-card { background: #fff; border: 1px solid #f1f1f1; border-radius: 8px; padding: 10px 12px; box-shadow: var(--shadow-soft); cursor: pointer; }
+.svet-card-link { display: block; text-decoration: none; color: inherit; }
 .svet-card--req { display: block; text-decoration: none; color: inherit; border-left: 3px solid var(--green-main); }
 .req-badge { font-size: 11px; font-weight: 600; color: var(--green-main); background: var(--green-light); border-radius: 999px; padding: 2px 8px; white-space: nowrap; }
 .svet-card:hover { background: #fafafa; }

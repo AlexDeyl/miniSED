@@ -420,6 +420,8 @@ def it_execute(request: RegulatoryRequest, *, by_b24_id=None, comment: str = "")
 
 def confirm_receipt(request: RegulatoryRequest, *, by_b24_id=None):
     """Инициатор подтверждает получение → заявка закрывается."""
+    if request.request_type not in constants.RECEIPT_TYPES:
+        raise RequestError("У этой заявки нет шага подтверждения получения.")
     if request.status != constants.STATUS_EXECUTED:
         raise RequestError("Подтвердить получение можно только исполненную заявку.")
     _set(request, constants.STATUS_CLOSED, received_at=timezone.now())

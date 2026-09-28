@@ -67,6 +67,11 @@ STATUS_CHOICES = [
     (STATUS_CANCELED, "Отменена"),
 ]
 
+# Типы, у которых после исполнения инициатор подтверждает получение
+# («Получил / ознакомился» → «Закрыта»). У проверки лица этого шага нет:
+# итог — решение СБ, получать нечего.
+RECEIPT_TYPES = [TYPE_POA, TYPE_MCHD, TYPE_ECP, TYPE_REVOKE]
+
 # из каких статусов инициатор может отменить заявку (до передачи юристам)
 CANCELABLE_STATUSES = [STATUS_DRAFT, STATUS_ON_APPROVAL, STATUS_RETURNED, STATUS_REJECTED]
 
