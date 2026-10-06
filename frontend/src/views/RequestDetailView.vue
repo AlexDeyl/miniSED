@@ -80,7 +80,20 @@ async function load() {
 
 async function loadRoute() {
   const { route: slots } = await requests.routePreview(props.id)
-  route.value = slots.map((s) => ({ ...s, manual: '', replacing: false }))
+  // Новый круг: этапы с ручным выбором заполняем теми, кого инициатор выбрал
+  // в прошлом круге, — иначе после доработки приходилось искать тех же людей
+  // заново (а пустой выбор блокировал отправку). Поменять можно, как обычно.
+  const prev = req.value?.approval?.rounds?.[req.value.approval.rounds.length - 1]
+  const prevByRole = new Map(
+    (prev?.participants || [])
+      .filter((p) => p.role && p.b24_user_id)
+      .map((p) => [p.role, String(p.b24_user_id)] as [string, string]),
+  )
+  route.value = slots.map((s) => ({
+    ...s,
+    manual: s.needs_manual ? prevByRole.get(s.role_code) || '' : '',
+    replacing: false,
+  }))
   routeLoaded.value = true
 }
 
@@ -649,6 +662,9 @@ onMounted(load)
         </div>
 
         <div style="margin-top:10px">
+          <!-- Ошибку отправки дублируем у кнопки: верхняя строка ошибки
+               остаётся за экраном, и казалось, что кнопка «ничего не делает» -->
+          <p v-if="error" class="state state--error" style="margin:0 0 8px">{{ error }}</p>
           <button class="btn btn--primary" :disabled="busy" @click="submit">
             {{ noApprovalNeeded
               ? 'Передать юристам'
