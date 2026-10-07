@@ -140,7 +140,12 @@ def resolve_or_provision_profile(bitrix_id, email, fio="") -> UserProfile:
         profile = UserProfile.objects.filter(bitrix_id=bitrix_id).first()
     if profile is None and email:
         profile = UserProfile.objects.filter(email__iexact=email).first()
-        if profile and bitrix_id and not profile.bitrix_id:
+        # Профиль с ДРУГИМ Битрикс ID — чужой: адрес перешёл к другой учётке
+        # (личный ящик сотрудника отдали групповому аккаунту службы). Отдать
+        # его значило бы впустить человека под чужим именем.
+        if profile and bitrix_id and profile.bitrix_id and profile.bitrix_id != bitrix_id:
+            profile = None
+        elif profile and bitrix_id and not profile.bitrix_id:
             profile.bitrix_id = bitrix_id
             profile.save(update_fields=["bitrix_id"])
     if profile is None:
@@ -152,6 +157,10 @@ def resolve_or_provision_profile(bitrix_id, email, fio="") -> UserProfile:
 
     if profile.auth_user is None:
         username = email or (f"b24_{bitrix_id}" if bitrix_id else f"profile_{profile.id}")
+        # Учётка с таким логином уже принадлежит другому профилю (тот же
+        # перешедший адрес) — её не берём, иначе два человека делят один токен.
+        if UserProfile.objects.filter(auth_user__username=username).exclude(pk=profile.pk).exists():
+            username = f"b24_{bitrix_id}" if bitrix_id else f"profile_{profile.id}"
         user, created = User.objects.get_or_create(
             username=username, defaults={"email": email}
         )
