@@ -11,6 +11,7 @@ import { useOtherUiStore, OTHER_TABS } from '@/stores/otherUi'
 import { useAdminModeStore } from '@/stores/adminMode'
 import { useItUiStore, IT_TABS } from '@/stores/itUi'
 import { useSecurityUiStore, SECURITY_TABS } from '@/stores/securityUi'
+import { useRegistryUiStore, REGISTRY_TABS } from '@/stores/registryUi'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -24,6 +25,7 @@ const otherUi = useOtherUiStore()
 const adminMode = useAdminModeStore()
 const itUi = useItUiStore()
 const securityUi = useSecurityUiStore()
+const registryUi = useRegistryUiStore()
 
 const pageTitle = computed(() => (route.meta.title as string) || 'MiniSED')
 const bare = computed(() => route.meta.noShell === true)
@@ -37,6 +39,7 @@ const onExecution = computed(() => route.name === 'execution')
 const onOther = computed(() => route.name === 'other')
 const onIt = computed(() => route.name === 'it')
 const onSecurity = computed(() => route.name === 'security')
+const onRegistry = computed(() => route.name === 'poa-registry')
 // Открыто из Битрикса (в iframe) — тогда «Выйти» не нужен (авто-вход портала).
 const inBitrix = window.self !== window.top
 
@@ -131,6 +134,18 @@ function tabBadge(code: string): number {
             v-for="t in LEGAL_TABS" :key="t.code"
             class="sidebar-subtab" :class="{ active: legalUi.scope === t.code }"
             @click="legalUi.scope = t.code"
+          >{{ t.label }}</button>
+        </div>
+
+        <!-- Реестр доверенностей и МЧД: номера и сроки, только юристам -->
+        <RouterLink v-if="auth.isLawyer || auth.canViewAll" to="/poa-registry">
+          <span>Реестр доверенностей и МЧД</span>
+        </RouterLink>
+        <div v-if="onRegistry" class="sidebar-subtabs">
+          <button
+            v-for="t in REGISTRY_TABS" :key="t.code || 'all'"
+            class="sidebar-subtab" :class="{ active: registryUi.kind === t.code }"
+            @click="registryUi.kind = t.code"
           >{{ t.label }}</button>
         </div>
 

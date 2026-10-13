@@ -480,6 +480,10 @@ onMounted(load)
           <div class="detail-meta">
             {{ req.subject_name || '—' }} · {{ req.organization_name }} · инициатор #{{ req.initiator_b24_id }}
           </div>
+          <!-- номер доверенности присваивается, когда юрист берёт заявку в работу -->
+          <div v-if="req.poa_number" class="detail-meta">
+            Номер доверенности: <b>{{ req.poa_number }}</b>
+          </div>
         </div>
         <span class="status-pill" :class="req.status">{{ req.status_display }}</span>
       </div>

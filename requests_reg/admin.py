@@ -1,6 +1,14 @@
 from django.contrib import admin
 
-from .models import PowerTemplate, RegulatoryRequest, RoleAssignment, SecurityDelegation
+from .models import (
+    PoaNumbering,
+    PoaRegistryChange,
+    PoaRegistryEntry,
+    PowerTemplate,
+    RegulatoryRequest,
+    RoleAssignment,
+    SecurityDelegation,
+)
 
 
 @admin.register(PowerTemplate)
@@ -28,6 +36,37 @@ class RoleAssignmentAdmin(admin.ModelAdmin):
     list_display = ("role_code", "user_b24_id", "user_name", "organization", "cfo", "facility", "is_active")
     list_filter = ("role_code", "is_active", "organization")
     search_fields = ("user_name", "user_b24_id")
+
+
+@admin.register(PoaNumbering)
+class PoaNumberingAdmin(admin.ModelAdmin):
+    list_display = ("organization", "mask", "year", "last_seq")
+
+
+class PoaRegistryChangeInline(admin.TabularInline):
+    model = PoaRegistryChange
+    extra = 0
+    can_delete = False
+    readonly_fields = ("field", "old_value", "new_value", "changed_by_b24_id", "changed_at")
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(PoaRegistryEntry)
+class PoaRegistryEntryAdmin(admin.ModelAdmin):
+    list_display = ("number", "kind", "organization", "representative", "issue_date", "valid_until", "request")
+    list_filter = ("kind", "organization")
+    search_fields = ("number", "reg_number", "representative", "powers", "code")
+    raw_id_fields = ("request",)
+    inlines = [PoaRegistryChangeInline]
+
+
+@admin.register(PoaRegistryChange)
+class PoaRegistryChangeAdmin(admin.ModelAdmin):
+    list_display = ("changed_at", "entry", "field", "old_value", "new_value", "changed_by_b24_id")
+    list_filter = ("field",)
+    readonly_fields = ("entry", "field", "old_value", "new_value", "changed_by_b24_id", "changed_at")
 
 
 @admin.register(SecurityDelegation)

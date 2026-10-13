@@ -357,10 +357,16 @@ def cancel(request: RegulatoryRequest, *, by_b24_id=None):
 
 
 # --- Исполнение юридическим отделом -----------------------------------------
-def take_in_work(request: RegulatoryRequest):
+@transaction.atomic
+def take_in_work(request: RegulatoryRequest, *, by_b24_id=None):
     if request.status != constants.STATUS_TO_LEGAL:
         raise RequestError("Взять в работу можно только заявку, переданную юристам.")
-    _set(request, constants.STATUS_LEGAL_WORK)
+    _set(request, constants.STATUS_LEGAL_WORK, taken_at=timezone.now())
+    # ТЗ: номер доверенности присваивается и запись в реестр вносится именно
+    # в момент «Взять в работу».
+    from . import registry
+
+    registry.register_request(request, by_b24_id=by_b24_id)
 
 
 def to_signing(request: RegulatoryRequest):
@@ -393,6 +399,15 @@ def execute(request: RegulatoryRequest, *, delivery_method: str, delivery_commen
     )
     log_action("request_executed", target=request,
                new_value={"delivery_method": delivery_method})
+    if request.request_type == constants.TYPE_REVOKE and request.source_request_id:
+        # отзыв исполнен — в реестре отозванная доверенность помечается
+        from . import registry
+        from .serializers import _parse_date
+
+        registry.mark_revoked(
+            request.source_request,
+            on_date=_parse_date((request.data or {}).get("revoke_date")),
+        )
     _notify("notify_initiator_executed", request)  # инициатору — подтвердите получение
 
 
@@ -429,8 +444,14 @@ def it_execute(request: RegulatoryRequest, *, by_b24_id=None, comment: str = "")
 def dev_take_in_work(request: RegulatoryRequest, *, by_b24_id=None):
     if request.status != constants.STATUS_TO_DEV:
         raise RequestError("Взять в работу можно только заявку, переданную в отдел внедрения.")
-    _set(request, constants.STATUS_DEV_WORK, executor_b24_id=by_b24_id,
-         taken_at=timezone.now())
+    with transaction.atomic():
+        _set(request, constants.STATUS_DEV_WORK, executor_b24_id=by_b24_id,
+             taken_at=timezone.now())
+        # МЧД для СФР тоже попадает в реестр: берёт её не юрист, но это та же
+        # МЧД юрлица с номером из общей нумерации.
+        from . import registry
+
+        registry.register_request(request, by_b24_id=by_b24_id)
     log_action("request_dev_taken", target=request, new_value={"by_b24_id": by_b24_id})
 
 

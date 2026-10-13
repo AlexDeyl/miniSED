@@ -95,8 +95,15 @@ class RegulatoryRequestDetailSerializer(RegulatoryRequestListSerializer):
             "source_request", "source_request_info", "revocations",
             "executor_b24_id", "taken_at",
             "check_result", "check_result_display", "check_comment",
-            "updated_at", "approval", "documents",
+            "updated_at", "approval", "documents", "poa_number",
         ]
+
+    # Номер доверенности из реестра (присваивается при «Взять в работу»).
+    poa_number = serializers.SerializerMethodField()
+
+    def get_poa_number(self, obj):
+        entry = getattr(obj, "registry_entry", None) if obj.pk else None
+        return entry.number if entry else ""
 
     def get_source_request_info(self, obj):
         return _card_ref(obj.source_request)

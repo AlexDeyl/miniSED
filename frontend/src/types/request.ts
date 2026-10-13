@@ -83,6 +83,8 @@ export interface FacetOption { value: string; label: string; count: number }
 export type RequestFacets = Record<RequestFilterField, FacetOption[]>
 
 export interface RegulatoryRequestDetail extends RegulatoryRequestListItem {
+  // номер из реестра доверенностей (пусто, пока юрист не взял в работу)
+  poa_number?: string
   facility: number | null
   cfo: number | null
   initiator_b24_id: number | null

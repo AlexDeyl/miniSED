@@ -166,6 +166,103 @@ class RegulatoryRequest(models.Model):
         return self.get_status_display()
 
 
+class PoaNumbering(models.Model):
+    """Маска и счётчик номеров доверенностей юрлица (ТЗ «Форма маски номера»).
+
+    Порядковый номер ХХ идёт сквозной по доверенностям И МЧД юрлица в пределах
+    календарного года (так в реестрах заказчика) и обнуляется с новым годом.
+    Строка заводится сама при первой выдаче — с маской по умолчанию из
+    constants.POA_NUMBER_MASKS; юристы правят маску и последний номер в
+    разделе реестра (например, чтобы продолжить нумерацию, начатую в Excel).
+    """
+
+    organization = models.OneToOneField(
+        Organization, on_delete=models.CASCADE, related_name="poa_numbering",
+        verbose_name="Организация",
+    )
+    mask = models.CharField(
+        "Маска номера", max_length=64,
+        help_text="{ХХ} — порядковый номер в году, {ГГГГ} — год, {ГГ} — две цифры года, {ММ} — месяц.",
+    )
+    year = models.PositiveIntegerField("Год счётчика", default=0)
+    last_seq = models.PositiveIntegerField("Последний выданный номер", default=0)
+
+    class Meta:
+        verbose_name = "Нумерация доверенностей"
+        verbose_name_plural = "Нумерация доверенностей (маски)"
+
+    def __str__(self):
+        return f"{self.organization} — {self.mask}"
+
+
+class PoaRegistryEntry(models.Model):
+    """Строка реестра доверенностей и МЧД (раздел юристов).
+
+    Создаётся в момент «Взять в работу» — тогда же присваивается номер. Графы
+    по умолчанию переносятся из заявки, дальше юрист их уточняет (каждая
+    правка пишется в PoaRegistryChange). Записи без заявки — доверенности,
+    выданные до MiniSED или мимо него, их юрист вносит руками.
+    """
+
+    request = models.OneToOneField(
+        RegulatoryRequest, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="registry_entry", verbose_name="Заявка",
+    )
+    kind = models.CharField("Вид", max_length=8, choices=constants.REGISTRY_KINDS)
+    organization = models.ForeignKey(
+        Organization, on_delete=models.PROTECT, related_name="poa_registry",
+        verbose_name="Компания",
+    )
+    number = models.CharField("Номер доверенности", max_length=64, blank=True, db_index=True)
+    # порядковый номер и год — по ним считается следующий номер; у записей,
+    # внесённых руками, могут быть пусты
+    seq = models.PositiveIntegerField("Порядковый номер", null=True, blank=True)
+    seq_year = models.PositiveIntegerField("Год нумерации", null=True, blank=True)
+    reg_number = models.CharField("Рег. № МЧД (ФНС)", max_length=64, blank=True)
+    issue_date = models.DateField("Дата выдачи", null=True, blank=True)
+    code = models.CharField("КОД", max_length=255, blank=True)
+    representative = models.CharField("Представитель", max_length=500, blank=True)
+    powers = models.TextField("Полномочия", blank=True)
+    valid_until = models.DateField("Срок действия", null=True, blank=True)
+    cert_valid_until = models.DateField("Срок сертификата", null=True, blank=True)
+    revoked_at = models.DateField("Отозвана с", null=True, blank=True)
+    comment = models.TextField("Примечание", blank=True)
+
+    created_by_b24_id = models.IntegerField("Внёс (ID Б24)", null=True, blank=True)
+    created_at = models.DateTimeField("Внесено", auto_now_add=True)
+    updated_at = models.DateTimeField("Обновлено", auto_now=True)
+
+    class Meta:
+        ordering = ["-issue_date", "-id"]
+        verbose_name = "Запись реестра доверенностей"
+        verbose_name_plural = "Реестр доверенностей и МЧД"
+        indexes = [models.Index(fields=["organization", "seq_year", "seq"])]
+
+    def __str__(self):
+        return f"{self.number or f'#{self.pk}'} — {self.representative}"
+
+
+class PoaRegistryChange(models.Model):
+    """Правка графы реестра: кто, когда, что было и что стало.
+
+    ТЗ: правки сохраняются; в интерфейсе их видит суперпользователь."""
+
+    entry = models.ForeignKey(
+        PoaRegistryEntry, on_delete=models.CASCADE, related_name="changes",
+        verbose_name="Запись реестра",
+    )
+    field = models.CharField("Графа", max_length=32)
+    old_value = models.TextField("Было", blank=True)
+    new_value = models.TextField("Стало", blank=True)
+    changed_by_b24_id = models.IntegerField("Кто правил (ID Б24)", null=True, blank=True)
+    changed_at = models.DateTimeField("Когда", auto_now_add=True)
+
+    class Meta:
+        ordering = ["-changed_at", "-id"]
+        verbose_name = "Правка реестра доверенностей"
+        verbose_name_plural = "Правки реестра доверенностей"
+
+
 class SecurityDelegation(models.Model):
     """Передача функций службы безопасности юридическому отделу.
 

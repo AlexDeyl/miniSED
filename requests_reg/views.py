@@ -638,7 +638,9 @@ class RegulatoryRequestViewSet(viewsets.ModelViewSet):
     def take(self, request, pk=None):
         req = self.get_object()
         self._require_lawyer()
-        return self._run(lambda: services.take_in_work(req)) or self._detail(req)
+        return self._run(
+            lambda: services.take_in_work(req, by_b24_id=self.b24_id)
+        ) or self._detail(req)
 
     @action(detail=True, methods=["post"], url_path="to_signing")
     def to_signing(self, request, pk=None):

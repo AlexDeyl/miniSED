@@ -219,6 +219,46 @@ ROLE_NAMES = {
 SFR_POWER_CODES = ["СФР", "КАДРЫ_СФР_ВУ_МУ"]
 
 
+# --- Реестр доверенностей и МЧД (раздел юристов) ----------------------------
+REGISTRY_POA = "poa"
+REGISTRY_MCHD = "mchd"
+REGISTRY_KINDS = [
+    (REGISTRY_POA, "Доверенность"),
+    (REGISTRY_MCHD, "МЧД"),
+]
+
+# Состояние срока действия — подсветка графы «Срок действия», как в Excel.
+VALIDITY_ACTIVE = "active"
+VALIDITY_EXPIRING = "expiring"
+VALIDITY_EXPIRED = "expired"
+VALIDITY_REVOKED = "revoked"
+VALIDITY_NO_TERM = "no_term"
+VALIDITY_CHOICES = [
+    (VALIDITY_ACTIVE, "Действует"),
+    (VALIDITY_EXPIRING, "Истекает"),
+    (VALIDITY_EXPIRED, "Истекла"),
+    (VALIDITY_REVOKED, "Отозвана"),
+    (VALIDITY_NO_TERM, "Срок не указан"),
+]
+# за сколько дней до окончания доверенность считается «истекающей»
+VALIDITY_WARN_DAYS = 30
+
+# Маски номеров по юрлицам (ТЗ «Форма маски номера доверенности»). Ключ —
+# название юрлица без кавычек и регистра (registry.org_key): так маска
+# находится и для «АО СЗ "Отель Введенский"», и для «АО «СЗ «Отель Введенский»».
+# Неизвестному юрлицу — маска по умолчанию; юристы её поправят в реестре.
+POA_MASK_TOKENS = ("{ХХ}", "{ГГГГ}", "{ГГ}", "{ММ}")
+POA_NUMBER_MASKS = {
+    "ао отель введенский": "Д-{ХХ}/{ГГ}",
+    "ао сз отель введенский": "Д-СЗ/{ХХ}-{ГГГГ}",
+    "ооо мир эстейт": "Д-{ХХ}/{ММ}-{ГГГГ}МЭ",
+    "ао блюхера 6": "Д-Б6/{ХХ}-{ГГГГ}",
+    "ооо управление отелями": "Д-УО/{ХХ}-{ГГГГ}",
+    "ооо невесомость": "Д-Н-{ГГ}/{ХХ}",
+}
+POA_DEFAULT_MASK = "Д-{ХХ}/{ГГГГ}"
+
+
 def number_prefix(request_type: str) -> str:
     entry = REQUEST_TYPES.get(request_type)
     return entry[1] if entry else "ЗАЯВ"

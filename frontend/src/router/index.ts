@@ -134,6 +134,13 @@ const router = createRouter({
       meta: { title: 'Работа юристов', lawyerOnly: true },
     },
     {
+      // Реестр доверенностей и МЧД — только юридическая служба
+      path: '/poa-registry',
+      name: 'poa-registry',
+      component: () => import('@/views/PoaRegistryView.vue'),
+      meta: { title: 'Реестр доверенностей и МЧД', lawyerOnly: true, wide: true },
+    },
+    {
       path: '/it',
       name: 'it',
       component: () => import('@/views/ItQueueView.vue'),
