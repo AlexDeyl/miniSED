@@ -5,8 +5,10 @@ import { agreements } from '@/services/agreements'
 import { requests } from '@/services/requests'
 import { contracts } from '@/services/contracts'
 import { compliments } from '@/services/compliments'
+import { jobdesc } from '@/services/jobdesc'
 import type { ContractListItem } from '@/types/contract'
 import type { ComplimentListItem } from '@/types/compliment'
+import type { JobDescListItem } from '@/types/jobdesc'
 import BitrixSearchModal from '@/components/BitrixSearchModal.vue'
 import DocumentEditor from '@/components/DocumentEditor.vue'
 import SearchBox from '@/components/SearchBox.vue'
@@ -42,7 +44,7 @@ const query = ref('')
 // только свободные согласования: заявки, договоры и комплименты, где я
 // согласующий, попадают в те же вкладки. Свои свободные согласования тоже
 // остаются в списке — жить им больше негде, отдельного раздела у них нет.
-type WorkKind = 'agreement' | 'request' | 'contract' | 'compliment'
+type WorkKind = 'agreement' | 'request' | 'contract' | 'compliment' | 'jobdesc'
 
 interface WorkItem {
   kind: WorkKind
@@ -64,6 +66,7 @@ const rawAgreements = ref<Agreement[]>([])
 const rawRequests = ref<RegulatoryRequestListItem[]>([])
 const rawContracts = ref<ContractListItem[]>([])
 const rawCompliments = ref<ComplimentListItem[]>([])
+const rawJobdesc = ref<JobDescListItem[]>([])
 
 const selected = ref<Agreement | null>(null)
 const loading = ref(false)
@@ -93,12 +96,14 @@ const TAB_STATUSES: Record<string, Record<WorkKind, string[]>> = {
     request: ['on_approval', 'returned'],
     contract: ['on_approval'],
     compliment: ['on_approval', 'returned'],
+    jobdesc: ['on_approval', 'returned'],
   },
   rejected: {
     agreement: ['rejected'],
     request: ['rejected'],
     contract: ['rejected', 'returned'],
     compliment: ['rejected'],
+    jobdesc: ['rejected'],
   },
   completed: {
     agreement: ['completed'],
@@ -106,6 +111,7 @@ const TAB_STATUSES: Record<string, Record<WorkKind, string[]>> = {
       'to_dev', 'dev_work', 'executed', 'closed'],
     contract: ['approved'],
     compliment: ['approved', 'in_work', 'executed'],
+    jobdesc: ['to_hr', 'hr_work', 'signing', 'executed', 'closed'],
   },
 }
 
@@ -171,6 +177,19 @@ const items = computed<WorkItem[]>(() => {
       to: `/compliments/${c.id}`,
       tags: [],
     })),
+    ...rawJobdesc.value.map((d) => ({
+      kind: 'jobdesc' as const,
+      id: d.id,
+      title: `${d.number} · ${d.position_name}`,
+      subtitle: [d.organization_name, d.cfo_name].filter(Boolean).join(' · '),
+      status: d.status,
+      statusDisplay: d.status_display,
+      badge: 'Должностная инструкция',
+      createdAt: d.created_at,
+      to: `/jobdesc/${d.id}`,
+      tags: [],
+      confirmReceipt: d.status === 'executed' && d.initiator_b24_id === uid.value,
+    })),
   ]
   // «Требует действия» и «Все» показывают всё пришедшее; при поиске вкладка
   // тоже не сужает выборку — статус искомой карточки заранее неизвестен.
@@ -189,32 +208,36 @@ async function loadList() {
   try {
     if (mode.value === 'todo' && !q) {
       // «Требует действия» — то, что ждёт именно моего решения, по всем модулям
-      const [ag, rq, ct, cm] = await Promise.all([
+      const [ag, rq, ct, cm, jd] = await Promise.all([
         agreements.todo(),
         requests.todo().catch(() => []),
         contracts.todo().catch(() => []),
         compliments.todo().catch(() => []),
+        jobdesc.todo().catch(() => []),
       ])
       rawAgreements.value = ag
       rawRequests.value = rq
       rawContracts.value = ct
       rawCompliments.value = cm
+      rawJobdesc.value = jd
     } else {
       // Архивные вкладки: всё, где я согласующий, плюс свои свободные
       // согласования. Статус согласований отбираем на сервере — иначе на каждой
       // вкладке пришлось бы тянуть весь архив; остальные модули отсеиваем на
       // клиенте, их объёмы несопоставимо меньше.
       const agStatus = q ? undefined : STATUS_BY_MODE[mode.value]
-      const [ag, rq, ct, cm] = await Promise.all([
+      const [ag, rq, ct, cm, jd] = await Promise.all([
         agreements.all(agStatus, q),
         requests.list(undefined, q, 'participant').catch(() => []),
         contracts.list('participant', q).catch(() => []),
         compliments.list('participant', q).catch(() => []),
+        jobdesc.list('participant', q).catch(() => []),
       ])
       rawAgreements.value = ag
       rawRequests.value = rq
       rawContracts.value = ct
       rawCompliments.value = cm
+      rawJobdesc.value = jd
     }
     // подтянуть имена авторов/участников списка
     enrichUsers(rawAgreements.value.flatMap(
@@ -234,26 +257,27 @@ watch([() => svet.mode, query, () => adminMode.active], loadList)
 // непросмотренные отклонённые/завершённые (мои согласования). Обновляем всегда —
 // бейджи видны независимо от активной вкладки.
 async function refreshBadges() {
-  const [ag, rq, ct, cm, counts] = await Promise.all([
+  const [ag, rq, ct, cm, jd, counts] = await Promise.all([
     agreements.todo().catch(() => []),
     requests.todo().catch(() => []),
     contracts.todo().catch(() => []),
     compliments.todo().catch(() => []),
+    jobdesc.todo().catch(() => []),
     agreements.badgeCounts().catch(() => ({ rejected_unseen: 0, completed_unseen: 0, in_progress: 0 })),
   ])
-  svet.todoCount = ag.length + rq.length + ct.length + cm.length
+  svet.todoCount = ag.length + rq.length + ct.length + cm.length + jd.length
   svet.rejectedUnseen = counts.rejected_unseen
   svet.completedUnseen = counts.completed_unseen
 }
 
 // «Получил / ознакомился» по исполненной заявке → «Закрыта»; карточка
 // уходит из «Требует действия», счётчик в сайдбаре уменьшается.
-async function confirmReceipt(id: number) {
+async function confirmReceipt(it: WorkItem) {
   if (!confirm('Подтвердить получение? Заявка будет закрыта.')) return
   busy.value = true
   error.value = null
   try {
-    await requests.confirmReceipt(id)
+    await (it.kind === 'jobdesc' ? jobdesc.acknowledge(it.id) : requests.confirmReceipt(it.id))
     await Promise.all([loadList(), refreshBadges()])
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Не удалось подтвердить получение'
@@ -560,7 +584,7 @@ onMounted(async () => {
                 <div class="item-sub">{{ it.subtitle }} · Исполнена — подтвердите получение</div>
               </RouterLink>
               <div class="row-actions" style="margin-top:8px">
-                <button class="btn btn--primary" :disabled="busy" @click="confirmReceipt(it.id)">
+                <button class="btn btn--primary" :disabled="busy" @click="confirmReceipt(it)">
                   Получил / ознакомился
                 </button>
                 <RouterLink :to="it.to" class="btn btn--ghost">Открыть</RouterLink>

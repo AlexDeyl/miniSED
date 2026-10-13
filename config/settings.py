@@ -64,6 +64,7 @@ INSTALLED_APPS = [
     "requests_reg",
     "contracts",
     "compliments",
+    "jobdesc",
     "approvals",
     "bitrix",
 ]

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { RouterView, RouterLink, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useSvetoforStore, SVETOFOR_TABS } from '@/stores/svetofor'
@@ -12,6 +12,8 @@ import { useAdminModeStore } from '@/stores/adminMode'
 import { useItUiStore, IT_TABS } from '@/stores/itUi'
 import { useSecurityUiStore, SECURITY_TABS } from '@/stores/securityUi'
 import { useRegistryUiStore, REGISTRY_TABS } from '@/stores/registryUi'
+import { useJobDescUiStore, JOBDESC_TABS, HR_TABS } from '@/stores/jobdescUi'
+import { jobdesc } from '@/services/jobdesc'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -26,6 +28,7 @@ const adminMode = useAdminModeStore()
 const itUi = useItUiStore()
 const securityUi = useSecurityUiStore()
 const registryUi = useRegistryUiStore()
+const jobdescUi = useJobDescUiStore()
 
 const pageTitle = computed(() => (route.meta.title as string) || 'MiniSED')
 const bare = computed(() => route.meta.noShell === true)
@@ -40,6 +43,16 @@ const onOther = computed(() => route.name === 'other')
 const onIt = computed(() => route.name === 'it')
 const onSecurity = computed(() => route.name === 'security')
 const onRegistry = computed(() => route.name === 'poa-registry')
+const onJobdesc = computed(() => route.name === 'jobdesc')
+const onHr = computed(() => route.name === 'hr')
+// Бейджи должностных инструкций видны сразу после входа: заявка ждёт решения
+// или «Получил / ознакомился», а отдел персонала — новые утверждённые ДИ.
+watch(() => auth.b24UserId, async (uid) => {
+  if (!uid) return
+  jobdescUi.todoCount = (await jobdesc.todo().catch(() => [])).length
+  if (auth.isHrStaff) jobdescUi.hrNewCount = (await jobdesc.hrQueue('new').catch(() => [])).length
+}, { immediate: true })
+
 // Открыто из Битрикса (в iframe) — тогда «Выйти» не нужен (авто-вход портала).
 const inBitrix = window.self !== window.top
 
@@ -89,6 +102,32 @@ function tabBadge(code: string): number {
             class="sidebar-subtab" :class="{ active: reqUi.typeFilter === t.code }"
             @click="reqUi.typeFilter = t.code"
           >{{ t.label }}</button>
+        </div>
+
+        <!-- Согласование должностных инструкций (ТЗ «Регламентные заявки — Иное») -->
+        <RouterLink to="/jobdesc">
+          <span>Должностные инструкции</span>
+          <span v-if="jobdescUi.todoCount" class="nav-badge" title="Требует действия">{{ jobdescUi.todoCount }}</span>
+        </RouterLink>
+        <div v-if="onJobdesc" class="sidebar-subtabs">
+          <button
+            v-for="t in JOBDESC_TABS" :key="t.code"
+            class="sidebar-subtab" :class="{ active: jobdescUi.mode === t.code }"
+            @click="jobdescUi.mode = t.code"
+          >{{ t.label }}<span v-if="t.code === 'todo' && jobdescUi.todoCount" class="subtab-badge">{{ jobdescUi.todoCount }}</span></button>
+        </div>
+
+        <!-- Исполнение утверждённых ДИ: отдел по работе с персоналом -->
+        <RouterLink v-if="auth.isHrStaff || auth.canViewAll" to="/hr">
+          <span>Заявки для отдела по работе с персоналом</span>
+          <span v-if="jobdescUi.hrNewCount" class="nav-badge" title="Новые">{{ jobdescUi.hrNewCount }}</span>
+        </RouterLink>
+        <div v-if="onHr" class="sidebar-subtabs">
+          <button
+            v-for="t in HR_TABS" :key="t.code"
+            class="sidebar-subtab" :class="{ active: jobdescUi.hrScope === t.code }"
+            @click="jobdescUi.hrScope = t.code"
+          >{{ t.label }}<span v-if="t.code === 'new' && jobdescUi.hrNewCount" class="subtab-badge">{{ jobdescUi.hrNewCount }}</span></button>
         </div>
 
         <RouterLink to="/contracts"><span>Договоры</span></RouterLink>

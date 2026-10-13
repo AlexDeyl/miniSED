@@ -122,6 +122,39 @@ const router = createRouter({
       meta: { title: 'Заявка на комплимент' },
     },
     {
+      path: '/jobdesc',
+      name: 'jobdesc',
+      component: () => import('@/views/JobDescsView.vue'),
+      meta: { title: 'Должностные инструкции' },
+    },
+    {
+      path: '/jobdesc/new',
+      name: 'jobdesc-new',
+      component: () => import('@/views/JobDescCreateView.vue'),
+      meta: { title: 'Новая заявка на согласование ДИ' },
+    },
+    {
+      path: '/jobdesc/:id/edit',
+      name: 'jobdesc-edit',
+      component: () => import('@/views/JobDescCreateView.vue'),
+      props: true,
+      meta: { title: 'Редактирование заявки на согласование ДИ' },
+    },
+    {
+      path: '/jobdesc/:id',
+      name: 'jobdesc-detail',
+      component: () => import('@/views/JobDescDetailView.vue'),
+      props: true,
+      meta: { title: 'Заявка на согласование ДИ' },
+    },
+    {
+      // Исполнение утверждённых ДИ — отдел по работе с персоналом
+      path: '/hr',
+      name: 'hr',
+      component: () => import('@/views/HrQueueView.vue'),
+      meta: { title: 'Заявки для отдела по работе с персоналом' },
+    },
+    {
       path: '/execution',
       name: 'execution',
       component: () => import('@/views/ExecutionQueueView.vue'),

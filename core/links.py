@@ -58,3 +58,7 @@ def request_route(request_id) -> str:
 
 def compliment_route(compliment_id) -> str:
     return f"/compliments/{compliment_id}"
+
+
+def jobdesc_route(jobdesc_id) -> str:
+    return f"/jobdesc/{jobdesc_id}"

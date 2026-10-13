@@ -36,6 +36,8 @@ export const useAuthStore = defineStore('auth', () => {
   // Служба безопасности — ей виден раздел «Работа службы безопасности»
   // (исполнение проверок лиц). Юристу — пока ему переданы функции СБ.
   const isSecurity = computed(() => !!profile.value?.is_security)
+  // Отдел по работе с персоналом — исполняет утверждённые заявки на ДИ.
+  const isHrStaff = computed(() => !!profile.value?.is_hr_staff)
 
   function ls(key: string, value?: string | null): string | null {
     try {
@@ -158,7 +160,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   return {
     token, profile, b24UserId, ready, isAuthenticated, displayName, isLawyer,
-    canViewAll, isComplimentExecutor, isItSpecialist, isSecurity,
+    canViewAll, isComplimentExecutor, isItSpecialist, isSecurity, isHrStaff,
     login, bitrixLogin, applyToken, refreshProfile, logout, init,
   }
 })

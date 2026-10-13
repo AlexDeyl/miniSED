@@ -53,7 +53,15 @@ def profile_payload(profile: UserProfile | None, user=None) -> dict:
         # Показывать ли раздел «Работа службы безопасности» (проверка лиц):
         # сотрудник СБ или юрист, пока функции СБ переданы юротделу.
         "is_security": _is_security(profile.bitrix_id),
+        # Показывать ли раздел «Заявки для отдела по работе с персоналом» (ДИ).
+        "is_hr_staff": _is_hr_staff(profile.bitrix_id),
     }
+
+
+def _is_hr_staff(b24_id) -> bool:
+    from jobdesc import hr_staff
+
+    return hr_staff.is_hr_staff(b24_id)
 
 
 def _is_it_specialist(b24_id) -> bool:

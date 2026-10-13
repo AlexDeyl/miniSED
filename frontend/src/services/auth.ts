@@ -17,6 +17,8 @@ export interface AuthProfile {
   /** Служба безопасности (или юрист на время передачи её функций) —
    *  виден раздел «Работа службы безопасности». */
   is_security?: boolean
+  /** Отдел по работе с персоналом — виден раздел «Заявки для отдела по работе с персоналом». */
+  is_hr_staff?: boolean
 }
 
 export interface LoginResult extends AuthProfile {
