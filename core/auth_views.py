@@ -78,16 +78,18 @@ def _is_security(b24_id) -> bool:
 
 
 def _is_compliment_executor(b24_id) -> bool:
-    """Назначен ли человек исполнителем хотя бы одной категории комплиментов."""
+    """Назначен ли человек исполнителем хотя бы одной категории комплиментов
+    либо ответственным за ресторан."""
     if not b24_id:
         return False
     from compliments import constants as K
+    from compliments.models import Restaurant
     from requests_reg.models import RoleAssignment
 
     executor_roles = {plan["executor"] for plan in K.CATEGORY_ROUTES.values()}
     return RoleAssignment.objects.filter(
         role_code__in=executor_roles, user_b24_id=b24_id, is_active=True
-    ).exists()
+    ).exists() or Restaurant.objects.filter(executor_b24_id=b24_id).exists()
 
 
 @api_view(["POST"])

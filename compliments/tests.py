@@ -512,3 +512,8 @@ class RestaurantExecutorTests(BaseData):
         names = [r["name"] for r in api(1).get("/api/compliments/meta/").json()["restaurants"]]
         self.assertEqual(names[0], "Ресторан Невесомость")
         self.assertEqual(len(names), 5)
+
+    def test_restaurant_executor_sees_execution_section(self):
+        from core.auth_views import _is_compliment_executor
+        self.assertTrue(_is_compliment_executor(IONOV))
+        self.assertFalse(_is_compliment_executor(777))
