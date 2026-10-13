@@ -21,6 +21,7 @@ SEARCH_FIELDS = (
     "department",
     "execution_comment",
     "facility__name",
+    "restaurant__name",
     "organization__short_name",
 )
 

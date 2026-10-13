@@ -15,6 +15,32 @@ from core.models import Facility, Organization
 from . import constants
 
 
+class Restaurant(models.Model):
+    """Ресторан для категории «рестораны и алкоголь».
+
+    У ресторанов разные ответственные за выдачу комплимента (разделение зон
+    ответственности, 13.10.2026): исполнитель заявки берётся из ресторана.
+    Если у ресторана исполнитель не задан — исполняет директор ресторанной
+    службы по общей роли (compliments.routing.executor_slot).
+
+    Исполнитель — сотрудник Б24 (ФИО — ПДн, в git не кладём: заводится в
+    админке или сидом seed_org_structure из негитируемого JSON)."""
+
+    name = models.CharField("Название", max_length=255, unique=True)
+    executor_b24_id = models.IntegerField("Исполнитель (ID Б24)", null=True, blank=True)
+    executor_name = models.CharField("Исполнитель (ФИО)", max_length=255, blank=True)
+    sort_order = models.PositiveIntegerField("Порядок", default=0)
+    is_active = models.BooleanField("Активен", default=True)
+
+    class Meta:
+        ordering = ["sort_order", "name"]
+        verbose_name = "Ресторан"
+        verbose_name_plural = "Рестораны"
+
+    def __str__(self):
+        return self.name
+
+
 class Compliment(models.Model):
     number = models.CharField("Номер", max_length=32, blank=True, db_index=True)
     title = models.CharField("Наименование заявки", max_length=500)
@@ -39,6 +65,12 @@ class Compliment(models.Model):
     organization = models.ForeignKey(
         Organization, on_delete=models.SET_NULL, null=True, blank=True,
         related_name="compliments", verbose_name="Юрлицо",
+    )
+
+    # Только для категории «рестораны и алкоголь»: определяет исполнителя.
+    restaurant = models.ForeignKey(
+        Restaurant, on_delete=models.PROTECT, null=True, blank=True,
+        related_name="compliments", verbose_name="Ресторан",
     )
 
     description = models.TextField("Описание заявки", blank=True)

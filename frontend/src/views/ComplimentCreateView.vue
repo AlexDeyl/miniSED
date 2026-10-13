@@ -15,6 +15,7 @@ const router = useRouter()
 
 const facilities = ref<Facility[]>([])
 const categories = ref<{ code: string; name: string }[]>([])
+const restaurants = ref<{ id: number; name: string }[]>([])
 const loading = ref(true)
 const busy = ref(false)
 const error = ref<string | null>(null)
@@ -27,6 +28,7 @@ const form = ref({
   guest_name: '',
   event_at: '',
   facility: null as number | null,
+  restaurant: null as number | null,
   description: '',
   department: '',
   needs_ceo: false,
@@ -40,10 +42,12 @@ const fileInput = ref<HTMLInputElement | null>(null)
 // чтобы инициатор понимал маршрут ещё до отправки.
 const ROUTE_HINT: Record<ComplimentCategory, string> = {
   confectionery: 'Руководитель отдела продаж → ресторанная служба. Выдаёт кондитерский цех.',
-  restaurant: 'Руководитель отдела продаж → коммерческий директор → генеральный директор. Выдаёт ресторанная служба.',
+  restaurant: 'Руководитель отдела продаж → коммерческий директор → генеральный директор. Выдаёт ответственный выбранного ресторана.',
   stay: 'Руководитель отдела продаж → коммерческий директор → генеральный директор. Выдаёт помощник генерального директора.',
 }
 const routeHint = computed(() => ROUTE_HINT[form.value.category])
+// Ресторан выбирают только для ресторанной категории — от него зависит исполнитель.
+const isRestaurant = computed(() => form.value.category === 'restaurant')
 
 async function load() {
   loading.value = true
@@ -51,6 +55,7 @@ async function load() {
     const [f, meta] = await Promise.all([compliments.facilities(), compliments.meta()])
     facilities.value = f
     categories.value = meta.categories
+    restaurants.value = meta.restaurants || []
     if (props.id) {
       const c = await compliments.get(props.id)
       form.value = {
@@ -62,6 +67,7 @@ async function load() {
         // input[type=datetime-local] понимает только «YYYY-MM-DDTHH:MM»
         event_at: c.event_at ? c.event_at.slice(0, 16) : '',
         facility: c.facility,
+        restaurant: c.restaurant,
         description: c.description || '',
         department: c.department || '',
         needs_ceo: c.needs_ceo,
@@ -95,6 +101,10 @@ async function save() {
     error.value = 'Укажите компанию — получателя комплимента'
     return
   }
+  if (isRestaurant.value && !form.value.restaurant) {
+    error.value = 'Выберите ресторан'
+    return
+  }
   busy.value = true
   const payload = {
     title: form.value.title.trim(),
@@ -104,6 +114,7 @@ async function save() {
     guest_name: form.value.guest_name.trim(),
     event_at: form.value.event_at || null,
     facility: form.value.facility,
+    restaurant: isRestaurant.value ? form.value.restaurant : null,
     description: form.value.description,
     department: form.value.department.trim(),
     needs_ceo: form.value.needs_ceo,
@@ -153,6 +164,14 @@ onMounted(load)
         </select>
       </label>
       <p class="detail-meta" style="margin:-4px 0 4px">Маршрут: {{ routeHint }}</p>
+
+      <label v-if="isRestaurant" class="form-field">
+        <span>Ресторан *</span>
+        <select v-model="form.restaurant">
+          <option :value="null">— выберите ресторан —</option>
+          <option v-for="r in restaurants" :key="r.id" :value="r.id">{{ r.name }}</option>
+        </select>
+      </label>
 
       <label class="form-field">
         <span>Что именно предоставляем</span>

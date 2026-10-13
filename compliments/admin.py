@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Compliment
+from .models import Compliment, Restaurant
 
 
 @admin.register(Compliment)
@@ -9,6 +9,13 @@ class ComplimentAdmin(admin.ModelAdmin):
         "number", "title", "category", "company", "event_at",
         "status", "initiator_b24_id", "executor_b24_id",
     )
-    list_filter = ("status", "category", "facility")
+    list_filter = ("status", "category", "restaurant", "facility")
     search_fields = ("number", "title", "company", "guest_name")
     readonly_fields = ("created_at", "updated_at", "taken_at", "executed_at")
+
+
+@admin.register(Restaurant)
+class RestaurantAdmin(admin.ModelAdmin):
+    list_display = ("name", "executor_name", "executor_b24_id", "sort_order", "is_active")
+    list_editable = ("sort_order", "is_active")
+    search_fields = ("name", "executor_name")

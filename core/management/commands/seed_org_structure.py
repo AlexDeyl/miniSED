@@ -1,5 +1,6 @@
 """
-Сид оргструктуры MiniSED: организации, объекты (отели), ЦФО.
+Сид оргструктуры MiniSED: организации, объекты (отели), ЦФО, матрица ролей,
+исполнители ресторанов для заявок на комплименты.
 
 Идемпотентен — можно прогонять при каждом деплое (scripts/deploy.sh вызывает
 после seed_employees). Организации сопоставляются по short_name, объекты и ЦФО —
@@ -57,7 +58,7 @@ class Command(BaseCommand):
             data = json.load(fh)
 
         dry_run = options["dry_run"]
-        orgs_n = fac_n = cfo_n = ra_n = 0
+        orgs_n = fac_n = cfo_n = ra_n = rest_n = 0
 
         with transaction.atomic():
             # --- Организации ---
@@ -175,6 +176,27 @@ class Command(BaseCommand):
                     f"{ra['role_code']} @ {ctx} → {ra.get('user_name', ra['user_b24_id'])}"
                 )
 
+            # --- Исполнители ресторанов (заявки на комплименты) ---
+            # Сами рестораны заводит миграция compliments; здесь — только кто
+            # исполняет (ПДн). Ресторана нет — создаём. executor_b24_id: null
+            # — снять персонального исполнителя (тогда исполняет директор
+            # ресторанной службы по роли).
+            from compliments.models import Restaurant
+
+            for r in data.get("compliment_restaurants", []):
+                _, created = Restaurant.objects.update_or_create(
+                    name=r["name"],
+                    defaults={
+                        "executor_b24_id": r.get("executor_b24_id"),
+                        "executor_name": r.get("executor_name", "") if r.get("executor_b24_id") else "",
+                    },
+                )
+                rest_n += 1
+                self.stdout.write(
+                    f"  [ресторан {'СОЗДАН' if created else 'обновлён'}] {r['name']} → "
+                    f"{r.get('executor_name') or r.get('executor_b24_id') or 'директор ресторанной службы (роль)'}"
+                )
+
             if dry_run:
                 transaction.set_rollback(True)
                 self.stdout.write(
@@ -184,6 +206,6 @@ class Command(BaseCommand):
         self.stdout.write(
             self.style.SUCCESS(
                 f"\nГотово. Организаций: {orgs_n}, объектов: {fac_n}, "
-                f"ЦФО: {cfo_n}, назначений ролей: {ra_n}."
+                f"ЦФО: {cfo_n}, назначений ролей: {ra_n}, ресторанов: {rest_n}."
             )
         )

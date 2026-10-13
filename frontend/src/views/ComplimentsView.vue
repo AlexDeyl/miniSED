@@ -95,7 +95,7 @@ onMounted(() => {
             <span class="status-pill" :class="c.status">{{ c.status_display }}</span>
           </div>
           <div class="item-sub">
-            {{ c.category_display }} · {{ c.company }}
+            {{ c.category_display }}<template v-if="c.restaurant_name"> · {{ c.restaurant_name }}</template> · {{ c.company }}
             <template v-if="c.facility_name"> · {{ c.facility_name }}</template>
             <template v-if="c.event_at"> · {{ fmt(c.event_at) }}</template>
           </div>

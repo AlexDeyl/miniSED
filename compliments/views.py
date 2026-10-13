@@ -32,7 +32,7 @@ from core.search import query_param
 from requests_reg.models import RoleAssignment
 
 from . import constants, form_pdf, services
-from .models import Compliment
+from .models import Compliment, Restaurant
 from .search import search
 from .serializers import (
     ComplimentDetailSerializer,
@@ -95,7 +95,7 @@ class ComplimentViewSet(viewsets.ModelViewSet):
         )
 
     def get_queryset(self):
-        qs = Compliment.objects.select_related("facility", "organization")
+        qs = Compliment.objects.select_related("facility", "organization", "restaurant")
         # Поиск (?q=) — по компании, гостю, отелю, содержанию комплимента и
         # ИМЕНАМ прикреплённых файлов.
         query = query_param(self.request, "q").strip() if self.action == "list" else ""
@@ -299,7 +299,7 @@ class ComplimentViewSet(viewsets.ModelViewSet):
             constants.EXECUTION_ALL_STATUSES if query
             else constants.EXECUTION_SCOPES.get(scope, constants.EXECUTION_NEW_STATUSES)
         )
-        qs = Compliment.objects.select_related("facility").filter(status__in=statuses)
+        qs = Compliment.objects.select_related("facility", "restaurant").filter(status__in=statuses)
 
         # Мои роли исполнителя → какие категории мне показывать.
         my_roles = set(
@@ -311,7 +311,12 @@ class ComplimentViewSet(viewsets.ModelViewSet):
             code for code, plan in constants.CATEGORY_ROUTES.items()
             if plan["executor"] in my_roles
         ]
-        qs = qs.filter(Q(executor_b24_id=self.b24_id) | Q(category__in=my_categories))
+        # По роли — только незакреплённые: заявка с назначенным исполнителем
+        # (напр. ресторан со своим ответственным) видна лишь ему.
+        qs = qs.filter(
+            Q(executor_b24_id=self.b24_id)
+            | Q(category__in=my_categories, executor_b24_id__isnull=True)
+        )
         qs = search(qs, query)
         return Response(ComplimentListSerializer(qs, many=True).data)
 
@@ -366,5 +371,9 @@ class ComplimentViewSet(viewsets.ModelViewSet):
         return Response({
             "statuses": [{"code": c, "name": n} for c, n in constants.STATUS_CHOICES],
             "categories": [{"code": c, "name": n} for c, n in constants.CATEGORY_CHOICES],
+            "restaurants": [
+                {"id": r.id, "name": r.name}
+                for r in Restaurant.objects.filter(is_active=True)
+            ],
             "roles": [{"code": c, "name": n} for c, n in constants.ROLE_NAMES.items()],
         })

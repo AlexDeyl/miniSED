@@ -12,12 +12,13 @@ from requests_reg import constants as R
 from requests_reg.models import RoleAssignment
 
 from . import constants, routing, services
-from .models import Compliment
+from .models import Compliment, Restaurant
 
 # Кто есть кто (dev-данные): Дарья — рук. продаж, Ксения — коммерческий
 # директор, ТАР — ГД, Шахов — ресторанная служба, Соколинская — помощник ГД,
 # Вика — кондитерский цех.
 DARIA, KSENIA, TAR, SHAHOV, SOKOL, VIKA = 17, 1595, 857, 900, 901, 902
+IONOV = 903  # исполнитель части ресторанов
 
 
 def api(uid=None):
@@ -194,6 +195,7 @@ class ApiTests(BaseData):
             "title": "Комплимент партнёрам", "category": constants.CATEGORY_RESTAURANT,
             "company": "ООО Ромашка", "facility": self.hotel.id,
             "category_details": "2 сертификата в ресторан",
+            "restaurant": Restaurant.objects.get(name="Ресторан Луч").id,
         }, format="json")
         self.assertEqual(r.status_code, 201, r.content)
         cid = r.json()["id"]
@@ -427,3 +429,86 @@ class SearchTests(BaseData):
         resp = api(SOKOL).get("/api/compliments/execution_queue/?scope=new&q=vruchenie-12")
         self.assertEqual(resp.status_code, 200, resp.content)
         self.assertEqual({x["id"] for x in resp.json()}, {done.id})
+
+
+class RestaurantExecutorTests(BaseData):
+    """Исполнитель ресторанной заявки зависит от выбранного ресторана;
+    ресторан без своего исполнителя — директор ресторанной службы по роли."""
+
+    def setUp(self):
+        super().setUp()
+        # рестораны заводит миграция, исполнителей — сид/админка
+        self.bistro = Restaurant.objects.get(name="Ресторан Bistrott 44")
+        self.bistro.executor_b24_id, self.bistro.executor_name = IONOV, "Ионов"
+        self.bistro.save()
+        self.luch = Restaurant.objects.get(name="Ресторан Луч")  # без исполнителя
+
+    def _approved(self, restaurant):
+        c = self._compliment(constants.CATEGORY_RESTAURANT, restaurant=restaurant)
+        parts = [
+            {"type": "internal", "b24_user_id": s["b24_user_id"], "role": s["role_code"], "order": i}
+            for i, s in enumerate(
+                s for s in routing.build_route(c) if s["role_class"] == constants.CLASS_APPROVER
+            )
+        ]
+        services.submit(c, parts, actor_b24_id=1)
+        for _ in range(4):
+            pending = services.current_pending_participant(services.get_approval(c))
+            if pending is None:
+                break
+            services.decide(c, pending.id, "approve", actor_b24_id=pending.b24_user_id)
+        c.refresh_from_db()
+        return c
+
+    def test_migration_seeds_restaurants(self):
+        self.assertEqual(Restaurant.objects.count(), 5)
+
+    def test_route_executor_from_restaurant(self):
+        slot = routing.build_route(self._compliment(constants.CATEGORY_RESTAURANT, restaurant=self.bistro))[-1]
+        self.assertEqual(slot["b24_user_id"], IONOV)
+        self.assertIn("Bistrott 44", slot["role_name"])
+
+    def test_route_executor_fallback_to_role(self):
+        slot = routing.build_route(self._compliment(constants.CATEGORY_RESTAURANT, restaurant=self.luch))[-1]
+        self.assertEqual(slot["b24_user_id"], SHAHOV)
+
+    def test_queue_split_by_restaurant(self):
+        mine = self._approved(self.bistro)
+        other = self._approved(self.luch)
+        self.assertEqual(mine.executor_b24_id, IONOV)
+        self.assertEqual(other.executor_b24_id, SHAHOV)
+        ionov_q = api(IONOV).get("/api/compliments/execution_queue/?scope=new").json()
+        shahov_q = api(SHAHOV).get("/api/compliments/execution_queue/?scope=new").json()
+        self.assertEqual([x["id"] for x in ionov_q], [mine.id])
+        self.assertEqual([x["id"] for x in shahov_q], [other.id])
+        # чужую по ресторану заявку Шахов не исполняет
+        self.assertEqual(api(SHAHOV).post(f"/api/compliments/{mine.id}/take/").status_code, 403)
+        self.assertEqual(api(IONOV).post(f"/api/compliments/{mine.id}/take/").status_code, 200)
+
+    def test_restaurant_required_for_restaurant_category(self):
+        r = api(1).post("/api/compliments/", {
+            "title": "Ужин", "category": constants.CATEGORY_RESTAURANT, "company": "ООО Ромашка",
+        }, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("restaurant", r.json())
+
+    def test_restaurant_cleared_for_other_category(self):
+        r = api(1).post("/api/compliments/", {
+            "title": "Торт", "category": constants.CATEGORY_CONFECTIONERY, "company": "ООО Ромашка",
+            "restaurant": self.bistro.id,
+        }, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertIsNone(r.json()["restaurant"])
+
+    def test_restaurant_change_resets_executor(self):
+        c = self._compliment(constants.CATEGORY_RESTAURANT, restaurant=self.bistro,
+                             executor_b24_id=IONOV, status=constants.STATUS_RETURNED)
+        r = api(1).patch(f"/api/compliments/{c.id}/", {"restaurant": self.luch.id}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertIsNone(r.json()["executor_b24_id"])
+        self.assertEqual(r.json()["restaurant_name"], "Ресторан Луч")
+
+    def test_meta_lists_restaurants(self):
+        names = [r["name"] for r in api(1).get("/api/compliments/meta/").json()["restaurants"]]
+        self.assertEqual(names[0], "Ресторан Невесомость")
+        self.assertEqual(len(names), 5)

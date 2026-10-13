@@ -371,6 +371,7 @@ onMounted(load)
         <table class="round-table">
           <tbody>
             <tr><td>Категория</td><td>{{ compliment.category_display }}</td></tr>
+            <tr v-if="compliment.restaurant_name"><td>Ресторан</td><td>{{ compliment.restaurant_name }}</td></tr>
             <tr v-if="compliment.category_details">
               <td>Что предоставляем</td>
               <td style="white-space:pre-line">{{ compliment.category_details }}</td>

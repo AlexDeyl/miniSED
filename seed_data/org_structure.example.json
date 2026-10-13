@@ -59,5 +59,16 @@
       "user_b24_id": 4,
       "user_name": "Сергеев Сергей Сергеевич"
     }
+  ],
+  "compliment_restaurants": [
+    {
+      "name": "Ресторан Пример-1",
+      "executor_b24_id": 5,
+      "executor_name": "Ресторанов Роман Романович"
+    },
+    {
+      "name": "Ресторан Пример-2",
+      "executor_b24_id": null
+    }
   ]
 }

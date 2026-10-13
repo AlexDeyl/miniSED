@@ -48,6 +48,9 @@ export interface ComplimentListItem {
   event_at: string | null
   facility: number | null
   facility_name: string | null
+  // только у категории «рестораны»: от ресторана зависит исполнитель
+  restaurant: number | null
+  restaurant_name: string | null
   status: ComplimentStatus
   status_display: string
   initiator_b24_id: number | null
@@ -80,6 +83,7 @@ export interface ComplimentCreatePayload {
   event_at?: string | null
   facility?: number | null
   organization?: number | null
+  restaurant?: number | null
   description?: string
   department?: string
   needs_ceo?: boolean

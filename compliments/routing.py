@@ -20,6 +20,11 @@
 инициатор видел путь «от направления до исполнения». Решения на этом слоте
 нет — это работа, а не голос.
 
+Исполнитель ресторанной категории зависит от ВЫБРАННОГО РЕСТОРАНА (разделение
+зон ответственности, 13.10.2026): у ресторана может быть свой исполнитель
+(compliments.Restaurant.executor_b24_id). Не задан — исполняет директор
+ресторанной службы по общей роли.
+
 Роли — общефирменные (requests_reg.RoleAssignment), не дублируем. Роль без
 назначения помечается needs_manual: исполнителя выбирает инициатор вручную.
 """
@@ -69,18 +74,45 @@ def executor_role(compliment) -> str | None:
     return plan["executor"] if plan else None
 
 
+def restaurant_executor(compliment) -> tuple[int, str] | None:
+    """Персональный исполнитель выбранного ресторана (b24_id, ФИО), если задан."""
+    if compliment.category != K.CATEGORY_RESTAURANT or not compliment.restaurant_id:
+        return None
+    r = compliment.restaurant
+    if r.executor_b24_id:
+        return r.executor_b24_id, r.executor_name
+    return None
+
+
+def resolve_executor(compliment) -> tuple[int, str] | None:
+    """Кто исполняет заявку по умолчанию: исполнитель ресторана, иначе роль."""
+    personal = restaurant_executor(compliment)
+    if personal:
+        return personal
+    code = executor_role(compliment)
+    assignment = resolve_role(code, compliment) if code else None
+    return (assignment.user_b24_id, assignment.user_name) if assignment else None
+
+
 def _slot(order: int, role_code: str, role_class: str, compliment) -> dict:
-    assignment = resolve_role(role_code, compliment)
+    if role_class == K.CLASS_EXECUTOR:
+        found = resolve_executor(compliment)
+    else:
+        assignment = resolve_role(role_code, compliment)
+        found = (assignment.user_b24_id, assignment.user_name) if assignment else None
+    role_name = C.ROLE_NAMES.get(role_code, role_code)
+    if role_class == K.CLASS_EXECUTOR and compliment.restaurant_id:
+        role_name = f"{role_name} · {compliment.restaurant.name}"
     return {
         "order": order,
         "role_code": role_code,
-        "role_name": C.ROLE_NAMES.get(role_code, role_code),
+        "role_name": role_name,
         "role_class": role_class,
         "required": True,
-        "resolved": assignment is not None,
-        "b24_user_id": assignment.user_b24_id if assignment else None,
-        "user_name": assignment.user_name if assignment else "",
-        "needs_manual": assignment is None,
+        "resolved": found is not None,
+        "b24_user_id": found[0] if found else None,
+        "user_name": found[1] if found else "",
+        "needs_manual": found is None,
         # Согласующего инициатор может заменить (отпуск, устаревшее
         # назначение); исполнителя — нет, он определяется категорией.
         "replaceable": role_class == K.CLASS_APPROVER,
@@ -100,9 +132,10 @@ def build_route(compliment) -> list[dict]:
 
 
 def default_executor(compliment) -> tuple[str | None, int | None]:
-    """Роль исполнителя и её сотрудник (если роль назначена) — для подстановки."""
+    """Роль исполнителя и сотрудник (исполнитель ресторана или назначенный на
+    роль) — для подстановки."""
     code = executor_role(compliment)
     if not code:
         return None, None
-    assignment = resolve_role(code, compliment)
-    return code, (assignment.user_b24_id if assignment else None)
+    found = resolve_executor(compliment)
+    return code, (found[0] if found else None)

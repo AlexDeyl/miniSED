@@ -28,6 +28,8 @@ def _details(compliment) -> list[str]:
         f"Категория: {compliment.category_label}",
         f"Компания: {compliment.company}",
     ]
+    if compliment.restaurant_id:
+        lines.append(f"Ресторан: {compliment.restaurant.name}")
     if compliment.guest_name:
         lines.append(f"Гость: {compliment.guest_name}")
     if compliment.event_at:

@@ -75,6 +75,7 @@ export const compliments = {
     api.get<{
       statuses: { code: string; name: string }[]
       categories: { code: string; name: string }[]
+      restaurants: { id: number; name: string }[]
       roles: { code: string; name: string }[]
     }>(`${BASE}/meta/`),
 }

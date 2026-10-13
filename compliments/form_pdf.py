@@ -98,6 +98,7 @@ def render_pdf(compliment, *, approval=None) -> bytes:
         [[Paragraph("Категория", section)],
          [Paragraph(
              f"{compliment.category_label}"
+             + (f"<br/><b>Ресторан:</b> {compliment.restaurant.name}" if compliment.restaurant_id else "")
              + (f"<br/>{compliment.category_details}" if compliment.category_details else ""),
              base,
          )]],
