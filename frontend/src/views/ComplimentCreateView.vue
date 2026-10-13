@@ -140,120 +140,238 @@ onMounted(load)
 </script>
 
 <template>
-  <section class="detail-narrow">
+  <section class="cform">
     <RouterLink :to="isEdit ? `/compliments/${props.id}` : '/compliments'" class="back-link">
       {{ isEdit ? '← К заявке' : '← К списку' }}
     </RouterLink>
     <h1 class="detail-title">
       {{ isEdit ? 'Редактирование заявки на комплимент' : 'Новая заявка на комплимент' }}
     </h1>
+    <p class="cform-lead">Поля со звёздочкой обязательны.</p>
 
     <p v-if="error" class="state state--error">{{ error }}</p>
     <p v-if="loading" class="state">Загрузка…</p>
 
-    <div v-else class="detail-card">
-      <label class="form-field">
-        <span>Наименование заявки *</span>
-        <input v-model="form.title" type="text" placeholder="Напр.: Комплимент организатору бизнес-завтрака" />
-      </label>
+    <template v-else>
+      <!-- 1. Что дарим: от категории зависит весь маршрут -->
+      <div class="cform-card">
+        <div class="cform-head">
+          <span class="cform-num">1</span>
+          <div>
+            <div class="cform-title">Комплимент</div>
+            <div class="cform-sub">Что предоставляем — от категории зависит маршрут согласования</div>
+          </div>
+        </div>
 
-      <label class="form-field">
-        <span>Категория комплимента *</span>
-        <select v-model="form.category">
-          <option v-for="c in categories" :key="c.code" :value="c.code">{{ c.name }}</option>
-        </select>
-      </label>
-      <p class="detail-meta" style="margin:-4px 0 4px">Маршрут: {{ routeHint }}</p>
-
-      <label v-if="isRestaurant" class="form-field">
-        <span>Ресторан *</span>
-        <select v-model="form.restaurant">
-          <option :value="null">— выберите ресторан —</option>
-          <option v-for="r in restaurants" :key="r.id" :value="r.id">{{ r.name }}</option>
-        </select>
-      </label>
-
-      <label class="form-field">
-        <span>Что именно предоставляем</span>
-        <textarea v-model="form.category_details" rows="2"
-                  placeholder="Напр.: 2 сертификата на проживание в отеле SVET, «Стандарт», до 30.12.2026"></textarea>
-      </label>
-
-      <div class="form-row">
         <label class="form-field">
-          <span>Компания (получатель) *</span>
-          <input v-model="form.company" type="text" placeholder="Напр.: ООО «Туроператор Невские Сезоны»" />
+          <span>Наименование заявки *</span>
+          <input v-model="form.title" type="text" placeholder="Напр.: Комплимент организатору бизнес-завтрака" />
         </label>
-        <label class="form-field">
-          <span>Ф.И.О. гостя</span>
-          <input v-model="form.guest_name" type="text" placeholder="если известно" />
-        </label>
-      </div>
 
-      <div class="form-row">
+        <div class="form-row">
+          <label class="form-field">
+            <span>Категория комплимента *</span>
+            <select v-model="form.category">
+              <option v-for="c in categories" :key="c.code" :value="c.code">{{ c.name }}</option>
+            </select>
+          </label>
+          <label v-if="isRestaurant" class="form-field">
+            <span>Ресторан *</span>
+            <select v-model="form.restaurant">
+              <option :value="null">— выберите ресторан —</option>
+              <option v-for="r in restaurants" :key="r.id" :value="r.id">{{ r.name }}</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="cform-route">
+          <span class="cform-route-label">Маршрут</span>
+          {{ routeHint }}
+        </div>
+
         <label class="form-field">
-          <span>Дата и время комплимента</span>
-          <input v-model="form.event_at" type="datetime-local" />
-        </label>
-        <label class="form-field">
-          <span>Отель</span>
-          <select v-model="form.facility">
-            <option :value="null">— не выбран —</option>
-            <option v-for="f in facilities" :key="f.id" :value="f.id">{{ f.name }}</option>
-          </select>
+          <span>Что именно предоставляем</span>
+          <textarea v-model="form.category_details" rows="2"
+                    placeholder="Напр.: 2 сертификата на проживание в отеле SVET, «Стандарт», до 30.12.2026"></textarea>
         </label>
       </div>
 
-      <label class="form-field">
-        <span>Подразделение инициатора</span>
-        <input v-model="form.department" type="text" placeholder="Напр.: Отдел продаж" />
-      </label>
+      <!-- 2. Кому и когда -->
+      <div class="cform-card">
+        <div class="cform-head">
+          <span class="cform-num">2</span>
+          <div>
+            <div class="cform-title">Получатель</div>
+            <div class="cform-sub">Кому, где и когда вручаем</div>
+          </div>
+        </div>
 
-      <label class="form-field">
-        <span>Описание заявки</span>
-        <textarea v-model="form.description" rows="3"
-                  placeholder="Повод, мероприятие, дополнительная информация"></textarea>
-      </label>
+        <div class="form-row">
+          <label class="form-field">
+            <span>Компания (получатель) *</span>
+            <input v-model="form.company" type="text" placeholder="Напр.: ООО «Туроператор Невские Сезоны»" />
+          </label>
+          <label class="form-field">
+            <span>Ф.И.О. гостя</span>
+            <input v-model="form.guest_name" type="text" placeholder="если известно" />
+          </label>
+        </div>
 
-      <label class="check-line">
-        <input v-model="form.needs_ceo" type="checkbox" />
-        <span>Согласование с генеральным директором</span>
-      </label>
-      <p class="detail-meta" style="margin:-4px 0 8px">
-        Добавит коммерческого и генерального директора там, где их нет по категории.
-      </p>
-
-      <div class="form-field">
-        <span>Файлы</span>
-        <input ref="fileInput" type="file" multiple @change="onFiles" />
-        <ul v-if="files.length" class="item-tags" style="flex-direction:column;align-items:flex-start;gap:4px;margin-top:6px">
-          <li v-for="(f, i) in files" :key="f.name + f.size">
-            {{ f.name }}
-            <button type="button" class="extra-x" title="Убрать" @click="removeFile(i)">×</button>
-          </li>
-        </ul>
+        <div class="form-row">
+          <label class="form-field">
+            <span>Дата и время комплимента</span>
+            <input v-model="form.event_at" type="datetime-local" />
+          </label>
+          <label class="form-field">
+            <span>Отель</span>
+            <select v-model="form.facility">
+              <option :value="null">— не выбран —</option>
+              <option v-for="f in facilities" :key="f.id" :value="f.id">{{ f.name }}</option>
+            </select>
+          </label>
+        </div>
       </div>
 
-      <div class="row-actions" style="margin-top:12px">
+      <!-- 3. Подробности и вложения -->
+      <div class="cform-card">
+        <div class="cform-head">
+          <span class="cform-num">3</span>
+          <div>
+            <div class="cform-title">Подробности</div>
+            <div class="cform-sub">Повод, согласование и файлы</div>
+          </div>
+        </div>
+
+        <label class="form-field">
+          <span>Подразделение инициатора</span>
+          <input v-model="form.department" type="text" placeholder="Напр.: Отдел продаж" />
+        </label>
+
+        <label class="form-field">
+          <span>Описание заявки</span>
+          <textarea v-model="form.description" rows="3"
+                    placeholder="Повод, мероприятие, дополнительная информация"></textarea>
+        </label>
+
+        <label class="cform-option" :class="{ 'is-on': form.needs_ceo }">
+          <input v-model="form.needs_ceo" type="checkbox" />
+          <span>
+            <b>Согласование с генеральным директором</b>
+            <small>Добавит коммерческого и генерального директора там, где их нет по категории.</small>
+          </span>
+        </label>
+
+        <div class="form-field">
+          <span>Файлы</span>
+          <label class="cform-drop">
+            <input ref="fileInput" type="file" multiple @change="onFiles" />
+            <span class="cform-drop-btn">Выбрать файлы</span>
+            <span class="cform-drop-hint">
+              {{ files.length ? `Выбрано: ${files.length}` : 'Бланк, макет сертификата, письмо партнёра…' }}
+            </span>
+          </label>
+          <ul v-if="files.length" class="cform-files">
+            <li v-for="(f, i) in files" :key="f.name + f.size">
+              <span>{{ f.name }}</span>
+              <button type="button" class="extra-x" title="Убрать" @click="removeFile(i)">×</button>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="cform-actions">
         <button class="btn btn--primary" :disabled="busy" @click="save">
           {{ isEdit ? 'Сохранить' : 'Создать заявку' }}
         </button>
-        <RouterLink v-if="isEdit" :to="`/compliments/${props.id}`" class="btn btn--ghost">
+        <RouterLink :to="isEdit ? `/compliments/${props.id}` : '/compliments'" class="btn btn--ghost">
           Отмена
         </RouterLink>
+        <p v-if="isEdit" class="cform-note">
+          Маршрут строится по категории при отправке — после правок проверьте его
+          в карточке заявки и отправьте на согласование заново.
+        </p>
       </div>
-      <p v-if="isEdit" class="muted" style="margin:10px 0 0;font-size:12px">
-        Маршрут строится по категории при отправке — после правок проверьте его
-        в карточке заявки и отправьте на согласование заново.
-      </p>
-    </div>
+    </template>
   </section>
 </template>
 
 <style scoped>
-.check-line { display: flex; align-items: center; gap: 8px; margin: 8px 0 4px; font-size: 14px; }
+.cform { max-width: 820px; }
+.cform-lead { margin: 0 0 14px; font-size: 12px; color: var(--text-muted); }
+
+/* Смысловой блок формы: заголовок с номером шага + поля с воздухом,
+   чтобы форма не сливалась в одно сплошное поле. */
+.cform-card {
+  background: #fff; border: 1px solid #eceff1; border-radius: 12px;
+  box-shadow: var(--shadow-soft); padding: 18px 20px 20px; margin-bottom: 14px;
+  display: flex; flex-direction: column; gap: 16px;
+}
+.cform-head {
+  display: flex; align-items: center; gap: 12px;
+  padding-bottom: 12px; border-bottom: 1px solid #f1f3f4;
+}
+.cform-num {
+  flex: none; width: 28px; height: 28px; border-radius: 50%;
+  background: var(--green-light); color: var(--green-main);
+  display: grid; place-items: center; font-weight: 700; font-size: 13px;
+}
+.cform-title { font-size: 15px; font-weight: 600; color: var(--text-main); }
+.cform-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+.cform .form-row { gap: 16px; }
+.cform .form-field { gap: 6px; min-width: 220px; }
+.cform .form-field > span { font-size: 13px; font-weight: 500; color: #3c4043; }
+.cform .form-field input, .cform .form-field select, .cform .form-field textarea {
+  padding: 10px 12px; border-color: #dadce0; background: #fcfcfd;
+}
+.cform .form-field input, .cform .form-field select { height: 42px; box-sizing: border-box; }
+.cform .form-field input:focus, .cform .form-field select:focus, .cform .form-field textarea:focus {
+  background: #fff; box-shadow: 0 0 0 3px rgba(11, 127, 95, 0.12);
+}
+
+/* Подсказка о маршруте — выделенная плашка, а не серая строчка между полями. */
+.cform-route {
+  background: var(--green-light); border-left: 3px solid var(--green-main);
+  border-radius: 6px; padding: 9px 12px; font-size: 13px; color: #1e4d3f; line-height: 1.45;
+}
+.cform-route-label {
+  display: inline-block; margin-right: 6px; font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.04em; color: var(--green-main);
+}
+
+/* Флажок — кликабельная плитка с пояснением. */
+.cform-option {
+  display: flex; align-items: flex-start; gap: 10px; cursor: pointer;
+  border: 1px solid #dadce0; border-radius: 8px; padding: 12px 14px; background: #fcfcfd;
+}
+.cform-option.is-on { border-color: var(--green-main); background: var(--green-light); }
+.cform-option input { margin-top: 2px; accent-color: var(--green-main); width: 16px; height: 16px; }
+.cform-option b { display: block; font-size: 14px; font-weight: 500; }
+.cform-option small { display: block; font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+/* Загрузка файлов. */
+.cform-drop {
+  display: flex; align-items: center; gap: 12px; cursor: pointer;
+  border: 1px dashed #c4c7c5; border-radius: 8px; padding: 12px 14px; background: #fcfcfd;
+}
+.cform-drop:hover { border-color: var(--green-main); }
+.cform-drop input { display: none; }
+.cform-drop-btn {
+  border: 1px solid var(--green-main); color: var(--green-main); border-radius: 6px;
+  padding: 6px 12px; font-size: 13px; font-weight: 500; background: #fff;
+}
+.cform-drop-hint { font-size: 13px; color: var(--text-muted); }
+.cform-files { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.cform-files li {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  background: #f5f5f5; border-radius: 6px; padding: 6px 10px; font-size: 13px;
+}
 .extra-x {
   border: none; background: #ffcdd2; color: #b71c1c; border-radius: 50%;
   width: 20px; height: 20px; cursor: pointer; line-height: 1; font-size: 14px;
 }
+
+.cform-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 4px 0 24px; }
+.cform-actions .btn { padding: 9px 20px; font-size: 14px; }
+.cform-note { flex-basis: 100%; margin: 4px 0 0; font-size: 12px; color: var(--text-muted); }
 </style>
