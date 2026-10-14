@@ -192,6 +192,22 @@ class RegistryFlowTests(TestCase):
         e = PoaRegistryEntry.objects.get(request=req)
         self.assertEqual(api(LAWYER).delete(f"/api/reg/poa-registry/{e.id}/").status_code, 403)
 
+    def test_manual_entry_with_full_form_payload(self):
+        # форма шлёт все графы: пустой номер, пустые строки и null-даты
+        form = {
+            "kind": "poa", "organization": self.org.id, "number": "", "reg_number": "",
+            "issue_date": "2026-10-14", "code": "", "representative": "Шаурин С. А.",
+            "powers": "Т2мобайл", "valid_until": None, "cert_valid_until": None,
+            "revoked_at": None, "comment": "",
+        }
+        r = api(LAWYER).post("/api/reg/poa-registry/", {**form, "assign_number": True}, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(r.json()["number"], "Д-Н-26/01")
+        r = api(LAWYER).post("/api/reg/poa-registry/",
+                             {**form, "number": "Д-43/26", "assign_number": True}, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(r.json()["number"], "Д-43/26")
+
     def test_filters_and_status_column(self):
         today = timezone.localdate()
         mk = lambda **kw: PoaRegistryEntry.objects.create(organization=self.org, **kw)  # noqa: E731

@@ -155,15 +155,13 @@ class PoaRegistryViewSet(viewsets.ModelViewSet):
         ser = PoaRegistryWriteSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         data = dict(ser.validated_data)
-        extra = {}
         if request.data.get("assign_number") and not data.get("number"):
+            # форма шлёт пустой «Номер» — его заменяет номер по маске
             number, seq, year = registry.allocate_number(
                 data["organization"], data.get("issue_date") or timezone.localdate(),
             )
-            extra = {"number": number, "seq": seq, "seq_year": year}
-        entry = PoaRegistryEntry.objects.create(
-            **data, **extra, created_by_b24_id=self.b24_id,
-        )
+            data.update(number=number, seq=seq, seq_year=year)
+        entry = PoaRegistryEntry.objects.create(**data, created_by_b24_id=self.b24_id)
         return Response(self.get_serializer(entry).data, status=201)
 
     def update(self, request, *args, **kwargs):
