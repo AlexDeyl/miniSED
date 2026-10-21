@@ -19,6 +19,8 @@ export interface AuthProfile {
   is_security?: boolean
   /** Отдел по работе с персоналом — виден раздел «Заявки для отдела по работе с персоналом». */
   is_hr_staff?: boolean
+  /** Задан ли пароль для входа по почте (на случай недоступности Битрикса). */
+  has_password?: boolean
 }
 
 export interface LoginResult extends AuthProfile {
@@ -32,4 +34,14 @@ export const authApi = {
     api.post<LoginResult>('/auth/bitrix/', { access_token: accessToken, domain }),
   me: () => api.get<AuthProfile>('/auth/me/'),
   logout: () => api.post<void>('/auth/logout/'),
+  changePassword: (oldPassword: string, newPassword: string, newPassword2: string) =>
+    api.post<{ detail: string; has_password: boolean }>('/auth/password/change/', {
+      old_password: oldPassword, new_password: newPassword, new_password2: newPassword2,
+    }),
+  requestReset: (email: string) =>
+    api.post<{ detail: string }>('/auth/password/reset/', { email }),
+  confirmReset: (uid: string, token: string, newPassword: string, newPassword2: string) =>
+    api.post<LoginResult>('/auth/password/reset/confirm/', {
+      uid, token, new_password: newPassword, new_password2: newPassword2,
+    }),
 }

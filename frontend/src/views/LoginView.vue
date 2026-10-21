@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { ApiError } from '@/services/api'
 import { bitrix } from '@/services/bitrix'
+import { authApi } from '@/services/auth'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -20,6 +21,28 @@ const email = ref('')
 const password = ref('')
 const busy = ref(false)
 const error = ref<string | null>(null)
+
+// «Забыли пароль?» — письмо со ссылкой на новый пароль
+const forgot = ref(false)
+const forgotSent = ref<string | null>(null)
+
+function openForgot() {
+  forgot.value = true
+  forgotSent.value = null
+  error.value = null
+}
+
+async function sendReset() {
+  error.value = null
+  busy.value = true
+  try {
+    forgotSent.value = (await authApi.requestReset(email.value.trim())).detail
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.message : 'Не удалось отправить письмо'
+  } finally {
+    busy.value = false
+  }
+}
 
 interface BX24Auth {
   access_token?: string
@@ -126,7 +149,25 @@ onMounted(async () => {
       <div class="login-logo">МиниСЭД 2.0</div>
       <p class="login-sub">Электронный документооборот</p>
 
-      <form @submit.prevent="submit">
+      <form v-if="forgot" @submit.prevent="sendReset">
+        <p class="login-forgot-text">
+          Укажите рабочую почту — пришлём ссылку, по которой можно задать новый пароль.
+        </p>
+        <label class="form-field">
+          <span>Email</span>
+          <input v-model="email" type="email" autocomplete="username" placeholder="ivanov@nord.ru" required />
+        </label>
+
+        <p v-if="forgotSent" class="login-sent">{{ forgotSent }}</p>
+        <p v-if="error" class="state state--error" style="margin-top:12px">{{ error }}</p>
+
+        <button class="btn btn--primary" type="submit" :disabled="busy" style="width:100%;margin-top:16px">
+          {{ busy ? 'Отправка…' : forgotSent ? 'Отправить ещё раз' : 'Отправить ссылку' }}
+        </button>
+        <button class="btn btn--ghost login-link" type="button" @click="forgot = false">← Ко входу</button>
+      </form>
+
+      <form v-else @submit.prevent="submit">
         <label class="form-field">
           <span>Email</span>
           <input v-model="email" type="email" autocomplete="username" placeholder="ivanov@nord.ru" />
@@ -141,13 +182,16 @@ onMounted(async () => {
         <button class="btn btn--primary" type="submit" :disabled="busy" style="width:100%;margin-top:16px">
           {{ busy ? 'Вход…' : 'Войти' }}
         </button>
+        <button class="btn btn--ghost login-link" type="button" @click="openForgot">Забыли пароль?</button>
       </form>
 
-      <div class="login-or"><span>или</span></div>
+      <template v-if="!forgot">
+        <div class="login-or"><span>или</span></div>
 
-      <button class="btn login-bitrix" type="button" :disabled="busy" @click="loginViaBitrix">
-        Войти через Битрикс24
-      </button>
+        <button class="btn login-bitrix" type="button" :disabled="busy" @click="loginViaBitrix">
+          Войти через Битрикс24
+        </button>
+      </template>
     </div>
   </div>
 </template>
@@ -161,4 +205,8 @@ onMounted(async () => {
 .login-or::before, .login-or::after { content: ''; flex: 1; height: 1px; background: var(--gray-border); }
 .login-bitrix { width: 100%; background: #2f6fd6; color: #fff; border-color: #2f6fd6; }
 .login-bitrix:hover { background: #2860bd; }
+.login-link { width: 100%; margin-top: 8px; border: none; color: var(--green-main); font-size: 13px; }
+.login-link:hover { background: transparent; text-decoration: underline; }
+.login-forgot-text { font-size: 13px; color: var(--text-muted); margin: 0 0 12px; }
+.login-sent { margin: 12px 0 0; font-size: 13px; padding: 8px 10px; border-radius: 6px; background: var(--green-light); color: var(--text-main); }
 </style>

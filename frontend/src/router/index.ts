@@ -11,6 +11,13 @@ const router = createRouter({
       meta: { title: 'Вход', public: true, noShell: true },
     },
     {
+      // ссылка из письма «Забыли пароль?»
+      path: '/reset-password/:uid/:token',
+      name: 'reset-password',
+      component: () => import('@/views/ResetPasswordView.vue'),
+      meta: { title: 'Новый пароль', public: true, noShell: true },
+    },
+    {
       path: '/svetofor',
       name: 'svetofor',
       component: () => import('@/views/SvetoforView.vue'),

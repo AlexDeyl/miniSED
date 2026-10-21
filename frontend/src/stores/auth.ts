@@ -73,6 +73,20 @@ export const useAuthStore = defineStore('auth', () => {
     applyProfile(res)
   }
 
+  // новый пароль по ссылке из письма — сервер сразу впускает
+  async function confirmReset(uid: string, t: string, password: string, password2: string) {
+    const res = await authApi.confirmReset(uid, t, password, password2)
+    token.value = res.token
+    ls(TOKEN_KEY, res.token)
+    applyProfile(res)
+  }
+
+  async function changePassword(oldPassword: string, password: string, password2: string) {
+    const res = await authApi.changePassword(oldPassword, password, password2)
+    if (profile.value) profile.value = { ...profile.value, has_password: res.has_password }
+    return res.detail
+  }
+
   // применить токен, полученный OAuth-редиректом (?bitrix_token=...)
   // Флаги доступа меняются без перелогина (юрист принял функции СБ) —
   // перечитываем профиль, чтобы сайдбар показал новый раздел сразу.
@@ -161,6 +175,6 @@ export const useAuthStore = defineStore('auth', () => {
   return {
     token, profile, b24UserId, ready, isAuthenticated, displayName, isLawyer,
     canViewAll, isComplimentExecutor, isItSpecialist, isSecurity, isHrStaff,
-    login, bitrixLogin, applyToken, refreshProfile, logout, init,
+    login, bitrixLogin, applyToken, refreshProfile, logout, init, confirmReset, changePassword,
   }
 })

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { RouterView, RouterLink, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useSvetoforStore, SVETOFOR_TABS } from '@/stores/svetofor'
@@ -14,6 +14,7 @@ import { useSecurityUiStore, SECURITY_TABS } from '@/stores/securityUi'
 import { useRegistryUiStore, REGISTRY_TABS } from '@/stores/registryUi'
 import { useJobDescUiStore, JOBDESC_TABS, HR_TABS } from '@/stores/jobdescUi'
 import { jobdesc } from '@/services/jobdesc'
+import ChangePasswordModal from '@/components/ChangePasswordModal.vue'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -55,6 +56,9 @@ watch(() => auth.b24UserId, async (uid) => {
 
 // Открыто из Битрикса (в iframe) — тогда «Выйти» не нужен (авто-вход портала).
 const inBitrix = window.self !== window.top
+
+// Смена пароля — только с токеном MiniSED (вход по почте или через Битрикс).
+const showPassword = ref(false)
 
 async function doLogout() {
   await auth.logout()
@@ -234,8 +238,19 @@ function tabBadge(code: string): number {
         <div class="sidebar-block-label">Текущий пользователь</div>
         <div v-if="auth.profile?.fio" class="sidebar-user-name">{{ auth.profile.fio }}</div>
         <div class="sidebar-user-id">ID Б24: <strong>{{ auth.b24UserId ?? '—' }}</strong></div>
-        <button v-if="!inBitrix" class="sidebar-logout" style="margin-top:8px" @click="doLogout">Выйти</button>
+        <!-- Пароля нет — вошёл только через Битрикс: подсказываем задать его
+             на случай, если портал будет недоступен. -->
+        <div v-if="auth.token && auth.profile && !auth.profile.has_password" class="sidebar-pwd-hint">
+          Задайте пароль, чтобы входить по почте, если Битрикс24 недоступен.
+        </div>
+        <div class="sidebar-user-actions">
+          <button v-if="auth.token" class="sidebar-logout" @click="showPassword = true">
+            {{ auth.profile?.has_password ? 'Сменить пароль' : 'Задать пароль' }}
+          </button>
+          <button v-if="!inBitrix" class="sidebar-logout" @click="doLogout">Выйти</button>
+        </div>
       </div>
+      <ChangePasswordModal v-if="showPassword" @close="showPassword = false" />
 
       <div class="sidebar-footer">
         ©Mini-SED by Alexander Rodionov, v. 2.0, 2026

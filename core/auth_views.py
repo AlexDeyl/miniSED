@@ -12,6 +12,13 @@ import requests
 from django.conf import settings
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
+from django.contrib.auth.password_validation import validate_password
+from django.contrib.auth.tokens import default_token_generator
+from django.core.cache import cache
+from django.core.exceptions import ValidationError
+from django.core.mail import send_mail
+from django.utils.encoding import force_bytes, force_str
+from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from django.shortcuts import redirect
 from django.urls import reverse
 from rest_framework import status
@@ -29,7 +36,9 @@ def profile_payload(profile: UserProfile | None, user=None) -> dict:
             "authenticated": True,
             "profile": None,
             "email": getattr(user, "email", "") or getattr(user, "username", ""),
+            "has_password": bool(user and user.has_usable_password()),
         }
+    auth_user = user or profile.auth_user
     role_codes = list(profile.roles.values_list("code", flat=True))
     perm_codes = list(
         profile.roles.filter(permissions__isnull=False)
@@ -46,6 +55,9 @@ def profile_payload(profile: UserProfile | None, user=None) -> dict:
         "roles": role_codes,
         "permissions": perm_codes,
         "organizations": list(profile.organizations.values_list("id", flat=True)),
+        # Задан ли пароль для входа по почте. Кто входил только через Битрикс,
+        # пароля не имеет — ему подсказываем задать его на случай сбоя портала.
+        "has_password": bool(auth_user and auth_user.has_usable_password()),
         # Показывать ли раздел «Заявки для исполнения» (комплименты).
         "is_compliment_executor": _is_compliment_executor(profile.bitrix_id),
         # Показывать ли раздел «Работа ИТ» (исполнение заявок на ЭЦП).
@@ -108,7 +120,7 @@ def login(request):
     if not email or not password:
         return Response({"detail": "Укажите email и пароль."}, status=400)
 
-    user = authenticate(request, username=email, password=password)
+    user = authenticate(request, username=_username_for_email(email), password=password)
     if user is None:
         return Response({"detail": "Неверный email или пароль."}, status=401)
     if not user.is_active:
@@ -119,6 +131,22 @@ def login(request):
     data = profile_payload(profile, user)
     data["token"] = token.key
     return Response(data)
+
+
+def _username_for_email(email: str) -> str:
+    """Логин учётки по рабочей почте.
+
+    Обычно логин и есть почта. Но учётка, заведённая через Битрикс, могла
+    получить логин b24_<id> (почта была занята или пуста) — тогда находим её
+    через профиль, если почта однозначно принадлежит одному человеку."""
+    exact = User.objects.filter(username__iexact=email).values_list("username", flat=True).first()
+    if exact:
+        return exact
+    usernames = list(
+        UserProfile.objects.filter(email__iexact=email, is_active=True, auth_user__isnull=False)
+        .values_list("auth_user__username", flat=True)[:2]
+    )
+    return usernames[0] if len(usernames) == 1 else email
 
 
 @api_view(["GET"])
@@ -133,6 +161,160 @@ def me(request):
 def logout(request):
     Token.objects.filter(user=request.user).delete()
     return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------------
+#  Пароль: смена (из приложения) и восстановление (по ссылке из письма)
+# ---------------------------------------------------------------------------
+# Пароль нужен на случай, когда Битрикс24 недоступен: тогда входят по почте.
+# Общих паролей «по умолчанию» нет — каждый задаёт свой сам: в приложении
+# («Сменить пароль») или по ссылке из письма («Забыли пароль?»).
+
+RESET_EMAIL_COOLDOWN = 120  # сек — не чаще одного письма на адрес
+
+
+def _check_new_password(user, new_password: str, new_password2: str) -> str | None:
+    """Текст ошибки для нового пароля или None, если он годится."""
+    if not new_password:
+        return "Введите новый пароль."
+    if new_password != new_password2:
+        return "Пароли не совпадают."
+    try:
+        validate_password(new_password, user)
+    except ValidationError as e:
+        return " ".join(e.messages)
+    return None
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def password_change(request):
+    """Смена пароля вошедшим пользователем.
+
+    Кто ещё ни разу не задавал пароль (входил через Битрикс), задаёт его без
+    текущего — личность уже подтверждена входом."""
+    user = request.user
+    if user.has_usable_password() and not user.check_password(
+        request.data.get("old_password") or ""
+    ):
+        return Response({"detail": "Текущий пароль указан неверно."}, status=400)
+
+    error = _check_new_password(
+        user, request.data.get("new_password") or "", request.data.get("new_password2") or ""
+    )
+    if error:
+        return Response({"detail": error}, status=400)
+
+    user.set_password(request.data["new_password"])
+    user.save(update_fields=["password"])
+    return Response({"detail": "Пароль сохранён.", "has_password": True})
+
+
+def _user_for_reset(email: str):
+    """Учётка, которой принадлежит почта, — для письма о восстановлении.
+
+    Сотрудник из справочника, ещё ни разу не входивший, учётки не имеет:
+    заводим её (как при первом входе через Битрикс), чтобы задать пароль
+    можно было и тогда, когда портал недоступен."""
+    user = User.objects.filter(username=_username_for_email(email)).first()
+    if user is not None:
+        profile = getattr(user, "minised_profile", None)
+        if not user.is_active or (profile is not None and not profile.is_active):
+            return None
+        return user
+
+    profiles = list(UserProfile.objects.filter(email__iexact=email, is_active=True)[:2])
+    if len(profiles) != 1:
+        return None
+    profile = resolve_or_provision_profile(profiles[0].bitrix_id, email, profiles[0].fio)
+    return profile.auth_user
+
+
+def _reset_link(user) -> str:
+    """Ссылка на страницу нового пароля — прямо на MiniSED, а не в портал:
+    восстановление нужно как раз тогда, когда Битрикс недоступен."""
+    base = (getattr(settings, "PUBLIC_BASE_URL", "") or "").rstrip("/")
+    uid = urlsafe_base64_encode(force_bytes(user.pk))
+    token = default_token_generator.make_token(user)
+    return f"{base}/app/?to=/reset-password/{uid}/{token}"
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def password_reset(request):
+    """Письмо со ссылкой на смену пароля.
+
+    Ответ всегда одинаковый — по нему нельзя узнать, есть ли такой адрес
+    в системе."""
+    email = (request.data.get("email") or "").strip().lower()
+    if not email:
+        return Response({"detail": "Укажите email."}, status=400)
+
+    answer = Response({
+        "detail": "Если этот адрес есть в системе, на него отправлено письмо "
+                  "со ссылкой для смены пароля.",
+    })
+    if not cache.add(f"pwd_reset:{email}", 1, RESET_EMAIL_COOLDOWN):
+        return answer
+
+    user = _user_for_reset(email)
+    if user is None:
+        return answer
+
+    profile = getattr(user, "minised_profile", None)
+    greeting = f"Здравствуйте, {profile.fio}!" if profile and profile.fio else "Здравствуйте!"
+    hours = settings.PASSWORD_RESET_TIMEOUT // 3600
+    body = (
+        f"{greeting}\n\n"
+        "Для вашей учётной записи МиниСЭД запрошена смена пароля.\n"
+        "Чтобы задать новый пароль, перейдите по ссылке:\n\n"
+        f"{_reset_link(user)}\n\n"
+        f"Ссылка действует {hours} ч. и срабатывает один раз.\n"
+        "Если вы не запрашивали смену пароля, просто проигнорируйте это письмо — "
+        "текущий пароль останется прежним.\n\n"
+        "Логин для входа — этот адрес почты."
+    )
+    try:
+        send_mail(
+            "МиниСЭД: смена пароля", body,
+            getattr(settings, "DEFAULT_FROM_EMAIL", None), [email],
+        )
+    except Exception as e:  # почта недоступна — ответ тот же, причина в логе
+        print("[password reset] send error:", e)
+    return answer
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def password_reset_confirm(request):
+    """Новый пароль по ссылке из письма. После смены сразу входим."""
+    try:
+        uid = force_str(urlsafe_base64_decode(request.data.get("uid") or ""))
+        user = User.objects.get(pk=uid, is_active=True)
+    except (TypeError, ValueError, OverflowError, User.DoesNotExist):
+        user = None
+    if user is None or not default_token_generator.check_token(
+        user, request.data.get("token") or ""
+    ):
+        return Response(
+            {"detail": "Ссылка недействительна или устарела. Запросите новую."},
+            status=400,
+        )
+
+    error = _check_new_password(
+        user, request.data.get("new_password") or "", request.data.get("new_password2") or ""
+    )
+    if error:
+        return Response({"detail": error}, status=400)
+
+    user.set_password(request.data["new_password"])
+    user.save(update_fields=["password"])
+
+    profile = getattr(user, "minised_profile", None)
+    token, _ = Token.objects.get_or_create(user=user)
+    data = profile_payload(profile, user)
+    data["token"] = token.key
+    return Response(data)
 
 
 # ---------------------------------------------------------------------------

@@ -128,6 +128,11 @@ a { color: var(--green-main); text-decoration: none; }
   border-radius: 6px; padding: 6px 10px; font: inherit; font-size: 12px; cursor: pointer;
 }
 .sidebar-logout:hover { background: rgba(0, 0, 0, 0.28); }
+.sidebar-user-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.sidebar-pwd-hint {
+  margin-top: 8px; font-size: 11px; line-height: 1.35; padding: 6px 8px;
+  border-radius: 6px; background: rgba(255, 255, 255, 0.14);
+}
 
 .main { flex: 1; display: flex; flex-direction: column; background: #fff; min-width: 0; }
 .main-header {

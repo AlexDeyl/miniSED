@@ -148,6 +148,9 @@ else:
     }
 
 
+# Ссылка «Забыли пароль?» из письма живёт сутки и срабатывает один раз.
+PASSWORD_RESET_TIMEOUT = int(env("PASSWORD_RESET_TIMEOUT", "86400"))
+
 AUTH_PASSWORD_VALIDATORS = [
     {
         "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
